@@ -8,16 +8,18 @@ android {
         applicationId 'com.facebook.messengerclone'
         minSdk 24
         targetSdk 35
-        versionCode 146
-        versionName '1.46'
+        versionCode 147
+        versionName '1.47-native'
         buildConfigField 'String', 'BASE_URL', '"https://facebook-extra.onrender.com"'
     }
 
     buildFeatures { buildConfig true }
 
     buildTypes {
-        release {
-            minifyEnabled false
-        }
+        release { minifyEnabled false }
     }
+}
+
+dependencies {
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 }

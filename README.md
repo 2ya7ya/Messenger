@@ -1,17 +1,16 @@
-# Messenger v146 Android wrapper
+# Messenger V146 Native Android
 
-This APK shell loads the existing v146 web app from `https://facebook-extra.onrender.com`, preserves the authenticated web session, and automatically opens the exact Messenger section implemented by `upload/messenger.js` after login.
+This branch is the start of a true native Android rebuild of the existing v146 Messenger UI. It does not load the Facebook website in a WebView.
 
-Included Android integrations:
-- file/photo/video/audio chooser
-- microphone permission for voice messages
-- camera permission when web capture requests it
-- cookies, IndexedDB/DOM storage, WebSocket-capable WebView
-- external links open outside the app
-- Android back button returns from a chat to the inbox; from inbox it exits
+Current native implementation:
+- one-time native login against `https://facebook-extra.onrender.com/api/login`
+- native Chats screen matching the v146 web layout dimensions/colors
+- immediate SQLite cached inbox render, then silent network refresh
+- native New message / contact picker
+- native conversation screen
+- cached conversation history
+- native text sending
+- authenticated avatar disk/memory cache
+- live Messenger WebSocket updates
 
-## Build
-Run `./gradlew assembleDebug` in an Android-capable environment with Android SDK 35 and JDK 17+.
-The APK will be at `app/build/outputs/apk/debug/app-debug.apk`.
-
-The GitHub Actions workflow can also build the APK automatically after pushing this folder to a repository.
+Next parity work: media/photo/video/file messages, voice recording/playback, reactions, reply/edit/delete/forward, group controls, themes, message info/read receipts, shared posts/reels, full emoji picker, media preview and the remaining v146 details.
