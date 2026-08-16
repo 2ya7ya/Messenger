@@ -77,7 +77,12 @@ public class MainActivity extends Activity {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
                 String host = uri.getHost();
-                if (host == null || host.equalsIgnoreCase(allowedHost)) return false;
+                if (host == null || host.equalsIgnoreCase(allowedHost)) {
+                    if (uri.toString().startsWith(baseUrl + "/app")) {
+                        view.setVisibility(View.INVISIBLE);
+                    }
+                    return false;
+                }
                 try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); } catch (ActivityNotFoundException ignored) {}
                 return true;
             }
@@ -129,13 +134,24 @@ public class MainActivity extends Activity {
     private void enterMessengerOnlyMode() {
         String js = "(function(){" +
                 "function boot(){" +
-                "if(!window.__facebookOpenMessenger){setTimeout(boot,80);return;}" +
+                "if(!window.__facebookOpenMessenger){setTimeout(boot,50);return;}" +
                 "window.__facebookOpenMessenger();" +
+                "setTimeout(function(){" +
                 "var p=document.getElementById('facebookMessengerPage');" +
-                "if(p){p.classList.add('is-open');" +
+                "if(!p){setTimeout(boot,50);return;}" +
+                "p.classList.add('is-open');" +
+                "var chats=p.querySelector('[data-msg-tab=\\\"chats\\\"]');" +
+                "if(chats){chats.click();}" +
                 "var close=p.querySelector('[data-msg-close]');" +
-                "if(close&&!close.dataset.androidBound){close.dataset.androidBound='1';close.addEventListener('click',function(e){e.preventDefault();e.stopImmediatePropagation();MessengerAndroid.closeApp();},true);}" +
+                "if(close&&!close.dataset.androidBound){" +
+                "close.dataset.androidBound='1';" +
+                "close.addEventListener('click',function(e){" +
+                "e.preventDefault();e.stopImmediatePropagation();" +
+                "MessengerAndroid.closeApp();" +
+                "},true);" +
                 "}" +
+                "MessengerAndroid.showMessenger();" +
+                "},100);" +
                 "}" +
                 "boot();" +
                 "})();";
@@ -200,6 +216,12 @@ public class MainActivity extends Activity {
     }
 
     private class AndroidBridge {
-        @JavascriptInterface public void closeApp() { runOnUiThread(MainActivity.this::finish); }
+        @JavascriptInterface public void closeApp() {
+            runOnUiThread(MainActivity.this::finish);
+        }
+
+        @JavascriptInterface public void showMessenger() {
+            runOnUiThread(() -> webView.setVisibility(View.VISIBLE));
+        }
     }
 }
