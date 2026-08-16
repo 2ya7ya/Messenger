@@ -8,8 +8,8 @@ android {
         applicationId 'com.facebook.messengerclone'
         minSdk 24
         targetSdk 35
-        versionCode 151
-        versionName '1.51-native-gesture-info-fix'
+        versionCode 152
+        versionName '1.52-native-info-pages-reply-fix'
         buildConfigField 'String', 'BASE_URL', '"https://facebook-extra.onrender.com"'
     }
 
