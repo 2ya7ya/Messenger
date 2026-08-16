@@ -10,7 +10,7 @@ android {
         targetSdk 35
         versionCode 146
         versionName '1.46'
-        buildConfigField 'String', 'BASE_URL', '"https://briefing-xn96.onrender.com"'
+        buildConfigField 'String', 'BASE_URL', '"https://facebook-extra.onrender.com"'
     }
 
     buildFeatures { buildConfig true }

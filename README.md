@@ -1,6 +1,6 @@
 # Messenger v146 Android wrapper
 
-This APK shell loads the existing v146 web app from `https://briefing-xn96.onrender.com`, preserves the authenticated web session, and automatically opens the exact Messenger section implemented by `upload/messenger.js` after login.
+This APK shell loads the existing v146 web app from `https://facebook-extra.onrender.com`, preserves the authenticated web session, and automatically opens the exact Messenger section implemented by `upload/messenger.js` after login.
 
 Included Android integrations:
 - file/photo/video/audio chooser
