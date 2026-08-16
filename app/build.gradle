@@ -1,0 +1,23 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.facebook.messengerclone'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.facebook.messengerclone'
+        minSdk 24
+        targetSdk 35
+        versionCode 146
+        versionName '1.46'
+        buildConfigField 'String', 'BASE_URL', '"https://briefing-xn96.onrender.com"'
+    }
+
+    buildFeatures { buildConfig true }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+}
