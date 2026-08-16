@@ -85,7 +85,18 @@ public class MainActivity extends Activity {
             @Override public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 progress.setVisibility(View.GONE);
-                if (url.startsWith(baseUrl + "/app")) enterMessengerOnlyMode();
+                if (url.startsWith(baseUrl + "/app")) {
+    enterMessengerOnlyMode();
+    webView.evaluateJavascript(
+        "setTimeout(function(){" +
+        "var p=document.getElementById('facebookMessengerPage');" +
+        "if(p){p.classList.add('is-open');}" +
+        "var chats=document.querySelector('[data-msg-tab=\\\"chats\\\"]');" +
+        "if(chats){chats.click();}" +
+        "},300);",
+        null
+    );
+}
             }
         });
 
