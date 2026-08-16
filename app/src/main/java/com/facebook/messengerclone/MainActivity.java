@@ -12,6 +12,8 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Paint;
+import android.graphics.Canvas;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaRecorder;
@@ -130,6 +132,34 @@ public class MainActivity extends Activity {
         done.setOnClickListener(v->saveGroupEdit(c,name.getText().toString().trim()));
     }
     private void renderGroupEditPreview(FrameLayout preview,JSONObject c){preview.removeAllViews();View avatar;if(!groupEditImageData.isEmpty()){ImageView im=new ImageView(this);im.setScaleType(ImageView.ScaleType.CENTER_CROP);try{String b64=groupEditImageData.substring(groupEditImageData.indexOf(',')+1);byte[] raw=Base64.decode(b64,Base64.DEFAULT);im.setImageBitmap(BitmapFactory.decodeByteArray(raw,0,raw.length));}catch(Exception ignored){}avatar=im;}else if(!groupEditEmoji.isEmpty()){TextView e=text(groupEditEmoji,43,Color.WHITE,Typeface.NORMAL);e.setGravity(Gravity.CENTER);try{e.setBackground(bg(Color.parseColor(groupEditColor),46));}catch(Exception ex){e.setBackground(bg(BLUE,46));}avatar=e;}else avatar=buildConversationAvatar(c,92);FrameLayout.LayoutParams ap=new FrameLayout.LayoutParams(dp(92),dp(92),Gravity.CENTER);preview.addView(avatar,ap);}
+    private String emojiDataUrl(String emoji,String color){
+        try{
+            final int size=240;
+            Bitmap bitmap=Bitmap.createBitmap(size,size,Bitmap.Config.ARGB_8888);
+            Canvas canvas=new Canvas(bitmap);
+            Paint bgPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
+            int bgColor=BLUE;
+            try{if(color!=null&&!color.isEmpty())bgColor=Color.parseColor(color);}catch(Exception ignored){}
+            bgPaint.setColor(bgColor);
+            canvas.drawCircle(size/2f,size/2f,size/2f,bgPaint);
+
+            Paint emojiPaint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.SUBPIXEL_TEXT_FLAG);
+            emojiPaint.setTextAlign(Paint.Align.CENTER);
+            emojiPaint.setTextSize(112f);
+            emojiPaint.setTypeface(Typeface.create(Typeface.DEFAULT,Typeface.NORMAL));
+            Paint.FontMetrics fm=emojiPaint.getFontMetrics();
+            float baseline=size/2f-(fm.ascent+fm.descent)/2f;
+            canvas.drawText(emoji==null?"":emoji,size/2f,baseline,emojiPaint);
+
+            ByteArrayOutputStream out=new ByteArrayOutputStream();
+            bitmap.compress(Bitmap.CompressFormat.PNG,100,out);
+            bitmap.recycle();
+            return "data:image/png;base64,"+Base64.encodeToString(out.toByteArray(),Base64.NO_WRAP);
+        }catch(Exception e){
+            return "";
+        }
+    }
+
     private void saveGroupEdit(JSONObject c,String title){if(title.isEmpty())return;String image=groupEditImageData;if(image.isEmpty()&&!groupEditEmoji.isEmpty())image=emojiDataUrl(groupEditEmoji,groupEditColor);try{api.patch("/api/messaging/conversations/"+c.optString("id")+"/group",new JSONObject().put("title",title).put("image",image),(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONObject nc=json.optJSONObject("conversation");if(nc!=null)activeConversation=nc;openConversation(nc==null?c:nc);}));}catch(Exception e){toast(e.getMessage());}}
 
     private void showGroupEmojiPicker(JSONObject c){
