@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.util.LruCache;
+import android.util.Base64;
 import android.widget.ImageView;
 
 import java.io.File;
@@ -35,7 +36,11 @@ final class ImageLoader {
             try {
                 File f = new File(dir, hash(url));
                 byte[] bytes;
-                if (f.exists()) bytes = java.nio.file.Files.readAllBytes(f.toPath());
+                if (url.startsWith("data:image/")) {
+                    int comma = url.indexOf(',');
+                    if (comma < 0) return;
+                    bytes = Base64.decode(url.substring(comma + 1), Base64.DEFAULT);
+                } else if (f.exists()) bytes = java.nio.file.Files.readAllBytes(f.toPath());
                 else {
                     bytes = api.getBytesSync(url);
                     try (FileOutputStream out = new FileOutputStream(f)) { out.write(bytes); }

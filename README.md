@@ -1,16 +1,7 @@
-# Messenger V146 Native Android
+# Messenger v146 Native Android
 
-This branch is the start of a true native Android rebuild of the existing v146 Messenger UI. It does not load the Facebook website in a WebView.
+Native Android Messenger client for the existing `facebook-extra.onrender.com` backend.
 
-Current native implementation:
-- one-time native login against `https://facebook-extra.onrender.com/api/login`
-- native Chats screen matching the v146 web layout dimensions/colors
-- immediate SQLite cached inbox render, then silent network refresh
-- native New message / contact picker
-- native conversation screen
-- cached conversation history
-- native text sending
-- authenticated avatar disk/memory cache
-- live Messenger WebSocket updates
+This project does not use a WebView. The Messenger UI, icon geometry, conversation spacing, message bubble grouping, timestamp rules, send-state assets, pinned icon, default profile image, voice-note waveform, and messaging API behavior were ported from the supplied v146 website implementation (`messenger.js` / `server.js`).
 
-Next parity work: media/photo/video/file messages, voice recording/playback, reactions, reply/edit/delete/forward, group controls, themes, message info/read receipts, shared posts/reels, full emoji picker, media preview and the remaining v146 details.
+The project includes a GitHub Actions workflow at `.github/workflows/build-apk.yml`. Push to `main` or run the workflow manually and download the `Messenger-v146-native` artifact.
