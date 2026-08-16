@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
@@ -18,6 +19,7 @@ import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
+import android.webkit.WebStorage;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
@@ -36,9 +38,11 @@ public class MainActivity extends Activity {
     private PermissionRequest pendingWebPermission;
     private final String baseUrl = BuildConfig.BASE_URL.replaceAll("/$", "");
     private String allowedHost;
+    private SharedPreferences prefs;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        prefs = getSharedPreferences("messenger_native", MODE_PRIVATE);
         try { allowedHost = URI.create(baseUrl).getHost(); } catch (Exception ignored) { allowedHost = ""; }
 
         FrameLayout root = new FrameLayout(this);
@@ -51,7 +55,12 @@ public class MainActivity extends Activity {
         setContentView(root);
 
         configureWebView();
-        if (state != null) webView.restoreState(state); else webView.loadUrl(baseUrl + "/");
+        if (state != null) {
+            webView.restoreState(state);
+        } else {
+            boolean authenticatedBefore = prefs.getBoolean("authenticated", false);
+            webView.loadUrl(authenticatedBefore ? baseUrl + "/app" : baseUrl + "/");
+        }
     }
 
     private void configureWebView() {
@@ -59,6 +68,10 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setDatabaseEnabled(true);
+        s.setCacheMode(WebSettings.LOAD_DEFAULT);
+        s.setLoadsImagesAutomatically(true);
+        s.setBlockNetworkImage(false);
+        s.setSupportZoom(false);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setAllowFileAccess(true);
         s.setAllowContentAccess(true);
@@ -89,19 +102,19 @@ public class MainActivity extends Activity {
 
             @Override public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                progress.setVisibility(View.GONE);
+
                 if (url.startsWith(baseUrl + "/app")) {
-    enterMessengerOnlyMode();
-    webView.evaluateJavascript(
-        "setTimeout(function(){" +
-        "var p=document.getElementById('facebookMessengerPage');" +
-        "if(p){p.classList.add('is-open');}" +
-        "var chats=document.querySelector('[data-msg-tab=\\\"chats\\\"]');" +
-        "if(chats){chats.click();}" +
-        "},300);",
-        null
-    );
-}
+                    prefs.edit().putBoolean("authenticated", true).apply();
+
+                    // Do not show the underlying Facebook home page.
+                    view.setVisibility(View.INVISIBLE);
+
+                    enterMessengerOnlyMode();
+                } else {
+                    progress.setVisibility(View.GONE);
+                    view.setVisibility(View.VISIBLE);
+                }
+            }
             }
         });
 
@@ -132,29 +145,29 @@ public class MainActivity extends Activity {
     }
 
     private void enterMessengerOnlyMode() {
-        String js = "(function(){" +
-                "function boot(){" +
-                "if(!window.__facebookOpenMessenger){setTimeout(boot,50);return;}" +
+        String js =
+                "(function(){" +
+                "function startMessenger(){" +
+                "if(typeof window.__facebookOpenMessenger!=='function'){" +
+                "setTimeout(startMessenger,20);" +
+                "return;" +
+                "}" +
                 "window.__facebookOpenMessenger();" +
-                "setTimeout(function(){" +
+                "function reveal(){" +
                 "var p=document.getElementById('facebookMessengerPage');" +
-                "if(!p){setTimeout(boot,50);return;}" +
-                "p.classList.add('is-open');" +
+                "if(!p||!p.classList.contains('is-open')){" +
+                "setTimeout(reveal,16);" +
+                "return;" +
+                "}" +
                 "var chats=p.querySelector('[data-msg-tab=\\\"chats\\\"]');" +
-                "if(chats){chats.click();}" +
-                "var close=p.querySelector('[data-msg-close]');" +
-                "if(close&&!close.dataset.androidBound){" +
-                "close.dataset.androidBound='1';" +
-                "close.addEventListener('click',function(e){" +
-                "e.preventDefault();e.stopImmediatePropagation();" +
-                "MessengerAndroid.closeApp();" +
-                "},true);" +
+                "if(chats)chats.click();" +
+                "MessengerAndroid.messengerReady();" +
                 "}" +
-                "MessengerAndroid.showMessenger();" +
-                "},100);" +
+                "reveal();" +
                 "}" +
-                "boot();" +
+                "startMessenger();" +
                 "})();";
+
         webView.evaluateJavascript(js, null);
     }
 
