@@ -130,6 +130,8 @@ public class MainActivity extends Activity {
         done.setOnClickListener(v->saveGroupEdit(c,name.getText().toString().trim()));
     }
     private void renderGroupEditPreview(FrameLayout preview,JSONObject c){preview.removeAllViews();View avatar;if(!groupEditImageData.isEmpty()){ImageView im=new ImageView(this);im.setScaleType(ImageView.ScaleType.CENTER_CROP);try{String b64=groupEditImageData.substring(groupEditImageData.indexOf(',')+1);byte[] raw=Base64.decode(b64,Base64.DEFAULT);im.setImageBitmap(BitmapFactory.decodeByteArray(raw,0,raw.length));}catch(Exception ignored){}avatar=im;}else if(!groupEditEmoji.isEmpty()){TextView e=text(groupEditEmoji,43,Color.WHITE,Typeface.NORMAL);e.setGravity(Gravity.CENTER);try{e.setBackground(bg(Color.parseColor(groupEditColor),46));}catch(Exception ex){e.setBackground(bg(BLUE,46));}avatar=e;}else avatar=buildConversationAvatar(c,92);FrameLayout.LayoutParams ap=new FrameLayout.LayoutParams(dp(92),dp(92),Gravity.CENTER);preview.addView(avatar,ap);}
+    private void saveGroupEdit(JSONObject c,String title){if(title.isEmpty())return;String image=groupEditImageData;if(image.isEmpty()&&!groupEditEmoji.isEmpty())image=emojiDataUrl(groupEditEmoji,groupEditColor);try{api.patch("/api/messaging/conversations/"+c.optString("id")+"/group",new JSONObject().put("title",title).put("image",image),(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONObject nc=json.optJSONObject("conversation");if(nc!=null)activeConversation=nc;openConversation(nc==null?c:nc);}));}catch(Exception e){toast(e.getMessage());}}
+
     private void showGroupEmojiPicker(JSONObject c){
         root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.rgb(11,15,20));root.addView(page,new FrameLayout.LayoutParams(-1,-1));
         LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(13),0,dp(13),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(61)));
@@ -329,4 +331,34 @@ public class MainActivity extends Activity {
 
     private View buildMessageContent(JSONObject m,boolean mine,boolean samePrev,boolean sameNext){String type=m.optString("type","text");JSONArray att=m.optJSONArray("attachments");JSONObject a=att!=null&&att.length()>0?att.optJSONObject(0):null;if("audio".equals(type)&&a!=null){VoiceMessageView v=new VoiceMessageView(this,api.absolute(a.optString("url")),a.optString("name"),api.mediaHeaders(),themeAccent(),themeReceived(),themeReceivedText(),Color.WHITE);v.setLayoutParams(new LinearLayout.LayoutParams(Math.min(dp(310),(int)(getResources().getDisplayMetrics().widthPixels*.72f)),dp(78)));return v;}if("image".equals(type)&&a!=null){ImageView im=new ImageView(this);im.setAdjustViewBounds(true);im.setScaleType(ImageView.ScaleType.FIT_CENTER);im.setBackgroundColor(Color.TRANSPARENT);im.setClipToOutline(true);im.setBackground(bg(Color.rgb(17,17,17),15));im.setMaxWidth(Math.min(dp(260),(int)(getResources().getDisplayMetrics().widthPixels*.72f)));im.setMaxHeight(dp(310));im.setLayoutParams(new LinearLayout.LayoutParams(-2,-2));images.load(a.optString("url"),im);return im;}if("video".equals(type)&&a!=null){VideoView vv=new VideoView(this);vv.setVideoURI(Uri.parse(api.absolute(a.optString("url"))),api.mediaHeaders());vv.setOnClickListener(v->{if(vv.isPlaying())vv.pause();else vv.start();});int w=Math.min(dp(260),(int)(getResources().getDisplayMetrics().widthPixels*.72f));vv.setLayoutParams(new LinearLayout.LayoutParams(w,dp(190)));return vv;}if("file".equals(type)&&a!=null){LinearLayout file=new LinearLayout(this);file.setGravity(Gravity.CENTER_VERTICAL);file.setPadding(dp(10),dp(8),dp(10),dp(8));TextView clip=text("📎",20,TEXT,Typeface.NORMAL);file.addView(clip,new LinearLayout.LayoutParams(dp(34),dp(42)));LinearLayout copy=new LinearLayout(this);copy.setOrientation(LinearLayout.VERTICAL);file.addView(copy,new LinearLayout.LayoutParams(dp(190),dp(48)));copy.addView(text(a.optString("name","File"),13,TEXT,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(27)));copy.addView(text(fileSize(a.optLong("size")),10,SUB,Typeface.NORMAL),new LinearLayout.LayoutParams(-1,dp(18)));return file;}if("shared_reel".equals(type)||"shared_post".equals(type)){TextView card=text("shared_reel".equals(type)?"Reel":"Post",15,TEXT,Typeface.BOLD);card.setGravity(Gravity.CENTER);card.setPadding(dp(18),dp(18),dp(18),dp(18));card.setBackground(bg(RECEIVED,15));return card;}String body=m.optString("body");TextView bubble=text(body,15,mine?themeSentText():themeReceivedText(),Typeface.NORMAL);bubble.setPadding(dp(12),dp(9),dp(12),dp(9));bubble.setMaxWidth((int)(getResources().getDisplayMetrics().widthPixels*.78f));bubble.setBackground(bubbleBg(mine,samePrev,sameNext));return bubble;}
     private String fileSize(long n){if(n<1024)return n+" B";if(n<1048576)return String.format(Locale.US,"%.1f KB",n/1024f);return String.format(Locale.US,"%.1f MB",n/1048576f);}
+    private static final class GroupSelectView extends View{
+        private boolean selected;
+        private final android.graphics.Paint p=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        GroupSelectView(Context c,boolean s){super(c);selected=s;}
+        void setSelectedState(boolean s){selected=s;invalidate();}
+        @Override protected void onDraw(android.graphics.Canvas canvas){
+            super.onDraw(canvas);
+            float d=getResources().getDisplayMetrics().density,cx=getWidth()/2f,cy=getHeight()/2f,r=Math.min(getWidth(),getHeight())*.34f;
+            p.setStyle(android.graphics.Paint.Style.FILL);
+            p.setColor(selected?Color.rgb(8,102,255):Color.TRANSPARENT);
+            canvas.drawCircle(cx,cy,r,p);
+            p.setStyle(android.graphics.Paint.Style.STROKE);
+            p.setStrokeWidth(1.8f*d);
+            p.setColor(selected?Color.rgb(8,102,255):Color.rgb(204,208,213));
+            canvas.drawCircle(cx,cy,r,p);
+            if(selected){
+                p.setStyle(android.graphics.Paint.Style.STROKE);
+                p.setStrokeCap(android.graphics.Paint.Cap.ROUND);
+                p.setStrokeJoin(android.graphics.Paint.Join.ROUND);
+                p.setStrokeWidth(1.9f*d);
+                p.setColor(Color.WHITE);
+                android.graphics.Path path=new android.graphics.Path();
+                path.moveTo(cx-3.6f*d,cy);
+                path.lineTo(cx-0.8f*d,cy+2.7f*d);
+                path.lineTo(cx+4.3f*d,cy-3.6f*d);
+                canvas.drawPath(path,p);
+            }
+        }
+    }
+
 }
