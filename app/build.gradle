@@ -8,8 +8,8 @@ android {
         applicationId 'com.facebook.messengerclone'
         minSdk 24
         targetSdk 35
-        versionCode 162
-        versionName '1.61-native-seen-actions-record-controls-fix'
+        versionCode 163
+        versionName '1.63-native-realtime-stickers-controls'
         buildConfigField 'String', 'BASE_URL', '"https://facebook-extra.onrender.com"'
     }
 

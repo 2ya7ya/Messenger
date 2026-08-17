@@ -27,6 +27,7 @@ import okhttp3.WebSocketListener;
 final class ApiClient {
     interface JsonCallback { void done(JSONObject json, Exception error); }
     interface SocketCallback { void event(JSONObject json); }
+    interface SocketClosedCallback { void closed(); }
 
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private final String baseUrl = BuildConfig.BASE_URL.replaceAll("/$", "");
@@ -87,9 +88,15 @@ final class ApiClient {
 
     byte[] getBytesSync(String path) throws IOException { try(Response response=http.newCall(request(path).get().build()).execute()){ if(!response.isSuccessful()||response.body()==null)throw new IOException("Request failed"); return response.body().bytes(); } }
 
-    WebSocket openMessengerSocket(SocketCallback cb) {
+    WebSocket openMessengerSocket(SocketCallback cb, SocketClosedCallback closed) {
         String ws=baseUrl.replaceFirst("^https://","wss://").replaceFirst("^http://","ws://")+"/ws/messenger"; Request.Builder b=new Request.Builder().url(ws); String cookie=prefs.getString("cookie",""); if(!cookie.isEmpty())b.header("Cookie",cookie);
-        return http.newWebSocket(b.build(),new WebSocketListener(){@Override public void onMessage(WebSocket webSocket,String text){try{cb.event(new JSONObject(text));}catch(Exception ignored){}}});
+        return http.newWebSocket(b.build(),new WebSocketListener(){
+            private boolean ended=false;
+            private void finish(){if(ended)return;ended=true;if(closed!=null)closed.closed();}
+            @Override public void onMessage(WebSocket webSocket,String text){try{cb.event(new JSONObject(text));}catch(Exception ignored){}}
+            @Override public void onClosed(WebSocket webSocket,int code,String reason){finish();}
+            @Override public void onFailure(WebSocket webSocket,Throwable t,Response response){finish();}
+        });
     }
 
     private void saveCookies(Headers headers) { List<String> cookies=headers.values("Set-Cookie"); String session=""; for(String c:cookies){ if(c.startsWith("facebook_session=")){session=c.substring(0,c.indexOf(';')>0?c.indexOf(';'):c.length());break;} } if(!session.isEmpty())prefs.edit().putString("cookie",session).apply(); }
