@@ -65,11 +65,12 @@ final class ApiClient {
 
     void upload(String path, byte[] bytes, String fileName, String mimeType, String caption, String clientId, String replyToId, JsonCallback cb) {
         try {
-            RequestBody body=RequestBody.create(bytes, MediaType.get((mimeType==null||mimeType.isEmpty())?"application/octet-stream":mimeType));
+            String actualMime=(mimeType==null||mimeType.isEmpty())?"application/octet-stream":mimeType;
+            RequestBody body=RequestBody.create(bytes, MediaType.get("application/octet-stream"));
             Request.Builder b=request(path).post(body)
-                    .header("Content-Type", (mimeType==null||mimeType.isEmpty())?"application/octet-stream":mimeType)
+                    .header("Content-Type", "application/octet-stream")
                     .header("X-File-Name", URLEncoder.encode(fileName==null?"attachment":fileName, StandardCharsets.UTF_8))
-                    .header("X-File-Type", (mimeType==null||mimeType.isEmpty())?"application/octet-stream":mimeType)
+                    .header("X-File-Type", actualMime)
                     .header("X-Client-Id", clientId==null?"":clientId)
                     .header("X-Caption", URLEncoder.encode(caption==null?"":caption, StandardCharsets.UTF_8));
             if(replyToId!=null&&!replyToId.isEmpty())b.header("X-Reply-To-Id",replyToId);
