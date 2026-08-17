@@ -47,9 +47,13 @@ final class VoiceMessageView extends LinearLayout {
         play = new ImageButton(context); play.setBackgroundColor(Color.TRANSPARENT); play.setPadding(0,0,0,0); play.setImageResource(R.drawable.ic_msg_play); play.setColorFilter(accent);
         LayoutParams pp = new LayoutParams(dp(31), dp(42)); pp.rightMargin = dp(11); addView(play, pp);
 
-        wave = new Wave(context, accent, waveColor); addView(wave, new LayoutParams(0, dp(48), 1));
+        int safeText = ensureContrast(voiceBg, textColor);
+        int safeIdle = ensureContrast(voiceBg, waveColor);
+        int safeAccent = ensureAccentContrast(voiceBg, accent, safeText);
+        play.setColorFilter(safeAccent);
+        wave = new Wave(context, safeAccent, safeIdle); addView(wave, new LayoutParams(0, dp(48), 1));
 
-        time = new TextView(context); time.setTextColor(textColor); time.setTextSize(15); time.setGravity(Gravity.CENTER_VERTICAL | Gravity.END); time.setText(format(fallbackDurationMs / 1000.0));
+        time = new TextView(context); time.setTextColor(safeText); time.setTextSize(15); time.setGravity(Gravity.CENTER_VERTICAL | Gravity.END); time.setText(format(fallbackDurationMs / 1000.0));
         LayoutParams tp = new LayoutParams(dp(42), dp(48)); tp.leftMargin = dp(9); addView(time, tp);
 
         play.setOnClickListener(v -> toggle());
@@ -84,6 +88,11 @@ final class VoiceMessageView extends LinearLayout {
     }
 
     void release() { handler.removeCallbacks(ticker); if (player != null) { try { player.release(); } catch (Exception ignored) {} player = null; } }
+
+    private static int ensureContrast(int bg, int fg) { return contrast(bg,fg)>=3.0 ? fg : (luma(bg)>0.58 ? Color.rgb(35,35,38) : Color.WHITE); }
+    private static int ensureAccentContrast(int bg, int accent, int fallback) { return contrast(bg,accent)>=2.0 ? accent : fallback; }
+    private static double luma(int c){double r=Color.red(c)/255.0,g=Color.green(c)/255.0,b=Color.blue(c)/255.0;r=r<=.03928?r/12.92:Math.pow((r+.055)/1.055,2.4);g=g<=.03928?g/12.92:Math.pow((g+.055)/1.055,2.4);b=b<=.03928?b/12.92:Math.pow((b+.055)/1.055,2.4);return .2126*r+.7152*g+.0722*b;}
+    private static double contrast(int a,int b){double x=luma(a),y=luma(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);}
 
     private static String format(double seconds) { int s = Math.max(0, (int)Math.round(seconds)); return (s / 60) + ":" + String.format(java.util.Locale.US, "%02d", s % 60); }
     private int dp(float n) { return Math.round(n * getResources().getDisplayMetrics().density); }

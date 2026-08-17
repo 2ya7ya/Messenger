@@ -8,8 +8,8 @@ android {
         applicationId 'com.facebook.messengerclone'
         minSdk 24
         targetSdk 35
-        versionCode 156
-        versionName '1.56-native-media-typing-voice-fix'
+        versionCode 157
+        versionName '1.57-native-media-voice-polish'
         buildConfigField 'String', 'BASE_URL', '"https://facebook-extra.onrender.com"'
     }
 
