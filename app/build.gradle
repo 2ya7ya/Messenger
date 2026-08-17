@@ -8,8 +8,8 @@ android {
         applicationId 'com.facebook.messengerclone'
         minSdk 24
         targetSdk 35
-        versionCode 164
-        versionName '1.64-native-sticker-sheet-typing-fix'
+        versionCode 165
+        versionName '1.65-native-sticker-sheet-realtime-fix'
         buildConfigField 'String', 'BASE_URL', '"https://facebook-extra.onrender.com"'
     }
 
