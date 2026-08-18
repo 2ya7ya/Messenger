@@ -652,7 +652,25 @@ public class MainActivity extends Activity {
     private String conversationStatus(JSONObject c){JSONArray ps=c.optJSONArray("participants");int others=0;JSONObject other=null;if(ps!=null)for(int i=0;i<ps.length();i++){JSONObject p=ps.optJSONObject(i);if(p!=null&&!p.optBoolean("isSelf")){others++;if(other==null)other=p;}}if("group".equals(c.optString("type"))||others>1)return (ps==null?others+1:ps.length())+" people";if(other!=null&&other.optBoolean("online"))return"Active now";Date last=parseDate(other==null?null:other.optString("lastSeenAt"));if(last==null)return"";long sec=Math.max(0,(System.currentTimeMillis()-last.getTime())/1000);if(sec<60)return"Active now";long min=sec/60;if(min<60)return"Active "+min+"m ago";long h=min/60;if(h<24)return"Active "+h+"h ago";long days=h/24;return"Active "+days+" "+(days==1?"day":"days")+" ago";}
     private Date parseDate(String value){if(value==null||value.isEmpty())return null;String v=value.replace("Z","+00:00");String[] patterns={"yyyy-MM-dd'T'HH:mm:ss.SSSXXX","yyyy-MM-dd'T'HH:mm:ssXXX","yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX"};for(String p:patterns)try{return new SimpleDateFormat(p,Locale.US).parse(v);}catch(Exception ignored){}return null;}
     private boolean sameDay(Date a,Date b){if(a==null||b==null)return false;Calendar x=Calendar.getInstance(),y=Calendar.getInstance();x.setTime(a);y.setTime(b);return x.get(Calendar.YEAR)==y.get(Calendar.YEAR)&&x.get(Calendar.DAY_OF_YEAR)==y.get(Calendar.DAY_OF_YEAR);}
-    private String inboxTime(String value){Date d=parseDate(value);if(d==null)return"";return new SimpleDateFormat(sameDay(d,new Date())?"h:mm a":"MMM d",Locale.getDefault()).format(d);}
+    private String inboxTime(String value){
+        Date d=parseDate(value);
+        if(d==null)return "";
+
+        long diff=Math.max(0,System.currentTimeMillis()-d.getTime());
+
+        if(diff<60000)return "now";
+
+        long minutes=diff/60000;
+        if(minutes<60)return minutes+"m";
+
+        long hours=minutes/60;
+        if(hours<24)return hours+"h";
+
+        long days=hours/24;
+        if(days<7)return days+"d";
+
+        return new SimpleDateFormat("MMM d",Locale.getDefault()).format(d);
+    }
     private String clusterStamp(String value){Date d=parseDate(value);if(d==null)return"";String time=new SimpleDateFormat("h:mm a",Locale.getDefault()).format(d);if(sameDay(d,new Date()))return time;return new SimpleDateFormat("MMM d",Locale.getDefault()).format(d).toUpperCase(Locale.getDefault())+", "+time;}
     private boolean sameBurst(JSONObject a,JSONObject b){if(a==null||b==null||isMine(a)!=isMine(b)||!a.optString("senderId").equals(b.optString("senderId")))return false;Date x=parseDate(a.optString("createdAt")),y=parseDate(b.optString("createdAt"));return x!=null&&y!=null&&sameDay(x,y)&&y.getTime()-x.getTime()>=0&&y.getTime()-x.getTime()<=BURST_MS;}
     private boolean needsStamp(int p){if(p<0||p>=messages.size())return false;JSONObject cur=messages.get(p);if("system".equals(cur.optString("type")))return false;Date b=parseDate(cur.optString("createdAt"));if(b==null)return false;for(int i=p-1;i>=0;i--){JSONObject prev=messages.get(i);if("system".equals(prev.optString("type")))continue;Date a=parseDate(prev.optString("createdAt"));if(a==null)continue;return !sameDay(a,b)||b.getTime()-a.getTime()>=STAMP_MS;}return true;}
