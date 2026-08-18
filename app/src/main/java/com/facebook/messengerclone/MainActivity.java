@@ -134,6 +134,46 @@ public class MainActivity extends Activity {
     private void loadCachedInbox(){String raw=cache.get("inbox");if(raw==null)return;try{applyInbox(new JSONObject(raw).optJSONArray("conversations"));}catch(Exception ignored){}}
     private void refreshInbox(){api.get("/api/messaging/inbox?limit=30",(json,error)->main.post(()->{if(error!=null){if(!api.hasSession())showLogin();return;}cache.put("inbox",json.toString());applyInbox(json.optJSONArray("conversations"));}));}
     private void applyInbox(JSONArray arr){if(arr==null)return;inbox.clear();for(int i=0;i<arr.length();i++){JSONObject o=arr.optJSONObject(i);if(o!=null)inbox.add(o);}filterInbox(searchBox==null?"":searchBox.getText().toString());}
+
+    private void markConversationReadLocally(String cid){
+        if(cid==null||cid.isEmpty())return;
+
+        try{
+            for(JSONObject c:inbox){
+                if(cid.equals(c.optString("id"))){
+                    c.put("unread",0);
+                    break;
+                }
+            }
+
+            String raw=cache.get("inbox");
+
+            if(raw!=null&&!raw.isEmpty()){
+                JSONObject root=new JSONObject(raw);
+                JSONArray arr=root.optJSONArray("conversations");
+
+                if(arr!=null){
+                    for(int i=0;i<arr.length();i++){
+                        JSONObject c=arr.optJSONObject(i);
+
+                        if(c!=null&&cid.equals(c.optString("id"))){
+                            c.put("unread",0);
+                            break;
+                        }
+                    }
+
+                    cache.put("inbox",root.toString());
+                }
+            }
+
+            filterInbox(
+                searchBox==null
+                    ? ""
+                    : searchBox.getText().toString()
+            );
+
+        }catch(Exception ignored){}
+    }
     private void filterInbox(String q){filteredInbox.clear();String n=q==null?"":q.toLowerCase(Locale.ROOT).trim();for(JSONObject c:inbox){String name=c.optString("name").toLowerCase(Locale.ROOT),preview=c.optJSONObject("lastMessage")==null?"":c.optJSONObject("lastMessage").optString("body").toLowerCase(Locale.ROOT);if(n.isEmpty()||name.contains(n)||preview.contains(n))filteredInbox.add(c);}if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();}
 
     private void openConversation(JSONObject c){activeConversation=c;replyTo=null;messages.clear();composerHasText=false;typingStateSent=false;root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(6),0,dp(6),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(49)));ImageButton back=icon(R.drawable.ic_msg_back,35,TEXT);head.addView(back);back.setOnClickListener(v->showInbox(false));View avatar=buildConversationAvatar(c,31);LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(dp(31),dp(31));ap.leftMargin=dp(1);head.addView(avatar,ap);LinearLayout names=new LinearLayout(this);names.setOrientation(LinearLayout.VERTICAL);names.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams np=new LinearLayout.LayoutParams(0,-1,1);np.leftMargin=dp(7);head.addView(names,np);TextView name=text(c.optString("name","Conversation"),14,TEXT,Typeface.BOLD);names.addView(name,new LinearLayout.LayoutParams(-1,dp(24)));TextView status=text(conversationStatus(c),10,SUB,Typeface.NORMAL);names.addView(status,new LinearLayout.LayoutParams(-1,dp(17)));ImageButton info=icon(R.drawable.ic_msg_info,35,TEXT);head.addView(info);info.setOnClickListener(v->showInfo());View divider=new View(this);divider.setBackgroundColor(DIV);page.addView(divider,new LinearLayout.LayoutParams(-1,dp(1)));
@@ -225,7 +265,7 @@ public class MainActivity extends Activity {
     private void syncComposerAction(){boolean has=messageInput!=null&&composerHasText;if(sendButton!=null){sendButton.setVisibility(has?View.VISIBLE:View.GONE);sendButton.setImageResource(has?R.drawable.msg_send_enabled:R.drawable.msg_send_disabled);sendButton.setColorFilter(has?themeAccent():themeDisabled());}if(micButton!=null){micButton.setColorFilter(themeAccent());micButton.setVisibility(has?View.GONE:View.VISIBLE);}}
 
     private void loadCachedMessages(String cid){String raw=cache.get("messages:"+cid);if(raw==null)return;try{applyMessages(new JSONObject(raw).optJSONArray("messages"),false);}catch(Exception ignored){}}
-    private void refreshMessages(String cid){if(refreshingMessages)return;refreshingMessages=true;api.get("/api/messaging/conversations/"+cid+"/messages?limit=80",(json,error)->main.post(()->{refreshingMessages=false;if(error!=null)return;beforeCursor=json.optString("nextBefore","");cache.put("messages:"+cid,json.toString());applyMessages(json.optJSONArray("messages"),true);}));}
+    private void refreshMessages(String cid){if(refreshingMessages)return;refreshingMessages=true;api.get("/api/messaging/conversations/"+cid+"/messages?limit=80",(json,error)->main.post(()->{refreshingMessages=false;if(error!=null)return;beforeCursor=json.optString("nextBefore","");cache.put("messages:"+cid,json.toString());applyMessages(json.optJSONArray("messages"),true);if(activeConversation!=null&&activeConversation.optString("id").equals(cid))markRead();}));}
     private void applyMessages(JSONArray arr,boolean fromNetwork){if(arr==null)return;messages.clear();for(int i=0;i<arr.length();i++){JSONObject m=arr.optJSONObject(i);if(m!=null&&!m.optBoolean("deleted"))messages.add(m);}if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();if(list!=null)list.post(()->list.setSelection(Math.max(0,messageAdapter.getCount()-1)));}}
     private void cacheMessagesNow(){if(activeConversation==null)return;try{cache.put("messages:"+activeConversation.optString("id"),new JSONObject().put("messages",new JSONArray(messages)).toString());}catch(Exception ignored){}}
 
@@ -526,7 +566,7 @@ public class MainActivity extends Activity {
     private final Runnable startTyping=()->{};
     private void sendTyping(boolean active){if(activeConversation==null)return;if(socket==null){connectSocket();return;}long now=SystemClock.uptimeMillis();if(active&&now-lastTypingWireAt<300)return;try{boolean ok=socket.send(new JSONObject().put("type","typing").put("conversationId",activeConversation.optString("id")).put("active",active).toString());if(ok){typingStateSent=active;lastTypingWireAt=now;}else{socket=null;connectSocket();}}catch(Exception ignored){socket=null;connectSocket();}}
     private final Runnable stopTyping=()->{main.removeCallbacks(typingPulse);sendTyping(false);};
-    private void markRead(){if(activeConversation==null)return;JSONObject last=null;for(int i=messages.size()-1;i>=0;i--)if(!messages.get(i).optString("id").isEmpty()&&!messages.get(i).optString("id").startsWith("tmp-")){last=messages.get(i);break;}if(last==null)return;final String cid=activeConversation.optString("id"),mid=last.optString("id");try{api.post("/api/messaging/conversations/"+cid+"/read",new JSONObject().put("messageId",mid),(j,e)->{});}catch(Exception ignored){}}
+    private void markRead(){if(activeConversation==null)return;JSONObject last=null;for(int i=messages.size()-1;i>=0;i--)if(!messages.get(i).optString("id").isEmpty()&&!messages.get(i).optString("id").startsWith("tmp-")){last=messages.get(i);break;}if(last==null)return;final String cid=activeConversation.optString("id"),mid=last.optString("id");markConversationReadLocally(cid);try{api.post("/api/messaging/conversations/"+cid+"/read",new JSONObject().put("messageId",mid),(j,e)->main.post(()->{if(e==null)refreshInbox();}));}catch(Exception ignored){}}
 
     private String conversationStatus(JSONObject c){JSONArray ps=c.optJSONArray("participants");int others=0;JSONObject other=null;if(ps!=null)for(int i=0;i<ps.length();i++){JSONObject p=ps.optJSONObject(i);if(p!=null&&!p.optBoolean("isSelf")){others++;if(other==null)other=p;}}if("group".equals(c.optString("type"))||others>1)return (ps==null?others+1:ps.length())+" people";if(other!=null&&other.optBoolean("online"))return"Active now";Date last=parseDate(other==null?null:other.optString("lastSeenAt"));if(last==null)return"";long sec=Math.max(0,(System.currentTimeMillis()-last.getTime())/1000);if(sec<60)return"Active now";long min=sec/60;if(min<60)return"Active "+min+"m ago";long h=min/60;if(h<24)return"Active "+h+"h ago";long days=h/24;return"Active "+days+" "+(days==1?"day":"days")+" ago";}
     private Date parseDate(String value){if(value==null||value.isEmpty())return null;String v=value.replace("Z","+00:00");String[] patterns={"yyyy-MM-dd'T'HH:mm:ss.SSSXXX","yyyy-MM-dd'T'HH:mm:ssXXX","yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX"};for(String p:patterns)try{return new SimpleDateFormat(p,Locale.US).parse(v);}catch(Exception ignored){}return null;}
