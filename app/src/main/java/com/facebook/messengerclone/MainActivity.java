@@ -229,6 +229,68 @@ public class MainActivity extends Activity {
     private void applyMessages(JSONArray arr,boolean fromNetwork){if(arr==null)return;messages.clear();for(int i=0;i<arr.length();i++){JSONObject m=arr.optJSONObject(i);if(m!=null&&!m.optBoolean("deleted"))messages.add(m);}if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();if(list!=null)list.post(()->list.setSelection(Math.max(0,messageAdapter.getCount()-1)));}}
     private void cacheMessagesNow(){if(activeConversation==null)return;try{cache.put("messages:"+activeConversation.optString("id"),new JSONObject().put("messages",new JSONArray(messages)).toString());}catch(Exception ignored){}}
 
+    private void cacheIncomingMessage(String cid,JSONObject incoming,boolean allowAppend){
+        if(cid==null||cid.isEmpty()||incoming==null)return;
+        try{
+            String key="messages:"+cid;
+            String raw=cache.get(key);
+
+            JSONObject root;
+            if(raw==null||raw.isEmpty())root=new JSONObject();
+            else root=new JSONObject(raw);
+
+            JSONArray current=root.optJSONArray("messages");
+            if(current==null)current=new JSONArray();
+
+            JSONArray updated=new JSONArray();
+
+            String incomingId=incoming.optString("id");
+            String incomingClient=incoming.optString("clientId");
+            boolean found=false;
+
+            for(int i=0;i<current.length();i++){
+                JSONObject old=current.optJSONObject(i);
+                if(old==null)continue;
+
+                boolean sameId=
+                    !incomingId.isEmpty() &&
+                    incomingId.equals(old.optString("id"));
+
+                boolean sameClient=
+                    !incomingClient.isEmpty() &&
+                    incomingClient.equals(old.optString("clientId"));
+
+                if(sameId||sameClient){
+                    updated.put(mergeMessage(old,incoming));
+                    found=true;
+                }else{
+                    updated.put(old);
+                }
+            }
+
+            if(!found&&allowAppend&&!incoming.optBoolean("deleted")){
+                updated.put(incoming);
+            }
+
+            // Keep the same latest-message cache size used by chat loading.
+            if(updated.length()>80){
+                JSONArray trimmed=new JSONArray();
+                int start=updated.length()-80;
+
+                for(int i=start;i<updated.length();i++){
+                    JSONObject item=updated.optJSONObject(i);
+                    if(item!=null)trimmed.put(item);
+                }
+
+                updated=trimmed;
+            }
+
+            root.put("messages",updated);
+            cache.put(key,root.toString());
+
+        }catch(Exception ignored){}
+    }
+
     private boolean isKeyboardVisible(){try{Rect r=new Rect();root.getWindowVisibleDisplayFrame(r);return root.getRootView().getHeight()-r.bottom>dp(120);}catch(Exception e){return false;}}
     private void keepKeyboardStateAfterSend(boolean wasVisible){if(messageInput==null)return;if(wasVisible){messageInput.requestFocus();}else{messageInput.clearFocus();InputMethodManager imm=(InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);if(imm!=null)imm.hideSoftInputFromWindow(messageInput.getWindowToken(),0);}}
 
@@ -453,7 +515,7 @@ public class MainActivity extends Activity {
     private void handleSocket(JSONObject e){String type=e.optString("type");
         if("ready".equals(type)){selfId=e.optString("userId");socketConnecting=false;socketRetry=0;main.removeCallbacks(socketReconnect);refreshInbox();if(activeConversation!=null){refreshMessages(activeConversation.optString("id"));markRead();}return;}
         if("conversation".equals(type)||"conversation_update".equals(type)){JSONObject c=e.optJSONObject("conversation");if(c!=null&&activeConversation!=null&&c.optString("id").equals(activeConversation.optString("id")))activeConversation=c;refreshInbox();return;}
-        if("message".equals(type)||"message_update".equals(type)){JSONObject m=e.optJSONObject("message");String cid=e.optString("conversationId",m==null?"":m.optString("conversationId"));if(m!=null){if(isStickerMessage(m))stickerLastConversations.add(cid);else if("message".equals(type))stickerLastConversations.remove(cid);}if(activeConversation!=null&&activeConversation.optString("id").equals(cid)&&m!=null){JSONObject oldMessage=null;for(JSONObject existing:messages)if(existing.optString("id").equals(m.optString("id"))){oldMessage=existing;break;}upsertMessage(oldMessage==null?m:mergeMessage(oldMessage,m));cacheMessagesNow();markRead();}refreshInbox();return;}
+        if("message".equals(type)||"message_update".equals(type)){JSONObject m=e.optJSONObject("message");String cid=e.optString("conversationId",m==null?"":m.optString("conversationId"));if(m!=null){if(isStickerMessage(m))stickerLastConversations.add(cid);else if("message".equals(type))stickerLastConversations.remove(cid);}if(activeConversation!=null&&activeConversation.optString("id").equals(cid)&&m!=null){JSONObject oldMessage=null;for(JSONObject existing:messages)if(existing.optString("id").equals(m.optString("id"))){oldMessage=existing;break;}upsertMessage(oldMessage==null?m:mergeMessage(oldMessage,m));cacheMessagesNow();markRead();}else if(m!=null&&!cid.isEmpty()){cacheIncomingMessage(cid,m,"message".equals(type));}refreshInbox();return;}
         if("message_hidden".equals(type)){String id=e.optString("messageId");messages.removeIf(m->id.equals(m.optString("id")));if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();return;}
         if("typing".equals(type)){String tcid=e.optString("conversationId");boolean active=e.optBoolean("active")&&!selfId.equals(e.optString("userId"));Runnable previous=typingExpiry.remove(tcid);if(previous!=null)main.removeCallbacks(previous);if(active){typingConversations.add(tcid);Runnable expire=()->{typingExpiry.remove(tcid);typingConversations.remove(tcid);if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();if(activeConversation!=null&&activeConversation.optString("id").equals(tcid)&&typingView!=null){typingView.setText("");typingView.setVisibility(View.GONE);}};typingExpiry.put(tcid,expire);main.postDelayed(expire,2400);}else{typingConversations.remove(tcid);}if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();if(activeConversation!=null&&activeConversation.optString("id").equals(tcid)&&typingView!=null){typingView.setText(active?"Typing..":"");typingView.setVisibility(active?View.VISIBLE:View.GONE);}return;}
         if("read".equals(type)){if(activeConversation!=null&&activeConversation.optString("id").equals(e.optString("conversationId"))){long id=parseLong(e.optString("messageId"));for(JSONObject m:messages)if(isMine(m)&&parseLong(m.optString("id"))<=id)try{m.put("status","read");}catch(Exception ignored){}if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();}return;}
