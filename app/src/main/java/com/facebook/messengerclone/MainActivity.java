@@ -176,6 +176,87 @@ public class MainActivity extends Activity {
     }
     private void filterInbox(String q){filteredInbox.clear();String n=q==null?"":q.toLowerCase(Locale.ROOT).trim();for(JSONObject c:inbox){String name=c.optString("name").toLowerCase(Locale.ROOT),preview=c.optJSONObject("lastMessage")==null?"":c.optJSONObject("lastMessage").optString("body").toLowerCase(Locale.ROOT);if(n.isEmpty()||name.contains(n)||preview.contains(n))filteredInbox.add(c);}if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();}
 
+    private void updateInboxFromIncomingMessage(String cid,JSONObject m){
+        if(cid==null||cid.isEmpty()||m==null)return;
+
+        try{
+            JSONObject conversation=null;
+            int oldIndex=-1;
+
+            for(int i=0;i<inbox.size();i++){
+                JSONObject c=inbox.get(i);
+
+                if(cid.equals(c.optString("id"))){
+                    conversation=c;
+                    oldIndex=i;
+                    break;
+                }
+            }
+
+            // Unknown/new conversation:
+            // let refreshInbox() obtain its full metadata.
+            if(conversation==null)return;
+
+            JSONObject last=new JSONObject();
+
+            last.put("id",m.optString("id"));
+            last.put("senderId",m.optString("senderId"));
+            last.put("body",m.optString("body"));
+            last.put("type",m.optString("type","text"));
+            last.put("createdAt",m.optString("createdAt"));
+            last.put("status",m.optString("status","sent"));
+
+            conversation.put("lastMessage",last);
+
+            boolean chatOpen=
+                activeConversation!=null &&
+                cid.equals(activeConversation.optString("id"));
+
+            boolean incomingFromOther=
+                !m.optString("senderId").isEmpty() &&
+                !m.optString("senderId").equals(selfId);
+
+            if(chatOpen){
+                conversation.put("unread",0);
+            }else if(incomingFromOther){
+                conversation.put(
+                    "unread",
+                    Math.max(0,conversation.optInt("unread"))+1
+                );
+            }
+
+            // Move newest conversation to top immediately.
+            if(oldIndex>0){
+                inbox.remove(oldIndex);
+                inbox.add(0,conversation);
+            }
+
+            // Persist the instantly updated inbox.
+            String raw=cache.get("inbox");
+            JSONObject root;
+
+            if(raw==null||raw.isEmpty()){
+                root=new JSONObject();
+            }else{
+                try{
+                    root=new JSONObject(raw);
+                }catch(Exception ignored){
+                    root=new JSONObject();
+                }
+            }
+
+            root.put("conversations",new JSONArray(inbox));
+            cache.put("inbox",root.toString());
+
+            filterInbox(
+                searchBox==null
+                    ? ""
+                    : searchBox.getText().toString()
+            );
+
+        }catch(Exception ignored){}
+    }
+
     private void openConversation(JSONObject c){activeConversation=c;replyTo=null;messages.clear();composerHasText=false;typingStateSent=false;root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(6),0,dp(6),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(49)));ImageButton back=icon(R.drawable.ic_msg_back,35,TEXT);head.addView(back);back.setOnClickListener(v->showInbox(false));View avatar=buildConversationAvatar(c,31);LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(dp(31),dp(31));ap.leftMargin=dp(1);head.addView(avatar,ap);LinearLayout names=new LinearLayout(this);names.setOrientation(LinearLayout.VERTICAL);names.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams np=new LinearLayout.LayoutParams(0,-1,1);np.leftMargin=dp(7);head.addView(names,np);TextView name=text(c.optString("name","Conversation"),14,TEXT,Typeface.BOLD);names.addView(name,new LinearLayout.LayoutParams(-1,dp(24)));TextView status=text(conversationStatus(c),10,SUB,Typeface.NORMAL);names.addView(status,new LinearLayout.LayoutParams(-1,dp(17)));ImageButton info=icon(R.drawable.ic_msg_info,35,TEXT);head.addView(info);info.setOnClickListener(v->showInfo());View divider=new View(this);divider.setBackgroundColor(DIV);page.addView(divider,new LinearLayout.LayoutParams(-1,dp(1)));
         FrameLayout messageArea=new FrameLayout(this);page.addView(messageArea,new LinearLayout.LayoutParams(-1,0,1));
         list=new ListView(this);list.setDivider(null);list.setSelector(android.R.color.transparent);list.setTranscriptMode(ListView.TRANSCRIPT_MODE_NORMAL);list.setPadding(dp(10),dp(12),dp(10),dp(26));list.setClipToPadding(false);list.setBackground(themeConversationBackground());messageArea.addView(list,new FrameLayout.LayoutParams(-1,-1));if("group".equals(c.optString("type")))list.addHeaderView(buildGroupConversationIntro(c),null,false);messageAdapter=new MessageAdapter();list.setAdapter(messageAdapter);
@@ -555,7 +636,7 @@ public class MainActivity extends Activity {
     private void handleSocket(JSONObject e){String type=e.optString("type");
         if("ready".equals(type)){selfId=e.optString("userId");socketConnecting=false;socketRetry=0;main.removeCallbacks(socketReconnect);refreshInbox();if(activeConversation!=null){refreshMessages(activeConversation.optString("id"));markRead();}return;}
         if("conversation".equals(type)||"conversation_update".equals(type)){JSONObject c=e.optJSONObject("conversation");if(c!=null&&activeConversation!=null&&c.optString("id").equals(activeConversation.optString("id")))activeConversation=c;refreshInbox();return;}
-        if("message".equals(type)||"message_update".equals(type)){JSONObject m=e.optJSONObject("message");String cid=e.optString("conversationId",m==null?"":m.optString("conversationId"));if(m!=null){if(isStickerMessage(m))stickerLastConversations.add(cid);else if("message".equals(type))stickerLastConversations.remove(cid);}if(activeConversation!=null&&activeConversation.optString("id").equals(cid)&&m!=null){JSONObject oldMessage=null;for(JSONObject existing:messages)if(existing.optString("id").equals(m.optString("id"))){oldMessage=existing;break;}upsertMessage(oldMessage==null?m:mergeMessage(oldMessage,m));cacheMessagesNow();markRead();}else if(m!=null&&!cid.isEmpty()){cacheIncomingMessage(cid,m,"message".equals(type));}refreshInbox();return;}
+        if("message".equals(type)||"message_update".equals(type)){JSONObject m=e.optJSONObject("message");String cid=e.optString("conversationId",m==null?"":m.optString("conversationId"));if(m!=null){if(isStickerMessage(m))stickerLastConversations.add(cid);else if("message".equals(type))stickerLastConversations.remove(cid);}if("message".equals(type)&&m!=null&&!cid.isEmpty())updateInboxFromIncomingMessage(cid,m);if(activeConversation!=null&&activeConversation.optString("id").equals(cid)&&m!=null){JSONObject oldMessage=null;for(JSONObject existing:messages)if(existing.optString("id").equals(m.optString("id"))){oldMessage=existing;break;}upsertMessage(oldMessage==null?m:mergeMessage(oldMessage,m));cacheMessagesNow();markRead();}else if(m!=null&&!cid.isEmpty()){cacheIncomingMessage(cid,m,"message".equals(type));}refreshInbox();return;}
         if("message_hidden".equals(type)){String id=e.optString("messageId");messages.removeIf(m->id.equals(m.optString("id")));if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();return;}
         if("typing".equals(type)){String tcid=e.optString("conversationId");boolean active=e.optBoolean("active")&&!selfId.equals(e.optString("userId"));Runnable previous=typingExpiry.remove(tcid);if(previous!=null)main.removeCallbacks(previous);if(active){typingConversations.add(tcid);Runnable expire=()->{typingExpiry.remove(tcid);typingConversations.remove(tcid);if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();if(activeConversation!=null&&activeConversation.optString("id").equals(tcid)&&typingView!=null){typingView.setText("");typingView.setVisibility(View.GONE);}};typingExpiry.put(tcid,expire);main.postDelayed(expire,2400);}else{typingConversations.remove(tcid);}if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();if(activeConversation!=null&&activeConversation.optString("id").equals(tcid)&&typingView!=null){typingView.setText(active?"Typing..":"");typingView.setVisibility(active?View.VISIBLE:View.GONE);}return;}
         if("read".equals(type)){if(activeConversation!=null&&activeConversation.optString("id").equals(e.optString("conversationId"))){long id=parseLong(e.optString("messageId"));for(JSONObject m:messages)if(isMine(m)&&parseLong(m.optString("id"))<=id)try{m.put("status","read");}catch(Exception ignored){}if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();}return;}
