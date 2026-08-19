@@ -120,6 +120,12 @@ public class MainActivity extends Activity {
     @Override protected void onDestroy(){main.removeCallbacks(socketReconnect);if(socket!=null)socket.close(1000,"bye");socket=null;stopRecorder(false);super.onDestroy();}
     @Override public void onBackPressed(){
         if(root!=null){
+            View mediaSheet=root.findViewWithTag("messenger-native-media-sheet");
+            if(mediaSheet!=null){
+                dismissInstagramMediaPicker(mediaSheet);
+                return;
+            }
+
             View stickerSheet=root.findViewWithTag("messenger-native-sticker-sheet");
             if(stickerSheet!=null){
                 dismissMessengerStickerPicker(stickerSheet);
@@ -426,29 +432,14 @@ public class MainActivity extends Activity {
     }
 
     private void buildComposer(LinearLayout page){
-        if("instagram".equals(activeTheme())){
-            buildInstagramComposer(page);
-            return;
-        }
-        composer=new LinearLayout(this);composer.setGravity(Gravity.CENTER_VERTICAL);composer.setPadding(dp(7),dp(4),dp(7),dp(5));composer.setBackgroundColor(Color.WHITE);
-        LinearLayout.LayoutParams composerLp=new LinearLayout.LayoutParams(-1,dp(49));composerLp.bottomMargin=dp(2);page.addView(composer,composerLp);
-        int accent=themeAccent();ImageButton attach=icon(R.drawable.ic_msg_attach,35,accent);composer.addView(attach);ImageButton emoji=icon(R.drawable.comment_stickers,35,accent);emoji.setColorFilter(accent,android.graphics.PorterDuff.Mode.SRC_IN);emoji.setPadding(dp(8),dp(8),dp(8),dp(8));composer.addView(emoji);
-        messageInput=new EditText(this);messageInput.setHint("Message...");messageInput.setTextSize(15);messageInput.setSingleLine(false);messageInput.setMaxLines(4);messageInput.setPadding(dp(12),dp(5),dp(12),dp(5));messageInput.setBackground(bg(LIGHT,20));
-        LinearLayout.LayoutParams ilp=new LinearLayout.LayoutParams(0,dp(38),1);ilp.setMargins(dp(3),0,dp(3),0);composer.addView(messageInput,ilp);
-        FrameLayout actions=new FrameLayout(this);composer.addView(actions,new LinearLayout.LayoutParams(dp(35),dp(35)));
-        sendButton=icon(R.drawable.msg_send_enabled,35,accent);sendButton.clearColorFilter();sendButton.setPadding(dp(5),dp(5),dp(5),dp(5));
-        micButton=icon(R.drawable.ic_msg_mic,35,accent);micButton.setClickable(true);micButton.setLongClickable(false);actions.addView(sendButton,new FrameLayout.LayoutParams(-1,-1));actions.addView(micButton,new FrameLayout.LayoutParams(-1,-1));
-        sendButton.setOnClickListener(v->sendText());micButton.setOnClickListener(v->{});micButton.setOnTouchListener((v,e)->{v.getParent().requestDisallowInterceptTouchEvent(true);return handleMicTouch(e);});
-        attach.setOnClickListener(v->pickAttachment());emoji.setOnClickListener(v->showMessengerStickerPicker());
-        messageInput.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence text,int st,int b,int c){}public void afterTextChanged(Editable e){boolean now=e!=null&&e.length()>0;if(now!=composerHasText){composerHasText=now;syncComposerAction();}queueTypingPulse();}});
-        composerHasText=false;syncComposerAction();
+        buildInstagramComposer(page);
     }
 
     private void buildInstagramComposer(LinearLayout page){
         composer=new LinearLayout(this);
         composer.setGravity(Gravity.CENTER_VERTICAL);
         composer.setPadding(dp(7),dp(4),dp(7),dp(4));
-        composer.setBackgroundColor(Color.BLACK);
+        composer.setBackgroundColor(Color.TRANSPARENT);
         LinearLayout.LayoutParams outerLp=new LinearLayout.LayoutParams(-1,dp(58));
         outerLp.setMargins(dp(8),dp(2),dp(8),dp(4));
         page.addView(composer,outerLp);
@@ -487,8 +478,8 @@ public class MainActivity extends Activity {
             b.setScaleType(ImageView.ScaleType.FIT_CENTER);
             b.setPadding(dp(4),dp(4),dp(4),dp(4));
             LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(dp(30),dp(30));
-            bp.leftMargin=dp(1);
-            bp.rightMargin=dp(1);
+            bp.leftMargin=dp(3);
+            bp.rightMargin=dp(3);
             pill.addView(b,bp);
         }
 
@@ -764,44 +755,31 @@ public class MainActivity extends Activity {
             w.setLayout(-1,-1);
         }
 
-        bundle.setAlpha(0f);
-        bundle.setScaleX(.92f);
-        bundle.setScaleY(.92f);
-        bundle.setTranslationY(dp(10));
+        bundle.setAlpha(1f);
+        bundle.setScaleX(1f);
+        bundle.setScaleY(1f);
+        bundle.setTranslationY(0f);
+
+        actionCard.setAlpha(1f);
+        actionCard.setScaleX(1f);
+        actionCard.setScaleY(1f);
+        actionCard.setTranslationY(0f);
+
+        android.view.animation.OvershootInterpolator emojiBounce=
+            new android.view.animation.OvershootInterpolator(.78f);
 
         reactionsCard.setAlpha(0f);
-        reactionsCard.setScaleX(.90f);
-        reactionsCard.setScaleY(.90f);
-        reactionsCard.setTranslationY(dp(9));
-
-        actionCard.setAlpha(0f);
-        actionCard.setTranslationY(dp(12));
-
-        bundle.animate()
-            .alpha(1f)
-            .scaleX(1f)
-            .scaleY(1f)
-            .translationY(0f)
-            .setDuration(155)
-            .setInterpolator(new DecelerateInterpolator())
-            .start();
+        reactionsCard.setScaleX(.76f);
+        reactionsCard.setScaleY(.76f);
+        reactionsCard.setTranslationY(dp(7));
 
         reactionsCard.animate()
             .alpha(1f)
             .scaleX(1f)
             .scaleY(1f)
             .translationY(0f)
-            .setStartDelay(12)
-            .setDuration(145)
-            .setInterpolator(new DecelerateInterpolator())
-            .start();
-
-        actionCard.animate()
-            .alpha(1f)
-            .translationY(0f)
-            .setStartDelay(18)
-            .setDuration(150)
-            .setInterpolator(new DecelerateInterpolator())
+            .setDuration(210)
+            .setInterpolator(emojiBounce)
             .start();
     }
     private void react(JSONObject m,String emoji){
@@ -988,7 +966,7 @@ public class MainActivity extends Activity {
         final int sheetH=Math.min(dp(390),(int)(getResources().getDisplayMetrics().heightPixels*.47f));
         FrameLayout host=new FrameLayout(this);host.setTag("messenger-native-sticker-sheet");host.setClickable(true);host.setBackgroundColor(Color.TRANSPARENT);
         FrameLayout.LayoutParams hostLp=new FrameLayout.LayoutParams(-1,sheetH,Gravity.BOTTOM);root.addView(host,hostLp);
-        View stickerBridge=new View(this);stickerBridge.setTag("messenger-sticker-bridge");stickerBridge.setBackgroundColor(Color.WHITE);FrameLayout.LayoutParams bridgeLp=new FrameLayout.LayoutParams(-1,dp(8),Gravity.BOTTOM);bridgeLp.bottomMargin=sheetH-dp(1);root.addView(stickerBridge,bridgeLp);
+        View stickerBridge=new View(this);stickerBridge.setTag("messenger-sticker-bridge");stickerBridge.setBackground(themeConversationBackground());FrameLayout.LayoutParams bridgeLp=new FrameLayout.LayoutParams(-1,dp(8),Gravity.BOTTOM);bridgeLp.bottomMargin=sheetH-dp(1);root.addView(stickerBridge,bridgeLp);
 
         LinearLayout sheet=new LinearLayout(this);sheet.setOrientation(LinearLayout.VERTICAL);sheet.setPadding(dp(10),dp(6),dp(10),dp(8));sheet.setBackground(topBg(Color.WHITE,22));host.addView(sheet,new FrameLayout.LayoutParams(-1,-1));
 
@@ -1063,51 +1041,241 @@ public class MainActivity extends Activity {
     }
 
     private void showInstagramMediaPicker(){
-        final Dialog d=new Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen);
-        final LinearLayout page=new LinearLayout(this);
-        page.setOrientation(LinearLayout.VERTICAL);
-        page.setBackgroundColor(Color.BLACK);
+        if(root==null||composer==null||activeConversation==null)return;
 
-        LinearLayout head=new LinearLayout(this);
-        head.setGravity(Gravity.CENTER_VERTICAL);
-        head.setPadding(dp(13),0,dp(10),0);
-        page.addView(head,new LinearLayout.LayoutParams(-1,dp(56)));
+        View old=root.findViewWithTag("messenger-native-media-sheet");
+        if(old!=null){
+            dismissInstagramMediaPicker(old);
+            return;
+        }
 
-        ImageButton close=icon(R.drawable.ic_msg_close,38,Color.WHITE);
-        head.addView(close,new LinearLayout.LayoutParams(dp(38),dp(38)));
-        close.setOnClickListener(v->d.dismiss());
+        View stickerOld=root.findViewWithTag("messenger-native-sticker-sheet");
+        if(stickerOld!=null)dismissMessengerStickerPicker(stickerOld);
 
-        TextView title=text("Gallery",18,Color.WHITE,Typeface.BOLD);
-        LinearLayout.LayoutParams titleLp=new LinearLayout.LayoutParams(0,dp(56),1);
-        titleLp.leftMargin=dp(8);
-        head.addView(title,titleLp);
+        InputMethodManager imm=(InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
+        if(imm!=null&&messageInput!=null){
+            imm.hideSoftInputFromWindow(messageInput.getWindowToken(),0);
+        }
 
-        TextView select=text("Recent",14,Color.rgb(180,180,180),Typeface.NORMAL);
-        select.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
-        head.addView(select,new LinearLayout.LayoutParams(dp(90),dp(56)));
+        final int sheetH=Math.min(
+            dp(410),
+            (int)(getResources().getDisplayMetrics().heightPixels*.48f)
+        );
 
-        final ScrollView sc=new ScrollView(this);
-        sc.setFillViewport(true);
-        final GridLayout grid=new GridLayout(this);
+        FrameLayout host=new FrameLayout(this);
+        host.setTag("messenger-native-media-sheet");
+        host.setClickable(true);
+        host.setBackgroundColor(Color.TRANSPARENT);
+        root.addView(
+            host,
+            new FrameLayout.LayoutParams(-1,sheetH,Gravity.BOTTOM)
+        );
+
+        View bridge=new View(this);
+        bridge.setTag("messenger-media-bridge");
+        bridge.setBackground(themeConversationBackground());
+        FrameLayout.LayoutParams bridgeLp=
+            new FrameLayout.LayoutParams(-1,dp(8),Gravity.BOTTOM);
+        bridgeLp.bottomMargin=sheetH-dp(1);
+        root.addView(bridge,bridgeLp);
+
+        LinearLayout sheet=new LinearLayout(this);
+        sheet.setOrientation(LinearLayout.VERTICAL);
+        sheet.setBackground(topBg(Color.rgb(38,38,38),22));
+        host.addView(sheet,new FrameLayout.LayoutParams(-1,-1));
+
+        LinearLayout dragHeader=new LinearLayout(this);
+        dragHeader.setOrientation(LinearLayout.VERTICAL);
+        dragHeader.setGravity(Gravity.CENTER_HORIZONTAL);
+        dragHeader.setPadding(0,dp(7),0,dp(5));
+        sheet.addView(dragHeader,new LinearLayout.LayoutParams(-1,dp(72)));
+
+        View puller=new View(this);
+        puller.setBackground(bg(Color.rgb(155,158,166),3));
+        LinearLayout.LayoutParams pullLp=
+            new LinearLayout.LayoutParams(dp(42),dp(5));
+        pullLp.gravity=Gravity.CENTER_HORIZONTAL;
+        pullLp.bottomMargin=dp(8);
+        dragHeader.addView(puller,pullLp);
+
+        LinearLayout titleRow=new LinearLayout(this);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        titleRow.setPadding(dp(14),0,dp(12),0);
+        dragHeader.addView(titleRow,new LinearLayout.LayoutParams(-1,dp(44)));
+
+        TextView title=text("Recents",18,Color.WHITE,Typeface.BOLD);
+        titleRow.addView(title,new LinearLayout.LayoutParams(0,dp(44),1));
+
+        TextView hd=text("HD",12,Color.WHITE,Typeface.BOLD);
+        hd.setGravity(Gravity.CENTER);
+        titleRow.addView(hd,new LinearLayout.LayoutParams(dp(38),dp(30)));
+
+        FrameLayout mediaHost=new FrameLayout(this);
+        sheet.addView(mediaHost,new LinearLayout.LayoutParams(-1,0,1));
+
+        ScrollView scroll=new ScrollView(this);
+        scroll.setFillViewport(false);
+
+        GridLayout grid=new GridLayout(this);
         grid.setColumnCount(3);
         grid.setUseDefaultMargins(false);
-        sc.addView(grid,new ScrollView.LayoutParams(-1,-2));
-        page.addView(sc,new LinearLayout.LayoutParams(-1,0,1));
+        scroll.addView(grid,new ScrollView.LayoutParams(-1,-2));
+        mediaHost.addView(scroll,new FrameLayout.LayoutParams(-1,-1));
 
-        ProgressBar loader=new ProgressBar(this);
-        GridLayout.LayoutParams loadLp=new GridLayout.LayoutParams();
-        loadLp.columnSpec=GridLayout.spec(0,3);
-        loadLp.width=-1;
-        loadLp.height=dp(70);
-        grid.addView(loader,loadLp);
+        ProgressBar loading=new ProgressBar(this);
+        mediaHost.addView(
+            loading,
+            new FrameLayout.LayoutParams(dp(30),dp(30),Gravity.CENTER)
+        );
 
-        d.setContentView(page);
-        d.show();
-        Window win=d.getWindow();
-        if(win!=null){
-            win.setLayout(-1,-1);
-            win.setStatusBarColor(Color.BLACK);
-            win.setNavigationBarColor(Color.BLACK);
+        final float[] startY={Float.NaN};
+
+        View.OnTouchListener drag=(v,e)->{
+            switch(e.getActionMasked()){
+                case MotionEvent.ACTION_DOWN:
+                    startY[0]=e.getRawY()-host.getTranslationY();
+                    host.animate().cancel();
+                    bridge.animate().cancel();
+                    composer.animate().cancel();
+                    if(replyBar!=null)replyBar.animate().cancel();
+                    ViewParent p0=v.getParent();
+                    if(p0!=null)p0.requestDisallowInterceptTouchEvent(true);
+                    return true;
+
+                case MotionEvent.ACTION_MOVE:
+                    if(Float.isNaN(startY[0]))return true;
+                    float dy=Math.max(0,e.getRawY()-startY[0]);
+                    host.setTranslationY(dy);
+                    bridge.setTranslationY(dy);
+                    composer.setTranslationY(-sheetH+dy);
+                    if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE){
+                        replyBar.setTranslationY(-sheetH+dy);
+                    }
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    float y=host.getTranslationY();
+                    startY[0]=Float.NaN;
+                    ViewParent p1=v.getParent();
+                    if(p1!=null)p1.requestDisallowInterceptTouchEvent(false);
+
+                    if(y>dp(76)){
+                        dismissInstagramMediaPicker(host);
+                    }else{
+                        host.animate().translationY(0).setDuration(190)
+                            .setInterpolator(new DecelerateInterpolator()).start();
+                        bridge.animate().translationY(0).setDuration(190)
+                            .setInterpolator(new DecelerateInterpolator()).start();
+                        composer.animate().translationY(-sheetH).setDuration(190)
+                            .setInterpolator(new DecelerateInterpolator()).start();
+                        if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE){
+                            replyBar.animate().translationY(-sheetH).setDuration(190)
+                                .setInterpolator(new DecelerateInterpolator()).start();
+                        }
+                    }
+                    return true;
+            }
+            return true;
+        };
+        dragHeader.setOnTouchListener(drag);
+
+        final float[] contentDownY={Float.NaN};
+        final boolean[] contentSheetDrag={false};
+
+        View.OnTouchListener contentDrag=(v,e)->{
+            switch(e.getActionMasked()){
+                case MotionEvent.ACTION_DOWN:
+                    contentDownY[0]=e.getRawY();
+                    contentSheetDrag[0]=false;
+                    return false;
+
+                case MotionEvent.ACTION_MOVE:
+                    float delta=e.getRawY()-contentDownY[0];
+
+                    if(
+                        !contentSheetDrag[0] &&
+                        scroll.getScrollY()==0 &&
+                        delta>dp(5)
+                    ){
+                        contentSheetDrag[0]=true;
+                        startY[0]=contentDownY[0]-host.getTranslationY();
+                        host.animate().cancel();
+                        bridge.animate().cancel();
+                        composer.animate().cancel();
+                        if(replyBar!=null)replyBar.animate().cancel();
+                        ViewParent parent=v.getParent();
+                        if(parent!=null)parent.requestDisallowInterceptTouchEvent(true);
+                    }
+
+                    if(contentSheetDrag[0]){
+                        float dy=Math.max(0,e.getRawY()-startY[0]);
+                        host.setTranslationY(dy);
+                        bridge.setTranslationY(dy);
+                        composer.setTranslationY(-sheetH+dy);
+                        if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE){
+                            replyBar.setTranslationY(-sheetH+dy);
+                        }
+                        return true;
+                    }
+                    return false;
+
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    if(contentSheetDrag[0]){
+                        float y=host.getTranslationY();
+                        contentSheetDrag[0]=false;
+                        contentDownY[0]=Float.NaN;
+
+                        ViewParent parent=v.getParent();
+                        if(parent!=null)parent.requestDisallowInterceptTouchEvent(false);
+
+                        if(y>dp(64)){
+                            dismissInstagramMediaPicker(host);
+                        }else{
+                            host.animate().translationY(0).setDuration(190)
+                                .setInterpolator(new DecelerateInterpolator()).start();
+                            bridge.animate().translationY(0).setDuration(190)
+                                .setInterpolator(new DecelerateInterpolator()).start();
+                            composer.animate().translationY(-sheetH).setDuration(190)
+                                .setInterpolator(new DecelerateInterpolator()).start();
+                            if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE){
+                                replyBar.animate().translationY(-sheetH).setDuration(190)
+                                    .setInterpolator(new DecelerateInterpolator()).start();
+                            }
+                        }
+                        return true;
+                    }
+
+                    contentDownY[0]=Float.NaN;
+                    return false;
+            }
+            return false;
+        };
+
+        scroll.setOnTouchListener(contentDrag);
+        grid.setOnTouchListener(contentDrag);
+
+        host.setTranslationY(sheetH);
+        bridge.setTranslationY(sheetH);
+        composer.setTranslationY(0);
+        if(replyBar!=null)replyBar.setTranslationY(0);
+
+        if(list!=null){
+            list.setPadding(dp(10),dp(12),dp(10),sheetH+dp(30));
+            list.post(()->list.setSelection(Math.max(0,list.getCount()-1)));
+        }
+
+        host.animate().translationY(0).setDuration(330)
+            .setInterpolator(new DecelerateInterpolator()).start();
+        bridge.animate().translationY(0).setDuration(330)
+            .setInterpolator(new DecelerateInterpolator()).start();
+        composer.animate().translationY(-sheetH).setDuration(330)
+            .setInterpolator(new DecelerateInterpolator()).start();
+
+        if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE){
+            replyBar.animate().translationY(-sheetH).setDuration(330)
+                .setInterpolator(new DecelerateInterpolator()).start();
         }
 
         new Thread(()->{
@@ -1139,54 +1307,51 @@ public class MainActivity extends Activity {
                         android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE
                     );
                     int count=0;
+
                     while(c.moveToNext()&&count<240){
                         long id=c.getLong(idCol);
                         int mt=c.getInt(typeCol);
                         Uri item=android.content.ContentUris.withAppendedId(collection,id);
                         uris.add(item);
-                        videos.add(mt==android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO);
+                        videos.add(
+                            mt==android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
+                        );
                         count++;
                     }
                 }
             }catch(Exception ignored){}
 
             main.post(()->{
-                if(!d.isShowing())return;
+                if(host.getParent()==null)return;
+
+                loading.setVisibility(View.GONE);
                 grid.removeAllViews();
-
-                if(uris.isEmpty()){
-                    TextView empty=text("No photos or videos",15,Color.rgb(160,160,160),Typeface.NORMAL);
-                    empty.setGravity(Gravity.CENTER);
-                    GridLayout.LayoutParams ep=new GridLayout.LayoutParams();
-                    ep.columnSpec=GridLayout.spec(0,3);
-                    ep.width=-1;
-                    ep.height=dp(160);
-                    grid.addView(empty,ep);
-                    return;
-                }
-
                 int cell=getResources().getDisplayMetrics().widthPixels/3;
 
                 for(int i=0;i<uris.size();i++){
                     final Uri uri=uris.get(i);
                     final boolean video=videos.get(i);
 
-                    FrameLayout tile=new FrameLayout(this);
+                    FrameLayout tile=new FrameLayout(MainActivity.this);
                     GridLayout.LayoutParams gp=new GridLayout.LayoutParams();
                     gp.width=cell;
                     gp.height=cell;
                     gp.setMargins(1,1,1,1);
                     grid.addView(tile,gp);
 
-                    ImageView thumb=new ImageView(this);
+                    ImageView thumb=new ImageView(MainActivity.this);
                     thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
                     thumb.setBackgroundColor(Color.rgb(18,18,18));
                     tile.addView(thumb,new FrameLayout.LayoutParams(-1,-1));
 
                     if(video){
-                        TextView play=text("▶",16,Color.WHITE,Typeface.BOLD);
+                        TextView play=text("▶",14,Color.WHITE,Typeface.BOLD);
                         play.setGravity(Gravity.CENTER);
-                        tile.addView(play,new FrameLayout.LayoutParams(dp(34),dp(34),Gravity.CENTER));
+                        FrameLayout.LayoutParams pp=
+                            new FrameLayout.LayoutParams(dp(28),dp(28),Gravity.BOTTOM|Gravity.START);
+                        pp.leftMargin=dp(7);
+                        pp.bottomMargin=dp(6);
+                        tile.addView(play,pp);
                     }
 
                     new Thread(()->{
@@ -1206,23 +1371,29 @@ public class MainActivity extends Activity {
                                     null
                                 );
                             }
+
                             if(bm!=null)main.post(()->{
-                                if(d.isShowing())thumb.setImageBitmap(bm);
+                                if(host.getParent()!=null)thumb.setImageBitmap(bm);
                             });
                         }catch(Exception ignored){}
                     }).start();
 
                     tile.setOnClickListener(v->{
-                        d.dismiss();
+                        dismissInstagramMediaPicker(host);
+
                         new Thread(()->{
                             try{
                                 String name=queryName(uri);
                                 String mime=getContentResolver().getType(uri);
-                                byte[] bytes=readAll(getContentResolver().openInputStream(uri));
+                                byte[] bytes=readAll(
+                                    getContentResolver().openInputStream(uri)
+                                );
+
                                 if(bytes.length>27*1024*1024){
                                     main.post(()->toast("File is too large."));
                                     return;
                                 }
+
                                 main.post(()->uploadAttachment(
                                     bytes,
                                     name,
@@ -1236,6 +1407,47 @@ public class MainActivity extends Activity {
                 }
             });
         }).start();
+    }
+
+    private void dismissInstagramMediaPicker(View host){
+        if(host==null||root==null)return;
+
+        View bridge=root.findViewWithTag("messenger-media-bridge");
+        int h=Math.max(host.getHeight(),dp(360));
+
+        host.animate()
+            .translationY(h)
+            .setDuration(220)
+            .setInterpolator(new android.view.animation.AccelerateInterpolator())
+            .withEndAction(()->{
+                if(host.getParent()==root)root.removeView(host);
+            })
+            .start();
+
+        if(bridge!=null){
+            bridge.animate()
+                .translationY(h)
+                .setDuration(220)
+                .setInterpolator(new android.view.animation.AccelerateInterpolator())
+                .withEndAction(()->{
+                    if(bridge.getParent()==root)root.removeView(bridge);
+                })
+                .start();
+        }
+
+        if(composer!=null){
+            composer.animate().translationY(0).setDuration(220)
+                .setInterpolator(new DecelerateInterpolator()).start();
+        }
+
+        if(replyBar!=null){
+            replyBar.animate().translationY(0).setDuration(220)
+                .setInterpolator(new DecelerateInterpolator()).start();
+        }
+
+        if(list!=null){
+            list.setPadding(dp(10),dp(12),dp(10),dp(26));
+        }
     }
 
     private void pickAttachment(){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("*/*");i.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"image/*","video/*","audio/*","application/pdf","text/plain","application/zip"});startActivityForResult(i,PICK_FILE);}
@@ -2322,29 +2534,19 @@ public class MainActivity extends Activity {
                 replyBlock.setOrientation(LinearLayout.VERTICAL);
                 replyBlock.setGravity(mine?Gravity.END:Gravity.START);
 
-                if(!mine){
-                    TextView repliedLabel=text(
-                        "Replied to you",
-                        12.5f,
-                        "instagram".equals(activeTheme())?Color.rgb(133,133,133):Color.rgb(138,141,145),
-                        Typeface.NORMAL
-                    );
-                    LinearLayout.LayoutParams labelLp=new LinearLayout.LayoutParams(-2,dp(24));
-                    labelLp.leftMargin=dp(12);
-                    replyBlock.addView(repliedLabel,labelLp);
-                }
+                TextView repliedLabel=text(
+                    mine?"You replied":"Replied to you",
+                    12.5f,
+                    "instagram".equals(activeTheme())?Color.rgb(133,133,133):Color.rgb(138,141,145),
+                    Typeface.NORMAL
+                );
+                LinearLayout.LayoutParams labelLp=new LinearLayout.LayoutParams(-2,dp(24));
+                if(mine)labelLp.rightMargin=dp(12);
+                else labelLp.leftMargin=dp(12);
+                replyBlock.addView(repliedLabel,labelLp);
 
                 LinearLayout previewRow=new LinearLayout(MainActivity.this);
                 previewRow.setGravity(Gravity.CENTER_VERTICAL);
-
-                View replyLine=new View(MainActivity.this);
-                replyLine.setBackground(bg(
-                    "instagram".equals(activeTheme())?Color.rgb(38,38,38):Color.rgb(180,184,190),
-                    2
-                ));
-                LinearLayout.LayoutParams lineLp=new LinearLayout.LayoutParams(dp(3),dp(46));
-                lineLp.rightMargin=dp(8);
-                previewRow.addView(replyLine,lineLp);
 
                 LinearLayout rpWrap=new LinearLayout(MainActivity.this);
                 rpWrap.setOrientation(LinearLayout.VERTICAL);
@@ -2360,6 +2562,23 @@ public class MainActivity extends Activity {
                 rp.setMaxWidth((int)(getResources().getDisplayMetrics().widthPixels*.64f));
                 rpWrap.addView(rp,new LinearLayout.LayoutParams(-2,-2));
 
+                View replyLine=new View(MainActivity.this);
+                replyLine.setBackground(bg(
+                    "instagram".equals(activeTheme())?Color.rgb(38,38,38):Color.rgb(180,184,190),
+                    2
+                ));
+                LinearLayout.LayoutParams lineLp=new LinearLayout.LayoutParams(dp(3),dp(46));
+
+                if(mine){
+                    previewRow.addView(rpWrap,new LinearLayout.LayoutParams(-2,-2));
+                    lineLp.leftMargin=dp(8);
+                    previewRow.addView(replyLine,lineLp);
+                }else{
+                    lineLp.rightMargin=dp(8);
+                    previewRow.addView(replyLine,lineLp);
+                    previewRow.addView(rpWrap,new LinearLayout.LayoutParams(-2,-2));
+                }
+
                 String replyId=reply.optString("id",reply.optString("messageId"));
                 if(!replyId.isEmpty()){
                     rpWrap.setClickable(true);
@@ -2368,7 +2587,6 @@ public class MainActivity extends Activity {
                     previewRow.setOnClickListener(v->jumpToMessage(replyId));
                 }
 
-                previewRow.addView(rpWrap,new LinearLayout.LayoutParams(-2,-2));
                 replyBlock.addView(previewRow,new LinearLayout.LayoutParams(-2,-2));
 
                 LinearLayout.LayoutParams rpp=new LinearLayout.LayoutParams(-2,-2);
