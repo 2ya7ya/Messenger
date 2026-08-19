@@ -88,7 +88,7 @@ public class MainActivity extends Activity {
     private static final long BURST_MS=5*60*1000L, STAMP_MS=15*60*1000L;
     private final Handler main=new Handler(Looper.getMainLooper());
     private ApiClient api; private MessengerCache cache; private ImageLoader images; private StickerLoader stickers; private WebSocket socket;
-    private FrameLayout root; private ListView list; private ProgressBar olderMessagesLoader; private InboxAdapter inboxAdapter; private MessageAdapter messageAdapter;
+    private FrameLayout root; private ListView list; private View olderMessagesLoaderRow; private OlderMessagesSpinner olderMessagesSpinner; private InboxAdapter inboxAdapter; private MessageAdapter messageAdapter;
     private final List<JSONObject> inbox=new ArrayList<>(), filteredInbox=new ArrayList<>(), messages=new ArrayList<>();
     private final Set<String> typingConversations=new HashSet<>();
     private final Set<String> stickerLastConversations=new HashSet<>();
@@ -278,22 +278,58 @@ public class MainActivity extends Activity {
 
     private void openConversation(JSONObject c){activeConversation=c;replyTo=null;messages.clear();composerHasText=false;typingStateSent=false;root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(6),0,dp(6),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(49)));ImageButton back=icon(R.drawable.ic_msg_back,35,TEXT);head.addView(back);back.setOnClickListener(v->showInbox(false));View avatar=buildConversationAvatar(c,31);LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(dp(31),dp(31));ap.leftMargin=dp(1);head.addView(avatar,ap);LinearLayout names=new LinearLayout(this);names.setOrientation(LinearLayout.VERTICAL);names.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams np=new LinearLayout.LayoutParams(0,-1,1);np.leftMargin=dp(7);head.addView(names,np);TextView name=text(c.optString("name","Conversation"),14,TEXT,Typeface.BOLD);names.addView(name,new LinearLayout.LayoutParams(-1,dp(24)));TextView status=text(conversationStatus(c),10,SUB,Typeface.NORMAL);names.addView(status,new LinearLayout.LayoutParams(-1,dp(17)));ImageButton info=icon(R.drawable.ic_msg_info,35,TEXT);head.addView(info);info.setOnClickListener(v->showInfo());View divider=new View(this);divider.setBackgroundColor(DIV);page.addView(divider,new LinearLayout.LayoutParams(-1,dp(1)));
         FrameLayout messageArea=new FrameLayout(this);page.addView(messageArea,new LinearLayout.LayoutParams(-1,0,1));
-        list=new ListView(this);list.setDivider(null);list.setSelector(android.R.color.transparent);list.setTranscriptMode(ListView.TRANSCRIPT_MODE_NORMAL);list.setPadding(dp(10),dp(12),dp(10),dp(26));list.setClipToPadding(false);list.setBackground(themeConversationBackground());messageArea.addView(list,new FrameLayout.LayoutParams(-1,-1));
+        list=new ListView(this);
+        list.setDivider(null);
+        list.setSelector(android.R.color.transparent);
+        list.setTranscriptMode(ListView.TRANSCRIPT_MODE_NORMAL);
+        list.setPadding(dp(10),dp(12),dp(10),dp(26));
+        list.setClipToPadding(false);
+        list.setBackground(themeConversationBackground());
+        messageArea.addView(list,new FrameLayout.LayoutParams(-1,-1));
 
-        olderMessagesLoader=new ProgressBar(this);
-        olderMessagesLoader.setIndeterminate(true);
-        olderMessagesLoader.setVisibility(View.GONE);
-        if(Build.VERSION.SDK_INT>=21){
-            olderMessagesLoader.getIndeterminateDrawable().setTint(Color.rgb(150,153,159));
+        // Older-message loader is a real ListView header row, never an overlay.
+        FrameLayout loaderRow=new FrameLayout(this);
+        loaderRow.setBackgroundColor(Color.TRANSPARENT);
+        olderMessagesLoaderRow=loaderRow;
+
+        olderMessagesSpinner=new OlderMessagesSpinner(this);
+        olderMessagesSpinner.setVisibility(View.INVISIBLE);
+
+        FrameLayout.LayoutParams spinnerLp=
+            new FrameLayout.LayoutParams(
+                dp(38),
+                dp(38),
+                Gravity.CENTER
+            );
+        loaderRow.addView(olderMessagesSpinner,spinnerLp);
+
+        android.widget.AbsListView.LayoutParams loaderRowLp=
+            new android.widget.AbsListView.LayoutParams(-1,0);
+        loaderRow.setLayoutParams(loaderRowLp);
+        list.addHeaderView(loaderRow,null,false);
+
+        if("group".equals(c.optString("type"))){
+            list.addHeaderView(buildGroupConversationIntro(c),null,false);
         }
-        FrameLayout.LayoutParams olderLoaderLp=
-            new FrameLayout.LayoutParams(dp(34),dp(34),Gravity.TOP|Gravity.CENTER_HORIZONTAL);
-        olderLoaderLp.topMargin=dp(10);
-        messageArea.addView(olderMessagesLoader,olderLoaderLp);
 
-        if("group".equals(c.optString("type")))list.addHeaderView(buildGroupConversationIntro(c),null,false);messageAdapter=new MessageAdapter();list.setAdapter(messageAdapter);
+        messageAdapter=new MessageAdapter();
+        list.setAdapter(messageAdapter);
         list.setOnScrollListener(new android.widget.AbsListView.OnScrollListener(){
-            @Override public void onScrollStateChanged(android.widget.AbsListView view,int state){}
+            private int state=SCROLL_STATE_IDLE;
+
+            @Override public void onScrollStateChanged(
+                android.widget.AbsListView view,
+                int newState
+            ){
+                state=newState;
+
+                if(
+                    newState==SCROLL_STATE_IDLE &&
+                    view.getFirstVisiblePosition()<=1
+                ){
+                    loadOlderMessagesPage();
+                }
+            }
 
             @Override public void onScroll(
                 android.widget.AbsListView view,
@@ -301,9 +337,8 @@ public class MainActivity extends Activity {
                 int visibleItemCount,
                 int totalItemCount
             ){
-                if(firstVisibleItem<=1&&visibleItemCount>0){
-                    loadOlderMessagesPage();
-                }
+                // Never start a page request during a fling/drag.
+                // That was causing the viewport to jump between batches.
             }
         });
         typingView=text("",13,Color.rgb(138,141,145),Typeface.NORMAL);typingView.setPadding(dp(14),0,dp(8),0);typingView.setBackgroundColor(Color.TRANSPARENT);typingView.setVisibility(View.GONE);FrameLayout.LayoutParams tvp=new FrameLayout.LayoutParams(-2,dp(21),Gravity.START|Gravity.BOTTOM);tvp.leftMargin=dp(4);tvp.bottomMargin=dp(2);messageArea.addView(typingView,tvp);
@@ -1474,6 +1509,73 @@ public class MainActivity extends Activity {
     private int themeReplyBackground(){switch(activeTheme()){case"monochrome":return Color.rgb(214,214,214);case"glow-pup":return Color.rgb(52,43,105);case"odyssey":return Color.rgb(36,85,90);case"supergirl":return Color.rgb(82,43,38);case"avatar":return Color.rgb(52,85,80);case"olivia":return Color.rgb(86,64,76);case"backrooms":return Color.rgb(81,76,41);case"deli-boys":return Color.rgb(61,57,52);case"heart-drive":return Color.rgb(50,27,112);case"valentines":return Color.rgb(73,18,118);default:return Color.rgb(223,225,229);}}
     private int themeReplyText(){switch(activeTheme()){case"glow-pup":return Color.rgb(238,233,255);case"odyssey":return Color.rgb(227,255,255);case"supergirl":return Color.rgb(255,240,228);case"avatar":return Color.rgb(234,255,248);case"olivia":return Color.rgb(255,230,239);case"backrooms":return Color.rgb(255,251,216);case"deli-boys":return Color.rgb(255,244,233);case"heart-drive":return Color.rgb(238,231,255);case"valentines":return Color.rgb(243,229,255);default:return Color.rgb(75,79,86);}}
 
+    private final class OlderMessagesSpinner extends View{
+        private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.RectF oval=new android.graphics.RectF();
+        private boolean running=false;
+
+        OlderMessagesSpinner(Context context){
+            super(context);
+            setWillNotDraw(false);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeWidth(dp(2.1f));
+        }
+
+        void start(){
+            running=true;
+            setVisibility(View.VISIBLE);
+            invalidate();
+        }
+
+        void stop(){
+            running=false;
+            setVisibility(View.INVISIBLE);
+        }
+
+        @Override protected void onDraw(Canvas canvas){
+            super.onDraw(canvas);
+            if(!running)return;
+
+            float inset=dp(3.2f);
+            oval.set(
+                inset,
+                inset,
+                getWidth()-inset,
+                getHeight()-inset
+            );
+
+            float cx=getWidth()/2f;
+            float cy=getHeight()/2f;
+
+            android.graphics.SweepGradient sweep=
+                new android.graphics.SweepGradient(
+                    cx,
+                    cy,
+                    new int[]{
+                        Color.argb(18,145,148,154),
+                        Color.argb(90,145,148,154),
+                        Color.argb(220,145,148,154),
+                        Color.argb(255,145,148,154),
+                        Color.argb(55,145,148,154),
+                        Color.argb(18,145,148,154)
+                    },
+                    new float[]{0f,.18f,.48f,.70f,.90f,1f}
+                );
+
+            paint.setShader(sweep);
+
+            float angle=(SystemClock.uptimeMillis()%850L)/850f*360f;
+            canvas.save();
+            canvas.rotate(angle,cx,cy);
+            canvas.drawArc(oval,0f,330f,false,paint);
+            canvas.restore();
+
+            paint.setShader(null);
+            postInvalidateDelayed(16);
+        }
+    }
+
     private final class ReplyProgressView extends View{
         private final Paint trackPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint progressPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -1552,7 +1654,7 @@ public class MainActivity extends Activity {
             replyArrow.setScaleX(.78f);
             replyArrow.setScaleY(.78f);
             replyArrow.setBackgroundColor(Color.TRANSPARENT);
-            replyArrow.setPadding(dp(2.5f),dp(2.5f),dp(2.5f),dp(2.5f));
+            replyArrow.setPadding(dp(1.75f),dp(1.75f),dp(1.75f),dp(1.75f));
 
             FrameLayout.LayoutParams arrowLp=
                 new FrameLayout.LayoutParams(dp(27),dp(27),mine
@@ -1829,6 +1931,26 @@ public class MainActivity extends Activity {
             return false;
         });
     }
+    private void setOlderLoaderVisible(boolean visible){
+        if(olderMessagesLoaderRow==null)return;
+
+        ViewGroup.LayoutParams lp=olderMessagesLoaderRow.getLayoutParams();
+        if(lp==null){
+            lp=new android.widget.AbsListView.LayoutParams(-1,0);
+        }
+
+        int wanted=visible?dp(46):0;
+        if(lp.height!=wanted){
+            lp.height=wanted;
+            olderMessagesLoaderRow.setLayoutParams(lp);
+        }
+
+        if(olderMessagesSpinner!=null){
+            if(visible)olderMessagesSpinner.start();
+            else olderMessagesSpinner.stop();
+        }
+    }
+
     private void loadOlderMessagesPage(){
         if(
             loadingOlderMessages ||
@@ -1839,49 +1961,65 @@ public class MainActivity extends Activity {
             list==null
         )return;
 
-        loadingOlderMessages=true;
-        if(olderMessagesLoader!=null){
-            olderMessagesLoader.setVisibility(View.VISIBLE);
-            olderMessagesLoader.bringToFront();
+        final int headers=list.getHeaderViewsCount();
+        final int firstVisible=list.getFirstVisiblePosition();
+
+        // Find the first actually-visible MESSAGE row, not a header.
+        int anchorPosition=-1;
+        String anchorId="";
+        int anchorTop=0;
+
+        int childCount=list.getChildCount();
+        for(int child=0;child<childCount;child++){
+            int adapterPosition=firstVisible+child;
+            int messageIndex=adapterPosition-headers;
+
+            if(messageIndex>=0&&messageIndex<messages.size()){
+                String id=messages.get(messageIndex).optString("id","");
+                if(!id.isEmpty()){
+                    anchorPosition=adapterPosition;
+                    anchorId=id;
+                    View anchorView=list.getChildAt(child);
+                    anchorTop=anchorView==null?0:anchorView.getTop();
+                    break;
+                }
+            }
         }
+
+        final String stableAnchorId=anchorId;
+        final int stableAnchorTop=anchorTop;
+        final int fallbackPosition=anchorPosition;
+
+        loadingOlderMessages=true;
+
+        // Show loader as list content, not on top of messages.
+        setOlderLoaderVisible(true);
 
         final String conversationId=activeConversation.optString("id");
         final String cursor=beforeCursor;
-        final int headers=list.getHeaderViewsCount();
-
-        // Anchor to the exact top visible message instead of relying on raw
-        // adapter positions, which shift when older rows are inserted.
-        final int firstVisible=list.getFirstVisiblePosition();
-        final int adapterIndex=firstVisible-headers;
-        String anchor="";
-        if(adapterIndex>=0&&adapterIndex<messages.size()){
-            anchor=messages.get(adapterIndex).optString("id","");
-        }
-        final String anchorId=anchor;
-
-        View firstChild=list.getChildAt(0);
-        final int anchorTop=firstChild==null?0:firstChild.getTop();
 
         api.get(
             "/api/messaging/conversations/"+conversationId+
             "/messages?limit=80&before="+cursor,
             (json,error)->main.post(()->{
-                loadingOlderMessages=false;
-                if(olderMessagesLoader!=null){
-                    olderMessagesLoader.setVisibility(View.GONE);
-                }
-
                 if(
                     activeConversation==null ||
                     !conversationId.equals(activeConversation.optString("id"))
-                )return;
+                ){
+                    loadingOlderMessages=false;
+                    setOlderLoaderVisible(false);
+                    return;
+                }
 
-                if(error!=null)return;
+                if(error!=null){
+                    loadingOlderMessages=false;
+                    setOlderLoaderVisible(false);
+                    return;
+                }
 
                 JSONArray arr=json.optJSONArray("messages");
-                beforeCursor=json.optString("nextBefore","");
-
-                if(arr==null||arr.length()==0)return;
+                String next=json.optString("nextBefore","");
+                beforeCursor=next;
 
                 List<JSONObject> older=new ArrayList<>();
                 Set<String> known=new HashSet<>();
@@ -1891,46 +2029,53 @@ public class MainActivity extends Activity {
                     if(!id.isEmpty())known.add(id);
                 }
 
-                for(int i=0;i<arr.length();i++){
-                    JSONObject item=arr.optJSONObject(i);
-                    if(item==null||item.optBoolean("deleted"))continue;
+                if(arr!=null){
+                    for(int i=0;i<arr.length();i++){
+                        JSONObject item=arr.optJSONObject(i);
+                        if(item==null||item.optBoolean("deleted"))continue;
 
-                    String id=item.optString("id");
-                    if(!id.isEmpty()&&known.contains(id))continue;
+                        String id=item.optString("id");
+                        if(!id.isEmpty()&&known.contains(id))continue;
 
-                    older.add(item);
-                    if(!id.isEmpty())known.add(id);
+                        older.add(item);
+                        if(!id.isEmpty())known.add(id);
+                    }
                 }
 
-                if(older.isEmpty())return;
+                if(!older.isEmpty()){
+                    messages.addAll(0,older);
+                    cacheMessagesNow();
 
-                messages.addAll(0,older);
-                cacheMessagesNow();
+                    if(messageAdapter!=null){
+                        messageAdapter.notifyDataSetChanged();
+                    }
+                }
 
-                if(messageAdapter!=null){
-                    messageAdapter.notifyDataSetChanged();
+                final int added=older.size();
 
-                    list.post(()->{
-                        // Re-find the same visible message by ID after prepend.
-                        // This keeps the viewport visually stationary.
-                        if(!anchorId.isEmpty()){
-                            int newIndex=findMessageIndex(anchorId);
-                            if(newIndex>=0){
-                                list.setSelectionFromTop(
-                                    newIndex+list.getHeaderViewsCount(),
-                                    anchorTop
-                                );
-                                return;
-                            }
+                // First remove loader row height, then restore the exact
+                // pre-load message to exactly the same pixel position.
+                setOlderLoaderVisible(false);
+
+                list.post(()->list.post(()->{
+                    if(!stableAnchorId.isEmpty()){
+                        int newIndex=findMessageIndex(stableAnchorId);
+
+                        if(newIndex>=0){
+                            list.setSelectionFromTop(
+                                newIndex+list.getHeaderViewsCount(),
+                                stableAnchorTop
+                            );
                         }
-
-                        // Fallback only if the anchor had no stable server ID.
+                    }else if(fallbackPosition>=0){
                         list.setSelectionFromTop(
-                            firstVisible+older.size(),
-                            anchorTop
+                            fallbackPosition+added,
+                            stableAnchorTop
                         );
-                    });
-                }
+                    }
+
+                    loadingOlderMessages=false;
+                }));
             })
         );
     }
