@@ -284,7 +284,7 @@ public class MainActivity extends Activity {
         list.setDivider(null);
         list.setSelector(android.R.color.transparent);
         list.setTranscriptMode(ListView.TRANSCRIPT_MODE_NORMAL);
-        list.setPadding(dp(10),dp(12),dp(10),dp(26));
+        list.setPadding(0,dp(12),0,dp(26));
         list.setClipToPadding(false);
         list.setBackground(themeConversationBackground());
         messageArea.addView(list,new FrameLayout.LayoutParams(-1,-1));
@@ -1656,7 +1656,11 @@ public class MainActivity extends Activity {
                 View moving=(View)parts[0];
                 View time=(View)parts[1];
 
-                moving.setTranslationX(-timeRevealOffset);
+                float edgeTravel=
+                    timeRevealOffset<=0f
+                        ?0f
+                        :timeRevealOffset+dp(10);
+                moving.setTranslationX(-edgeTravel);
 
                 float max=dp(78);
                 float progress=max<=0f?0f:
@@ -1779,6 +1783,8 @@ public class MainActivity extends Activity {
             outer.setClipChildren(false);
             outer.setClipToPadding(false);
             LinearLayout.LayoutParams swipeHostLp=new LinearLayout.LayoutParams(-1,-2);
+            swipeHostLp.leftMargin=dp(10);
+            swipeHostLp.rightMargin=dp(10);
             swipeHostLp.topMargin=dp(samePrev?1:3);
             swipeHostLp.bottomMargin=dp(sameNext?1:3);
             outer.addView(swipeHost,swipeHostLp);
@@ -1882,10 +1888,11 @@ public class MainActivity extends Activity {
             View content=buildMessageContent(m,mine,samePrev,sameNext);stack.addView(content,new LinearLayout.LayoutParams(-2,-2));
 
             if(reply!=null){
-                // Align the reply indicator with the actual message bubble,
+                // Align reply UI and timestamp with the actual message bubble,
                 // not the combined reply-preview + message block.
                 replyArrow.setTranslationY(dp(18));
                 replyProgress.setTranslationY(dp(18));
+                sideTime.setTranslationY(dp(19));
             }
 
             if(isActuallyEdited(m)){TextView ed=text("edited",9,mine?Color.rgb(220,232,255):Color.rgb(110,113,117),Typeface.NORMAL);LinearLayout.LayoutParams ep=new LinearLayout.LayoutParams(-2,dp(14));ep.gravity=mine?Gravity.END:Gravity.START;ep.leftMargin=dp(4);ep.rightMargin=dp(4);stack.addView(ed,ep);}JSONArray reactions=m.optJSONArray("reactions");if(reactions!=null&&reactions.length()>0){StringBuilder r=new StringBuilder();for(int i=0;i<reactions.length();i++){JSONObject rr=reactions.optJSONObject(i);if(rr!=null)r.append(rr.optString("emoji"));}if(reactions.length()>1)r.append(" ").append(reactions.length());TextView badge=text(r.toString(),12,TEXT,Typeface.NORMAL);badge.setGravity(Gravity.CENTER);badge.setPadding(reactions.length()==1?0:dp(5),0,reactions.length()==1?0:dp(5),0);badge.setBackground(bg(Color.WHITE,11));badge.setElevation(0f);LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(reactions.length()==1?dp(22):-2,dp(22));bp.gravity=mine?Gravity.END:Gravity.START;bp.topMargin=-dp(4);stack.addView(badge,bp);badge.setOnClickListener(v->showReactionDetails(m));}
