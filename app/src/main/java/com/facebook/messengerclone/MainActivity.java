@@ -1459,13 +1459,15 @@ public class MainActivity extends Activity {
 
             trackPaint.setStyle(Paint.Style.STROKE);
             trackPaint.setStrokeCap(Paint.Cap.ROUND);
-            trackPaint.setStrokeWidth(dp(2.1f));
-            trackPaint.setColor(Color.argb(120,255,255,255));
+            int replyGray=Color.rgb(139,142,148);
+
+            trackPaint.setStrokeWidth(dp(1.8f));
+            trackPaint.setColor(Color.argb(92,139,142,148));
 
             progressPaint.setStyle(Paint.Style.STROKE);
             progressPaint.setStrokeCap(Paint.Cap.ROUND);
-            progressPaint.setStrokeWidth(dp(3.0f));
-            progressPaint.setColor(Color.WHITE);
+            progressPaint.setStrokeWidth(dp(2.5f));
+            progressPaint.setColor(replyGray);
 
             setAlpha(0f);
         }
@@ -1513,7 +1515,7 @@ public class MainActivity extends Activity {
 
             ImageView replyArrow=new ImageView(MainActivity.this);
             replyArrow.setImageResource(R.drawable.ic_msg_reply);
-            replyArrow.setColorFilter(Color.WHITE);
+            replyArrow.setColorFilter(Color.rgb(139,142,148));
             replyArrow.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
             replyArrow.setAlpha(0f);
             replyArrow.setScaleX(.78f);
@@ -1529,11 +1531,11 @@ public class MainActivity extends Activity {
             arrowLp.rightMargin=mine?dp(2):0;
 
             FrameLayout.LayoutParams progressLp=
-                new FrameLayout.LayoutParams(dp(42),dp(42),mine
+                new FrameLayout.LayoutParams(dp(37),dp(37),mine
                     ?Gravity.END|Gravity.CENTER_VERTICAL
                     :Gravity.START|Gravity.CENTER_VERTICAL);
-            progressLp.leftMargin=mine?0:dp(31);
-            progressLp.rightMargin=mine?-dp(2):0;
+            progressLp.leftMargin=mine?0:dp(33);
+            progressLp.rightMargin=mine?dp(0):0;
 
             swipeHost.addView(replyArrow,arrowLp);
             swipeHost.addView(replyProgress,progressLp);
@@ -1564,14 +1566,14 @@ public class MainActivity extends Activity {
                 ImageView pendingIcon=new ImageView(MainActivity.this);
                 pendingIcon.setImageResource(R.drawable.ic_msg_send);
                 pendingIcon.clearColorFilter();
-                pendingIcon.setAlpha(.78f);
+                pendingIcon.setAlpha(1f);
                 pendingIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
                 pendingIcon.setPadding(0,0,0,0);
                 pendingIcon.setRotation(0f);
                 pendingIcon.setTranslationY(dp(2));
 
                 LinearLayout.LayoutParams pendingLp=
-                    new LinearLayout.LayoutParams(dp(28),dp(26));
+                    new LinearLayout.LayoutParams(dp(30),dp(28));
                 pendingLp.leftMargin=dp(2);
                 row.addView(pendingIcon,pendingLp);
             }
@@ -1579,9 +1581,15 @@ public class MainActivity extends Activity {
             JSONObject reply=m.optJSONObject("reply");if(reply!=null){LinearLayout rpWrap=new LinearLayout(MainActivity.this);rpWrap.setOrientation(LinearLayout.VERTICAL);rpWrap.setGravity(Gravity.START);int replyBg=themeReplyBackground();int replyText=themeReplyText();rpWrap.setBackground(bg(replyBg,18));TextView rp=text(replyPreviewFromReply(reply),12,replyText,Typeface.NORMAL);rp.setSingleLine(true);rp.setEllipsize(TextUtils.TruncateAt.END);rp.setPadding(dp(12),dp(8),dp(12),dp(8));rp.setMaxWidth((int)(getResources().getDisplayMetrics().widthPixels*.64f));rpWrap.addView(rp,new LinearLayout.LayoutParams(-2,-2));String replyId=reply.optString("id",reply.optString("messageId"));if(!replyId.isEmpty()){rpWrap.setClickable(true);rpWrap.setOnClickListener(v->jumpToMessage(replyId));}LinearLayout.LayoutParams rpp=new LinearLayout.LayoutParams(-2,-2);rpp.bottomMargin=dp(5);rpp.gravity=mine?Gravity.END:Gravity.START;stack.addView(rpWrap,rpp);}
             View content=buildMessageContent(m,mine,samePrev,sameNext);stack.addView(content,new LinearLayout.LayoutParams(-2,-2));
 
+            if(reply!=null){
+                // Align the reply indicator with the actual message bubble,
+                // not the combined reply-preview + message block.
+                replyArrow.setTranslationY(dp(18));
+                replyProgress.setTranslationY(dp(18));
+            }
 
             if(isActuallyEdited(m)){TextView ed=text("edited",9,mine?Color.rgb(220,232,255):Color.rgb(110,113,117),Typeface.NORMAL);LinearLayout.LayoutParams ep=new LinearLayout.LayoutParams(-2,dp(14));ep.gravity=mine?Gravity.END:Gravity.START;ep.leftMargin=dp(4);ep.rightMargin=dp(4);stack.addView(ed,ep);}JSONArray reactions=m.optJSONArray("reactions");if(reactions!=null&&reactions.length()>0){StringBuilder r=new StringBuilder();for(int i=0;i<reactions.length();i++){JSONObject rr=reactions.optJSONObject(i);if(rr!=null)r.append(rr.optString("emoji"));}if(reactions.length()>1)r.append(" ").append(reactions.length());TextView badge=text(r.toString(),12,TEXT,Typeface.NORMAL);badge.setGravity(Gravity.CENTER);badge.setPadding(reactions.length()==1?0:dp(5),0,reactions.length()==1?0:dp(5),0);badge.setBackground(bg(Color.WHITE,11));badge.setElevation(0f);LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(reactions.length()==1?dp(22):-2,dp(22));bp.gravity=mine?Gravity.END:Gravity.START;bp.topMargin=-dp(4);stack.addView(badge,bp);badge.setOnClickListener(v->showReactionDetails(m));}
-            wireMessageGesture(content,stack,m,mine,replyArrow,replyProgress);if(mine&&p==lastMineIndex()&&p==messages.size()-1&&!m.optBoolean("pending")){String statusText=status(m);if(!statusText.isEmpty()){TextView st=text(statusText,11.5f,Color.rgb(138,141,145),Typeface.NORMAL);st.setGravity(Gravity.END);LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-2,dp(19));sp.gravity=Gravity.END;sp.rightMargin=dp(7);sp.topMargin=dp(1);outer.addView(st,sp);if("read".equals(m.optString("status")))main.postDelayed(()->{if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();},15000);}}return outer;}
+            wireMessageGesture(content,content,m,mine,replyArrow,replyProgress);if(mine&&p==lastMineIndex()&&p==messages.size()-1&&!m.optBoolean("pending")){String statusText=status(m);if(!statusText.isEmpty()){TextView st=text(statusText,11.5f,Color.rgb(138,141,145),Typeface.NORMAL);st.setGravity(Gravity.END);LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-2,dp(19));sp.gravity=Gravity.END;sp.rightMargin=dp(7);sp.topMargin=dp(1);outer.addView(st,sp);if("read".equals(m.optString("status")))main.postDelayed(()->{if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();},15000);}}return outer;}
         private String replyPreviewFromReply(JSONObject r){String b=r.optString("body").replaceFirst("^[🎤📷🎥🎬]\\s*","").trim();if(!b.isEmpty())return b;String t=r.optString("type");if("audio".equals(t))return"Voice message";if("image".equals(t))return"Photo";if("video".equals(t))return"Video";if("file".equals(t))return"File";if("shared_reel".equals(t))return"Reel";if("shared_post".equals(t))return"Post";return"Message";}
     }
     private void wireMessageGesture(
@@ -1615,7 +1623,8 @@ public class MainActivity extends Activity {
                     replyArrow.setScaleY(.78f);
                     replyArrow.setRotation(0f);
                     replyArrow.setTranslationX(0f);
-                    replyArrow.setColorFilter(Color.WHITE);
+                    replyArrow.setColorFilter(Color.rgb(139,142,148));
+                    replyArrow.setBackgroundColor(Color.TRANSPARENT);
 
                     replyProgress.setProgress(0f);
                     replyProgress.setAlpha(0f);
@@ -1677,9 +1686,8 @@ public class MainActivity extends Activity {
 
                     float triggerDistance=dp(46f);
                     float revealAt=dp(27f);
+                    int replyGray=Color.rgb(139,142,148);
 
-                    // Nothing is visible while the bubble still covers the
-                    // indicator's physical area.
                     float visibleProgress=
                         moved<=revealAt
                             ?0f
@@ -1687,6 +1695,8 @@ public class MainActivity extends Activity {
 
                     if(visibleProgress<=0f){
                         replyArrow.setAlpha(0f);
+                        replyArrow.setBackgroundColor(Color.TRANSPARENT);
+                        replyArrow.setColorFilter(replyGray);
                         replyProgress.setAlpha(0f);
                         replyProgress.setProgress(0f);
                     }else{
@@ -1695,18 +1705,21 @@ public class MainActivity extends Activity {
                         replyProgress.setTranslationX(mine?-iconTravel:iconTravel);
 
                         replyArrow.setAlpha(1f);
-                        float iconScale=.88f+.12f*visibleProgress;
-                        replyArrow.setScaleX(iconScale);
-                        replyArrow.setScaleY(iconScale);
+                        replyArrow.setScaleX(.93f+.07f*visibleProgress);
+                        replyArrow.setScaleY(.93f+.07f*visibleProgress);
 
                         replyProgress.setProgress(visibleProgress);
                         replyProgress.setAlpha(1f);
 
-                        replyArrow.setColorFilter(
-                            visibleProgress>=.995f
-                                ?Color.rgb(150,153,159)
-                                :Color.WHITE
-                        );
+                        if(visibleProgress>=.995f){
+                            // Activated state: fully gray circle, white arrow.
+                            replyArrow.setBackground(bg(replyGray,17));
+                            replyArrow.setColorFilter(Color.WHITE);
+                        }else{
+                            // Loading state: transparent circle, gray arrow/ring.
+                            replyArrow.setBackgroundColor(Color.TRANSPARENT);
+                            replyArrow.setColorFilter(replyGray);
+                        }
                     }
                     return true;
 
@@ -1725,9 +1738,11 @@ public class MainActivity extends Activity {
                     if(parent!=null)parent.requestDisallowInterceptTouchEvent(false);
 
                     if(trigger){
+                        int replyGray=Color.rgb(139,142,148);
                         replyProgress.setProgress(1f);
                         replyProgress.setAlpha(1f);
-                        replyArrow.setColorFilter(Color.rgb(155,158,164));
+                        replyArrow.setBackground(bg(replyGray,17));
+                        replyArrow.setColorFilter(Color.WHITE);
                     }
 
                     // Fast, subtle spring return.
