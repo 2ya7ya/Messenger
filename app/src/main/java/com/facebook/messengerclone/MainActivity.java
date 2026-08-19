@@ -155,7 +155,7 @@ public class MainActivity extends Activity {
 
     private void showLogin(){root.removeAllViews();activeConversation=null;LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setGravity(Gravity.CENTER_HORIZONTAL);box.setPadding(dp(26),dp(52),dp(26),dp(24));root.addView(box,new FrameLayout.LayoutParams(-1,-1));TextView logo=text("Messenger",31,BLUE,Typeface.BOLD);logo.setGravity(Gravity.CENTER);box.addView(logo,new LinearLayout.LayoutParams(-1,dp(90)));EditText id=new EditText(this);id.setHint("Mobile number or email");id.setSingleLine(true);id.setTextSize(16);id.setPadding(dp(14),0,dp(14),0);id.setBackground(bg(LIGHT,12));box.addView(id,new LinearLayout.LayoutParams(-1,dp(52)));Space sp=new Space(this);box.addView(sp,new LinearLayout.LayoutParams(1,dp(12)));EditText pass=new EditText(this);pass.setHint("Password");pass.setSingleLine(true);pass.setInputType(0x81);pass.setTextSize(16);pass.setPadding(dp(14),0,dp(14),0);pass.setBackground(bg(LIGHT,12));box.addView(pass,new LinearLayout.LayoutParams(-1,dp(52)));Button login=new Button(this);login.setText("Log in");login.setTextColor(Color.WHITE);login.setTextSize(16);login.setTypeface(Typeface.DEFAULT,Typeface.BOLD);login.setBackground(bg(BLUE,24));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(48));lp.topMargin=dp(16);box.addView(login,lp);ProgressBar p=new ProgressBar(this);p.setVisibility(View.GONE);box.addView(p,new LinearLayout.LayoutParams(dp(38),dp(38)));login.setOnClickListener(v->{String a=id.getText().toString().trim(),b=pass.getText().toString();if(a.isEmpty()||b.isEmpty()){toast("Enter your login details.");return;}login.setEnabled(false);p.setVisibility(View.VISIBLE);api.login(a,b,(json,error)->main.post(()->{login.setEnabled(true);p.setVisibility(View.GONE);if(error!=null){toast(error.getMessage());return;}showInbox(true);}));});}
 
-    private void showInbox(boolean initial){activeConversation=null;replyTo=null;root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(15),0,dp(12),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(58)));TextView title=text("Chats",25,TEXT,Typeface.BOLD);head.addView(title,new LinearLayout.LayoutParams(0,-1,1));ImageButton search=icon(R.drawable.ic_msg_search,40,TEXT);head.addView(search);ImageButton plus=icon(R.drawable.ic_msg_plus,40,TEXT);head.addView(plus);
+    private void showInbox(boolean initial){activeConversation=null;replyTo=null;root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setBackground(themeConversationBackground());head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(15),0,dp(12),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(58)));TextView title=text("Chats",25,TEXT,Typeface.BOLD);head.addView(title,new LinearLayout.LayoutParams(0,-1,1));ImageButton search=icon(R.drawable.ic_msg_search,40,TEXT);head.addView(search);ImageButton plus=icon(R.drawable.ic_msg_plus,40,TEXT);head.addView(plus);
         searchBox=new EditText(this);searchBox.setSingleLine(true);searchBox.setHint("Search chats");searchBox.setTextSize(16);searchBox.setPadding(dp(15),0,dp(15),0);searchBox.setBackground(bg(LIGHT,22));LinearLayout.LayoutParams sl=new LinearLayout.LayoutParams(-1,dp(40));sl.setMargins(dp(12),dp(8),dp(12),dp(5));page.addView(searchBox,sl);list=new ListView(this);list.setDivider(null);list.setSelector(android.R.color.transparent);list.setPadding(dp(8),dp(2),dp(8),dp(90));list.setClipToPadding(false);page.addView(list,new LinearLayout.LayoutParams(-1,0,1));inboxAdapter=new InboxAdapter();list.setAdapter(inboxAdapter);list.setOnItemClickListener((p,v,pos,id)->openConversation(filteredInbox.get(pos)));
         ImageButton fab=icon(R.drawable.ic_msg_plus,54,Color.WHITE);fab.setPadding(dp(14),dp(14),dp(14),dp(14));fab.setBackground(bg(BLUE,30));FrameLayout.LayoutParams fp=new FrameLayout.LayoutParams(dp(54),dp(54),Gravity.END|Gravity.BOTTOM);fp.setMargins(0,0,dp(18),dp(22));root.addView(fab,fp);plus.setOnClickListener(v->showContacts());fab.setOnClickListener(v->showContacts());search.setOnClickListener(v->searchBox.requestFocus());searchBox.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int b,int c){filterInbox(s.toString());}public void afterTextChanged(Editable e){}});loadCachedInbox();refreshInbox();connectSocket();}
     private void loadCachedInbox(){String raw=cache.get("inbox");if(raw==null)return;try{applyInbox(new JSONObject(raw).optJSONArray("conversations"));}catch(Exception ignored){}}
@@ -291,7 +291,7 @@ public class MainActivity extends Activity {
             getWindow().setNavigationBarColor(Color.BLACK);
             getWindow().getDecorView().setSystemUiVisibility(0);
         }
-        root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(instagramTheme?Color.BLACK:Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(6),0,dp(6),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(49)));ImageButton back=icon(R.drawable.ic_msg_back,35,instagramTheme?Color.WHITE:TEXT);head.addView(back);back.setOnClickListener(v->showInbox(false));View avatar=buildConversationAvatar(c,31);LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(dp(31),dp(31));ap.leftMargin=dp(1);head.addView(avatar,ap);LinearLayout names=new LinearLayout(this);names.setOrientation(LinearLayout.VERTICAL);names.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams np=new LinearLayout.LayoutParams(0,-1,1);np.leftMargin=dp(7);head.addView(names,np);TextView name=text(c.optString("name","Conversation"),14,instagramTheme?Color.WHITE:TEXT,Typeface.BOLD);names.addView(name,new LinearLayout.LayoutParams(-1,dp(24)));TextView status=text(conversationStatus(c),10,instagramTheme?Color.rgb(142,142,142):SUB,Typeface.NORMAL);names.addView(status,new LinearLayout.LayoutParams(-1,dp(17)));ImageButton info=icon(R.drawable.ic_msg_info,35,instagramTheme?Color.WHITE:TEXT);head.addView(info);info.setOnClickListener(v->showInfo());View divider=new View(this);divider.setBackgroundColor(instagramTheme?Color.BLACK:DIV);page.addView(divider,new LinearLayout.LayoutParams(-1,dp(1)));
+        root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackground(themeConversationBackground());root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(6),0,dp(6),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(49)));ImageButton back=icon(R.drawable.ic_msg_back,35,instagramTheme?Color.WHITE:TEXT);head.addView(back);back.setOnClickListener(v->showInbox(false));View avatar=buildConversationAvatar(c,31);LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(dp(31),dp(31));ap.leftMargin=dp(1);head.addView(avatar,ap);LinearLayout names=new LinearLayout(this);names.setOrientation(LinearLayout.VERTICAL);names.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams np=new LinearLayout.LayoutParams(0,-1,1);np.leftMargin=dp(7);head.addView(names,np);TextView name=text(c.optString("name","Conversation"),14,instagramTheme?Color.WHITE:TEXT,Typeface.BOLD);names.addView(name,new LinearLayout.LayoutParams(-1,dp(24)));TextView status=text(conversationStatus(c),10,instagramTheme?Color.rgb(142,142,142):SUB,Typeface.NORMAL);names.addView(status,new LinearLayout.LayoutParams(-1,dp(17)));ImageButton info=icon(R.drawable.ic_msg_info,35,instagramTheme?Color.WHITE:TEXT);head.addView(info);info.setOnClickListener(v->showInfo());View divider=new View(this);divider.setBackgroundColor(instagramTheme?Color.BLACK:DIV);page.addView(divider,new LinearLayout.LayoutParams(-1,dp(1)));
         FrameLayout messageArea=new FrameLayout(this);page.addView(messageArea,new LinearLayout.LayoutParams(-1,0,1));
         list=new ListView(this);
         list.setDivider(null);
@@ -441,7 +441,7 @@ public class MainActivity extends Activity {
         composer.setPadding(dp(7),dp(4),dp(7),dp(4));
         composer.setBackgroundColor(Color.TRANSPARENT);
         LinearLayout.LayoutParams outerLp=new LinearLayout.LayoutParams(-1,dp(58));
-        outerLp.setMargins(dp(8),dp(2),dp(8),dp(4));
+        outerLp.setMargins(dp(3),dp(2),dp(3),dp(4));
         page.addView(composer,outerLp);
 
         LinearLayout pill=new LinearLayout(this);
@@ -478,8 +478,8 @@ public class MainActivity extends Activity {
             b.setScaleType(ImageView.ScaleType.FIT_CENTER);
             b.setPadding(dp(4),dp(4),dp(4),dp(4));
             LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(dp(30),dp(30));
-            bp.leftMargin=dp(3);
-            bp.rightMargin=dp(3);
+            bp.leftMargin=dp(4);
+            bp.rightMargin=dp(4);
             pill.addView(b,bp);
         }
 
@@ -746,9 +746,32 @@ public class MainActivity extends Activity {
         reactionsCard.setOnClickListener(v->{});
         actionCard.setOnClickListener(v->{});
 
+        reactionsCard.animate().cancel();
+        reactionsCard.setAlpha(0f);
+        reactionsCard.setScaleX(.72f);
+        reactionsCard.setScaleY(.72f);
+        reactionsCard.setTranslationY(dp(8));
         d.setContentView(overlay);
         Window w=d.getWindow();
         d.show();
+        reactionsCard.post(()->{
+            reactionsCard.animate().cancel();
+            reactionsCard.setAlpha(0f);
+            reactionsCard.setScaleX(.72f);
+            reactionsCard.setScaleY(.72f);
+            reactionsCard.setTranslationY(dp(8));
+
+            reactionsCard.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .translationY(0f)
+                .setDuration(235)
+                .setInterpolator(
+                    new android.view.animation.OvershootInterpolator(1.05f)
+                )
+                .start();
+        });
         if(w!=null){
             w.setBackgroundDrawableResource(android.R.color.transparent);
             w.setDimAmount(0f);
@@ -768,19 +791,7 @@ public class MainActivity extends Activity {
         android.view.animation.OvershootInterpolator emojiBounce=
             new android.view.animation.OvershootInterpolator(.78f);
 
-        reactionsCard.setAlpha(0f);
-        reactionsCard.setScaleX(.76f);
-        reactionsCard.setScaleY(.76f);
-        reactionsCard.setTranslationY(dp(7));
-
-        reactionsCard.animate()
-            .alpha(1f)
-            .scaleX(1f)
-            .scaleY(1f)
-            .translationY(0f)
-            .setDuration(210)
-            .setInterpolator(emojiBounce)
-            .start();
+        
     }
     private void react(JSONObject m,String emoji){
         if(m==null)return;
@@ -957,6 +968,19 @@ public class MainActivity extends Activity {
     };HorizontalScrollView tabsScroll=new HorizontalScrollView(this);LinearLayout tabs=new LinearLayout(this);tabs.setOrientation(LinearLayout.HORIZONTAL);tabsScroll.addView(tabs,new HorizontalScrollView.LayoutParams(-2,dp(42)));ScrollView scroll=new ScrollView(this);GridLayout grid=new GridLayout(this);grid.setColumnCount(8);scroll.addView(grid,new ScrollView.LayoutParams(-1,-2));Runnable[] render=new Runnable[1];final int[] selected={0};render[0]=()->{grid.removeAllViews();String[] all=groups[selected[0]][1].split(" ");for(String e:all){Button b=new Button(this);b.setText(e);b.setTextSize(24);b.setBackgroundColor(Color.TRANSPARENT);b.setPadding(0,0,0,0);GridLayout.LayoutParams lp=new GridLayout.LayoutParams();lp.width=0;lp.height=dp(44);lp.columnSpec=GridLayout.spec(GridLayout.UNDEFINED,1f);grid.addView(b,lp);b.setOnClickListener(v->{consumer.accept(e);d.dismiss();});}};for(int i=0;i<groups.length;i++){final int ix=i;Button tb=new Button(this);tb.setText(groups[i][0]);tb.setTextSize(11);tb.setAllCaps(false);tb.setBackgroundColor(Color.TRANSPARENT);tb.setTextColor(i==0?BLUE:SUB);tabs.addView(tb,new LinearLayout.LayoutParams(-2,dp(40)));tb.setOnClickListener(v->{selected[0]=ix;for(int j=0;j<tabs.getChildCount();j++)((Button)tabs.getChildAt(j)).setTextColor(j==ix?BLUE:SUB);render[0].run();});}panel.addView(tabsScroll,new LinearLayout.LayoutParams(-1,dp(42)));panel.addView(scroll,new LinearLayout.LayoutParams(-1,dp(330)));render[0].run();d.setContentView(panel);Window w=d.getWindow();if(w!=null){w.setBackgroundDrawableResource(android.R.color.transparent);w.setGravity(Gravity.BOTTOM);}d.show();if(w!=null)w.setLayout(-1,-2);}
     private void showMessengerStickerPicker(){
         if(root==null||composer==null||activeConversation==null)return;
+        View mediaOld=root.findViewWithTag("messenger-native-media-sheet");
+        if(mediaOld!=null){
+            View mediaBridge=root.findViewWithTag("messenger-media-bridge");
+            if(mediaOld.getParent()==root)root.removeView(mediaOld);
+            if(mediaBridge!=null&&mediaBridge.getParent()==root)root.removeView(mediaBridge);
+            if(composer!=null)composer.setTranslationY(0);
+            if(replyBar!=null)replyBar.setTranslationY(0);
+            if(list!=null){
+                list.setTranslationY(0);
+                list.setPadding(dp(10),dp(12),dp(10),dp(26));
+            }
+        }
+
         // Close any previous native sticker surface first.
         View old=root.findViewWithTag("messenger-native-sticker-sheet");
         if(old!=null){ dismissMessengerStickerPicker(old); return; }
@@ -966,7 +990,7 @@ public class MainActivity extends Activity {
         final int sheetH=Math.min(dp(390),(int)(getResources().getDisplayMetrics().heightPixels*.47f));
         FrameLayout host=new FrameLayout(this);host.setTag("messenger-native-sticker-sheet");host.setClickable(true);host.setBackgroundColor(Color.TRANSPARENT);
         FrameLayout.LayoutParams hostLp=new FrameLayout.LayoutParams(-1,sheetH,Gravity.BOTTOM);root.addView(host,hostLp);
-        View stickerBridge=new View(this);stickerBridge.setTag("messenger-sticker-bridge");stickerBridge.setBackground(themeConversationBackground());FrameLayout.LayoutParams bridgeLp=new FrameLayout.LayoutParams(-1,dp(8),Gravity.BOTTOM);bridgeLp.bottomMargin=sheetH-dp(1);root.addView(stickerBridge,bridgeLp);
+        View stickerBridge=new View(this);stickerBridge.setTag("messenger-sticker-bridge");stickerBridge.setBackgroundColor(Color.TRANSPARENT);FrameLayout.LayoutParams bridgeLp=new FrameLayout.LayoutParams(-1,dp(4),Gravity.BOTTOM);bridgeLp.bottomMargin=sheetH-dp(1);root.addView(stickerBridge,bridgeLp);
 
         LinearLayout sheet=new LinearLayout(this);sheet.setOrientation(LinearLayout.VERTICAL);sheet.setPadding(dp(10),dp(6),dp(10),dp(8));sheet.setBackground(topBg(Color.WHITE,22));host.addView(sheet,new FrameLayout.LayoutParams(-1,-1));
 
@@ -986,8 +1010,8 @@ public class MainActivity extends Activity {
         final float[] startY={Float.NaN}; final boolean[] dragged={false};
         View.OnTouchListener drag=(v,e)->{switch(e.getActionMasked()){
             case MotionEvent.ACTION_DOWN:startY[0]=e.getRawY()-host.getTranslationY();dragged[0]=false;host.animate().cancel();composer.animate().cancel();if(replyBar!=null)replyBar.animate().cancel();v.getParent().requestDisallowInterceptTouchEvent(true);return true;
-            case MotionEvent.ACTION_MOVE:if(Float.isNaN(startY[0]))return true;float dy=Math.max(0,e.getRawY()-startY[0]);if(dy>dp(3))dragged[0]=true;host.setTranslationY(dy);stickerBridge.setTranslationY(dy);composer.setTranslationY(-sheetH+dy);if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.setTranslationY(-sheetH+dy);return true;
-            case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:float y=host.getTranslationY();startY[0]=Float.NaN;v.getParent().requestDisallowInterceptTouchEvent(false);if(y>dp(76)){dismissMessengerStickerPicker(host);}else{host.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();composer.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();}return true;
+            case MotionEvent.ACTION_MOVE:if(Float.isNaN(startY[0]))return true;float dy=Math.max(0,e.getRawY()-startY[0]);if(dy>dp(3))dragged[0]=true;host.setTranslationY(dy);stickerBridge.setTranslationY(dy);composer.setTranslationY(-sheetH+dy);if(list!=null)list.setTranslationY(-sheetH+dy);if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.setTranslationY(-sheetH+dy);return true;
+            case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:float y=host.getTranslationY();startY[0]=Float.NaN;v.getParent().requestDisallowInterceptTouchEvent(false);if(y>dp(76)){dismissMessengerStickerPicker(host);}else{host.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();composer.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();}return true;
         }return true;};
         // The whole puller/search header is the drag target, including the search-bar area.
         dragHeader.setOnTouchListener(drag);
@@ -998,14 +1022,14 @@ public class MainActivity extends Activity {
         final float[] contentDownY={Float.NaN};final boolean[] contentSheetDrag={false};
         View.OnTouchListener contentDrag=(v,e)->{switch(e.getActionMasked()){
             case MotionEvent.ACTION_DOWN:contentDownY[0]=e.getRawY();contentSheetDrag[0]=false;return false;
-            case MotionEvent.ACTION_MOVE:float delta=e.getRawY()-contentDownY[0];if(!contentSheetDrag[0]&&scroll.getScrollY()==0&&delta>dp(5)){contentSheetDrag[0]=true;startY[0]=contentDownY[0]-host.getTranslationY();dragged[0]=true;host.animate().cancel();stickerBridge.animate().cancel();composer.animate().cancel();if(replyBar!=null)replyBar.animate().cancel();ViewParent parent=v.getParent();if(parent!=null)parent.requestDisallowInterceptTouchEvent(true);}if(contentSheetDrag[0]){float dy=Math.max(0,e.getRawY()-startY[0]);host.setTranslationY(dy);stickerBridge.setTranslationY(dy);composer.setTranslationY(-sheetH+dy);if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.setTranslationY(-sheetH+dy);return true;}return false;
-            case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:if(contentSheetDrag[0]){float y=host.getTranslationY();contentSheetDrag[0]=false;contentDownY[0]=Float.NaN;ViewParent parent=v.getParent();if(parent!=null)parent.requestDisallowInterceptTouchEvent(false);if(y>dp(64))dismissMessengerStickerPicker(host);else{host.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();composer.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();}return true;}contentDownY[0]=Float.NaN;return false;}return false;};
+            case MotionEvent.ACTION_MOVE:float delta=e.getRawY()-contentDownY[0];if(!contentSheetDrag[0]&&scroll.getScrollY()==0&&delta>dp(5)){contentSheetDrag[0]=true;startY[0]=contentDownY[0]-host.getTranslationY();dragged[0]=true;host.animate().cancel();stickerBridge.animate().cancel();composer.animate().cancel();if(replyBar!=null)replyBar.animate().cancel();ViewParent parent=v.getParent();if(parent!=null)parent.requestDisallowInterceptTouchEvent(true);}if(contentSheetDrag[0]){float dy=Math.max(0,e.getRawY()-startY[0]);host.setTranslationY(dy);stickerBridge.setTranslationY(dy);composer.setTranslationY(-sheetH+dy);if(list!=null)list.setTranslationY(-sheetH+dy);if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.setTranslationY(-sheetH+dy);return true;}return false;
+            case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:if(contentSheetDrag[0]){float y=host.getTranslationY();contentSheetDrag[0]=false;contentDownY[0]=Float.NaN;ViewParent parent=v.getParent();if(parent!=null)parent.requestDisallowInterceptTouchEvent(false);if(y>dp(64))dismissMessengerStickerPicker(host);else{host.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();composer.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();}return true;}contentDownY[0]=Float.NaN;return false;}return false;};
         stickerContentDrag[0]=contentDrag;scroll.setOnTouchListener(contentDrag);grid.setOnTouchListener(contentDrag);
 
-        host.setTranslationY(sheetH);stickerBridge.setTranslationY(sheetH);composer.setTranslationY(0);if(replyBar!=null)replyBar.setTranslationY(0);if(list!=null){list.setPadding(dp(10),dp(12),dp(10),sheetH+dp(30));list.post(()->list.setSelection(Math.max(0,list.getCount()-1)));}host.animate().translationY(0).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();composer.animate().translationY(-sheetH).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();
+        host.setTranslationY(sheetH);stickerBridge.setTranslationY(sheetH);composer.setTranslationY(0);if(replyBar!=null)replyBar.setTranslationY(0);if(list!=null){list.setPadding(dp(10),dp(12),dp(10),sheetH+dp(30));list.post(()->list.setSelection(Math.max(0,list.getCount()-1)));}host.animate().translationY(0).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();composer.animate().translationY(-sheetH).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.animate().translationY(-sheetH).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();
         loader.load("");
     }
-    private void dismissMessengerStickerPicker(View host){if(host==null||root==null)return;View bridge=root.findViewWithTag("messenger-sticker-bridge");int h=Math.max(host.getHeight(),dp(360));host.animate().translationY(h).setDuration(220).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(()->{if(host.getParent()==root)root.removeView(host);}).start();if(bridge!=null)bridge.animate().translationY(h).setDuration(220).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(()->{if(bridge.getParent()==root)root.removeView(bridge);}).start();if(composer!=null)composer.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null)replyBar.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.setPadding(dp(10),dp(12),dp(10),dp(26));}
+    private void dismissMessengerStickerPicker(View host){if(host==null||root==null)return;View bridge=root.findViewWithTag("messenger-sticker-bridge");int h=Math.max(host.getHeight(),dp(360));host.animate().translationY(h).setDuration(220).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(()->{if(host.getParent()==root)root.removeView(host);}).start();if(bridge!=null)bridge.animate().translationY(h).setDuration(220).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(()->{if(bridge.getParent()==root)root.removeView(bridge);}).start();if(composer!=null)composer.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null)replyBar.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.setPadding(dp(10),dp(12),dp(10),dp(26));}
 
     private JSONObject buildOptimisticSticker(String url,String client,JSONObject reply){JSONObject temp=new JSONObject();try{temp.put("id","tmp-"+System.nanoTime());temp.put("clientId",client);temp.put("conversationId",activeConversation==null?"":activeConversation.optString("id"));temp.put("senderId",selfId);temp.put("type","image");temp.put("body","");temp.put("createdAt",new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX",Locale.US).format(new Date()));temp.put("status","sending");temp.put("pending",true);temp.put("sticker",true);temp.put("sender",new JSONObject().put("id",selfId).put("name","You").put("isSelf",true));temp.put("attachments",new JSONArray().put(new JSONObject().put("url",url).put("mime","image/gif").put("name","sticker.gif").put("sticker",true)));temp.put("reactions",new JSONArray());if(reply!=null)temp.put("reply",new JSONObject().put("id",reply.optString("id")).put("body",reply.optString("body")).put("type",reply.optString("type","text")).put("senderName",senderName(reply)));}catch(Exception ignored){}return temp;}
     private void sendStickerFromUrl(String url){if(activeConversation==null||url==null||url.isEmpty())return;final String cid=activeConversation.optString("id"),client="sticker-native-"+UUID.randomUUID();stickerLastConversations.add(cid);final JSONObject replyObj=replyTo;final String reply=replyObj==null?"":replyObj.optString("id");JSONObject temp=buildOptimisticSticker(url,client,replyObj);messages.add(temp);if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();scrollToAbsoluteBottom();}cacheMessagesNow();if(replyObj!=null)setReply(null);new Thread(()->{try{byte[] bytes=stickers.getCachedOrFetch(url);if(bytes==null||bytes.length==0)throw new Exception("Could not load sticker.");api.upload("/api/messaging/conversations/"+cid+"/attachment",bytes,"sticker-"+System.currentTimeMillis()+".gif","image/gif","",client,reply,(json,error)->main.post(()->{if(error!=null){markOptimisticFailed(client);toast(error.getMessage());return;}JSONObject m=json.optJSONObject("message");if(m!=null){try{m.put("sticker",true);}catch(Exception ignored){}stickerLastConversations.add(cid);replaceOptimistic(client,m);cacheMessagesNow();refreshInbox();}}));}catch(Exception ex){main.post(()->{markOptimisticFailed(client);toast(ex.getMessage());});}}).start();}
@@ -1050,7 +1074,17 @@ public class MainActivity extends Activity {
         }
 
         View stickerOld=root.findViewWithTag("messenger-native-sticker-sheet");
-        if(stickerOld!=null)dismissMessengerStickerPicker(stickerOld);
+        if(stickerOld!=null){
+            View stickerBridge=root.findViewWithTag("messenger-sticker-bridge");
+            if(stickerOld.getParent()==root)root.removeView(stickerOld);
+            if(stickerBridge!=null&&stickerBridge.getParent()==root)root.removeView(stickerBridge);
+            if(composer!=null)composer.setTranslationY(0);
+            if(replyBar!=null)replyBar.setTranslationY(0);
+            if(list!=null){
+                list.setTranslationY(0);
+                list.setPadding(dp(10),dp(12),dp(10),dp(26));
+            }
+        }
 
         InputMethodManager imm=(InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
         if(imm!=null&&messageInput!=null){
@@ -1058,8 +1092,8 @@ public class MainActivity extends Activity {
         }
 
         final int sheetH=Math.min(
-            dp(410),
-            (int)(getResources().getDisplayMetrics().heightPixels*.48f)
+            dp(500),
+            (int)(getResources().getDisplayMetrics().heightPixels*.58f)
         );
 
         FrameLayout host=new FrameLayout(this);
@@ -1073,9 +1107,9 @@ public class MainActivity extends Activity {
 
         View bridge=new View(this);
         bridge.setTag("messenger-media-bridge");
-        bridge.setBackground(themeConversationBackground());
+        bridge.setBackgroundColor(Color.TRANSPARENT);
         FrameLayout.LayoutParams bridgeLp=
-            new FrameLayout.LayoutParams(-1,dp(8),Gravity.BOTTOM);
+            new FrameLayout.LayoutParams(-1,dp(4),Gravity.BOTTOM);
         bridgeLp.bottomMargin=sheetH-dp(1);
         root.addView(bridge,bridgeLp);
 
@@ -1148,6 +1182,7 @@ public class MainActivity extends Activity {
                     host.setTranslationY(dy);
                     bridge.setTranslationY(dy);
                     composer.setTranslationY(-sheetH+dy);
+                    if(list!=null)list.setTranslationY(-sheetH+dy);
                     if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE){
                         replyBar.setTranslationY(-sheetH+dy);
                     }
@@ -1169,6 +1204,10 @@ public class MainActivity extends Activity {
                             .setInterpolator(new DecelerateInterpolator()).start();
                         composer.animate().translationY(-sheetH).setDuration(190)
                             .setInterpolator(new DecelerateInterpolator()).start();
+                        if(list!=null){
+                            list.animate().translationY(-sheetH).setDuration(190)
+                                .setInterpolator(new DecelerateInterpolator()).start();
+                        }
                         if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE){
                             replyBar.animate().translationY(-sheetH).setDuration(190)
                                 .setInterpolator(new DecelerateInterpolator()).start();
@@ -1255,10 +1294,18 @@ public class MainActivity extends Activity {
 
         scroll.setOnTouchListener(contentDrag);
         grid.setOnTouchListener(contentDrag);
+        mediaHost.setOnTouchListener(contentDrag);
+        sheet.setOnTouchListener((v,e)->{
+            if(e.getActionMasked()==MotionEvent.ACTION_DOWN && e.getY()<=dp(72)){
+                return false;
+            }
+            return contentDrag.onTouch(v,e);
+        });
 
         host.setTranslationY(sheetH);
         bridge.setTranslationY(sheetH);
         composer.setTranslationY(0);
+        if(list!=null)list.setTranslationY(0);
         if(replyBar!=null)replyBar.setTranslationY(0);
 
         if(list!=null){
@@ -1272,6 +1319,10 @@ public class MainActivity extends Activity {
             .setInterpolator(new DecelerateInterpolator()).start();
         composer.animate().translationY(-sheetH).setDuration(330)
             .setInterpolator(new DecelerateInterpolator()).start();
+        if(list!=null){
+            list.animate().translationY(-sheetH).setDuration(330)
+                .setInterpolator(new DecelerateInterpolator()).start();
+        }
 
         if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE){
             replyBar.animate().translationY(-sheetH).setDuration(330)
@@ -1437,6 +1488,10 @@ public class MainActivity extends Activity {
 
         if(composer!=null){
             composer.animate().translationY(0).setDuration(220)
+                .setInterpolator(new DecelerateInterpolator()).start();
+        }
+        if(list!=null){
+            list.animate().translationY(0).setDuration(220)
                 .setInterpolator(new DecelerateInterpolator()).start();
         }
 
