@@ -103,7 +103,7 @@ public class MainActivity extends Activity {
     private MediaRecorder recorder; private File recordFile; private long recordStarted; private Runnable recordTicker; private float recordDownX,recordDownY; private boolean recordLocked=false,recordCanceled=false,pendingMicStart=false;
     private ImageButton recordCancelButton; private TextView recordCancelHint; private final float[] recordLevels=new float[34];
     private FrameLayout recordOverlay; private View recordLockIndicator; private TextView recordLockHint; private boolean recordLockReady=false,recordDeleteHot=false,recordLockHot=false;
-    private String beforeCursor=""; private JSONObject groupEditConversation; private String groupEditImageData="", groupEditEmoji="", groupEditColor="#3da9ef", groupEditDraftName="";
+    private String beforeCursor=""; private boolean loadingOlderMessages=false; private JSONObject groupEditConversation; private String groupEditImageData="", groupEditEmoji="", groupEditColor="#3da9ef", groupEditDraftName="";
 
     @Override protected void onCreate(Bundle state){super.onCreate(state);requestWindowFeature(Window.FEATURE_NO_TITLE);getWindow().setStatusBarColor(Color.WHITE);getWindow().setNavigationBarColor(Color.WHITE);getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);api=new ApiClient(this);cache=new MessengerCache(this);images=new ImageLoader(this,api);stickers=new StickerLoader(this,api);root=new FrameLayout(this);root.setBackgroundColor(Color.WHITE);setContentView(root);if(api.hasSession())showInbox(true);else showLogin();}
     @Override protected void onResume(){super.onResume();if(api!=null&&api.hasSession())connectSocket();}
@@ -279,6 +279,20 @@ public class MainActivity extends Activity {
     private void openConversation(JSONObject c){activeConversation=c;replyTo=null;messages.clear();composerHasText=false;typingStateSent=false;root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(6),0,dp(6),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(49)));ImageButton back=icon(R.drawable.ic_msg_back,35,TEXT);head.addView(back);back.setOnClickListener(v->showInbox(false));View avatar=buildConversationAvatar(c,31);LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(dp(31),dp(31));ap.leftMargin=dp(1);head.addView(avatar,ap);LinearLayout names=new LinearLayout(this);names.setOrientation(LinearLayout.VERTICAL);names.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams np=new LinearLayout.LayoutParams(0,-1,1);np.leftMargin=dp(7);head.addView(names,np);TextView name=text(c.optString("name","Conversation"),14,TEXT,Typeface.BOLD);names.addView(name,new LinearLayout.LayoutParams(-1,dp(24)));TextView status=text(conversationStatus(c),10,SUB,Typeface.NORMAL);names.addView(status,new LinearLayout.LayoutParams(-1,dp(17)));ImageButton info=icon(R.drawable.ic_msg_info,35,TEXT);head.addView(info);info.setOnClickListener(v->showInfo());View divider=new View(this);divider.setBackgroundColor(DIV);page.addView(divider,new LinearLayout.LayoutParams(-1,dp(1)));
         FrameLayout messageArea=new FrameLayout(this);page.addView(messageArea,new LinearLayout.LayoutParams(-1,0,1));
         list=new ListView(this);list.setDivider(null);list.setSelector(android.R.color.transparent);list.setTranscriptMode(ListView.TRANSCRIPT_MODE_NORMAL);list.setPadding(dp(10),dp(12),dp(10),dp(26));list.setClipToPadding(false);list.setBackground(themeConversationBackground());messageArea.addView(list,new FrameLayout.LayoutParams(-1,-1));if("group".equals(c.optString("type")))list.addHeaderView(buildGroupConversationIntro(c),null,false);messageAdapter=new MessageAdapter();list.setAdapter(messageAdapter);
+        list.setOnScrollListener(new android.widget.AbsListView.OnScrollListener(){
+            @Override public void onScrollStateChanged(android.widget.AbsListView view,int state){}
+
+            @Override public void onScroll(
+                android.widget.AbsListView view,
+                int firstVisibleItem,
+                int visibleItemCount,
+                int totalItemCount
+            ){
+                if(firstVisibleItem<=1&&visibleItemCount>0){
+                    loadOlderMessagesPage();
+                }
+            }
+        });
         typingView=text("",13,Color.rgb(138,141,145),Typeface.NORMAL);typingView.setPadding(dp(14),0,dp(8),0);typingView.setBackgroundColor(Color.TRANSPARENT);typingView.setVisibility(View.GONE);FrameLayout.LayoutParams tvp=new FrameLayout.LayoutParams(-2,dp(21),Gravity.START|Gravity.BOTTOM);tvp.leftMargin=dp(4);tvp.bottomMargin=dp(2);messageArea.addView(typingView,tvp);
         replyBar=new LinearLayout(this);replyBar.setGravity(Gravity.CENTER_VERTICAL);replyBar.setPadding(dp(15),dp(2),dp(8),dp(2));replyBar.setBackgroundColor(Color.WHITE);replyBar.setVisibility(View.GONE);page.addView(replyBar,new LinearLayout.LayoutParams(-1,dp(52)));
         buildComposer(page);loadCachedMessages(c.optString("id"));refreshMessages(c.optString("id"));markRead();}
@@ -1525,17 +1539,17 @@ public class MainActivity extends Activity {
             replyArrow.setScaleX(.78f);
             replyArrow.setScaleY(.78f);
             replyArrow.setBackgroundColor(Color.TRANSPARENT);
-            replyArrow.setPadding(dp(5),dp(5),dp(5),dp(5));
+            replyArrow.setPadding(dp(3.5f),dp(3.5f),dp(3.5f),dp(3.5f));
 
             FrameLayout.LayoutParams arrowLp=
-                new FrameLayout.LayoutParams(dp(30),dp(30),mine
+                new FrameLayout.LayoutParams(dp(27),dp(27),mine
                     ?Gravity.END|Gravity.CENTER_VERTICAL
                     :Gravity.START|Gravity.CENTER_VERTICAL);
             arrowLp.leftMargin=mine?0:dp(35);
             arrowLp.rightMargin=mine?dp(2):0;
 
             FrameLayout.LayoutParams progressLp=
-                new FrameLayout.LayoutParams(dp(33),dp(33),mine
+                new FrameLayout.LayoutParams(dp(30),dp(30),mine
                     ?Gravity.END|Gravity.CENTER_VERTICAL
                     :Gravity.START|Gravity.CENTER_VERTICAL);
             progressLp.leftMargin=mine?0:dp(33);
@@ -1581,7 +1595,7 @@ public class MainActivity extends Activity {
                 pendingIcon.setTranslationY(dp(2));
 
                 LinearLayout.LayoutParams pendingLp=
-                    new LinearLayout.LayoutParams(dp(30),dp(28));
+                    new LinearLayout.LayoutParams(dp(21),dp(20));
                 pendingLp.leftMargin=dp(2);
                 row.addView(pendingIcon,pendingLp);
             }
@@ -1678,7 +1692,7 @@ public class MainActivity extends Activity {
                     // Once captured, lock the reply direction. Crossing the
                     // original touch point in the opposite direction no longer
                     // cancels/restarts the reply gesture.
-                    float raw=Math.abs(dx);
+                    float raw=mine?Math.max(0f,-dx):Math.max(0f,dx);
 
                     // Instagram-like soft resistance.
                     float moved;
@@ -1723,7 +1737,7 @@ public class MainActivity extends Activity {
 
                         if(visibleProgress>=.995f){
                             // Activated state: fully gray circle, white arrow.
-                            replyArrow.setBackground(bg(replyGray,15));
+                            replyArrow.setBackground(bg(replyGray,13.5f));
                             replyArrow.setColorFilter(Color.WHITE);
                         }else{
                             // Loading state: transparent circle, gray arrow/ring.
@@ -1750,7 +1764,7 @@ public class MainActivity extends Activity {
                     if(trigger){
                         replyProgress.setProgress(1f);
                         replyProgress.setAlpha(1f);
-                        replyArrow.setBackground(bg(Color.rgb(139,142,148),15));
+                        replyArrow.setBackground(bg(Color.rgb(139,142,148),13.5f));
                         replyArrow.setColorFilter(Color.WHITE);
                     }
 
@@ -1802,6 +1816,85 @@ public class MainActivity extends Activity {
             return false;
         });
     }
+    private void loadOlderMessagesPage(){
+        if(
+            loadingOlderMessages ||
+            refreshingMessages ||
+            activeConversation==null ||
+            beforeCursor==null ||
+            beforeCursor.isEmpty() ||
+            list==null
+        )return;
+
+        loadingOlderMessages=true;
+
+        final String conversationId=activeConversation.optString("id");
+        final String cursor=beforeCursor;
+        final int first=list.getFirstVisiblePosition();
+        View firstChild=list.getChildAt(0);
+        final int top=firstChild==null?0:firstChild.getTop();
+        final int headers=list.getHeaderViewsCount();
+
+        api.get(
+            "/api/messaging/conversations/"+conversationId+
+            "/messages?limit=80&before="+cursor,
+            (json,error)->main.post(()->{
+                loadingOlderMessages=false;
+
+                if(
+                    activeConversation==null ||
+                    !conversationId.equals(activeConversation.optString("id"))
+                )return;
+
+                if(error!=null)return;
+
+                JSONArray arr=json.optJSONArray("messages");
+                beforeCursor=json.optString("nextBefore","");
+
+                if(arr==null||arr.length()==0)return;
+
+                List<JSONObject> older=new ArrayList<>();
+                Set<String> known=new HashSet<>();
+
+                for(JSONObject existing:messages){
+                    String id=existing.optString("id");
+                    if(!id.isEmpty())known.add(id);
+                }
+
+                for(int i=0;i<arr.length();i++){
+                    JSONObject item=arr.optJSONObject(i);
+                    if(item==null||item.optBoolean("deleted"))continue;
+
+                    String id=item.optString("id");
+                    if(!id.isEmpty()&&known.contains(id))continue;
+
+                    older.add(item);
+                    if(!id.isEmpty())known.add(id);
+                }
+
+                if(older.isEmpty())return;
+
+                messages.addAll(0,older);
+                cacheMessagesNow();
+
+                if(messageAdapter!=null){
+                    messageAdapter.notifyDataSetChanged();
+
+                    // Preserve exactly what the user was looking at while
+                    // inserting the older rows above it.
+                    final int added=older.size();
+                    list.post(()->{
+                        if(headers>0&&first<headers){
+                            list.setSelectionFromTop(first,top);
+                        }else{
+                            list.setSelectionFromTop(first+added,top);
+                        }
+                    });
+                }
+            })
+        );
+    }
+
     private void jumpToMessage(String messageId){if(messageId==null||messageId.isEmpty()||activeConversation==null)return;int index=findMessageIndex(messageId);if(index>=0){animateMessageTarget(index);return;}loadOlderUntil(messageId,0);}
     private int findMessageIndex(String id){for(int i=0;i<messages.size();i++)if(id.equals(messages.get(i).optString("id")))return i;return-1;}
     private void loadOlderUntil(String target,int attempts){if(attempts>=40||beforeCursor==null||beforeCursor.isEmpty()){toast("Message is no longer available.");return;}String cursor=beforeCursor;api.get("/api/messaging/conversations/"+activeConversation.optString("id")+"/messages?limit=80&before="+cursor,(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONArray arr=json.optJSONArray("messages");beforeCursor=json.optString("nextBefore","");if(arr!=null){List<JSONObject> older=new ArrayList<>();for(int i=0;i<arr.length();i++){JSONObject x=arr.optJSONObject(i);if(x!=null)older.add(x);}messages.addAll(0,older);if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();}int idx=findMessageIndex(target);if(idx>=0)animateMessageTarget(idx);else if(!beforeCursor.isEmpty()&&!beforeCursor.equals(cursor))loadOlderUntil(target,attempts+1);else toast("Message is no longer available.");}));}
