@@ -1505,6 +1505,10 @@ public class MainActivity extends Activity {
         public View getView(int p,View cv,ViewGroup parent){JSONObject m=messages.get(p);LinearLayout outer=new LinearLayout(MainActivity.this);outer.setOrientation(LinearLayout.VERTICAL);if(needsStamp(p)){TextView stamp=text(clusterStamp(m.optString("createdAt")),11,Color.rgb(138,141,145),Typeface.NORMAL);stamp.setGravity(Gravity.CENTER);LinearLayout.LayoutParams slp=new LinearLayout.LayoutParams(-1,dp(31));slp.topMargin=dp(7);slp.bottomMargin=dp(2);outer.addView(stamp,slp);}if("system".equals(m.optString("type"))){TextView sys=text(m.optString("body"),12,Color.rgb(138,141,145),Typeface.NORMAL);sys.setGravity(Gravity.CENTER);sys.setPadding(dp(25),dp(8),dp(25),dp(8));outer.addView(sys,new LinearLayout.LayoutParams(-1,-2));return outer;}boolean mine=isMine(m),samePrev=p>0&&sameBurst(messages.get(p-1),m),sameNext=p+1<messages.size()&&sameBurst(m,messages.get(p+1));
 
             FrameLayout swipeHost=new FrameLayout(MainActivity.this);
+            swipeHost.setClipChildren(false);
+            swipeHost.setClipToPadding(false);
+            outer.setClipChildren(false);
+            outer.setClipToPadding(false);
             LinearLayout.LayoutParams swipeHostLp=new LinearLayout.LayoutParams(-1,-2);
             swipeHostLp.topMargin=dp(samePrev?1:3);
             swipeHostLp.bottomMargin=dp(sameNext?1:3);
@@ -1521,17 +1525,17 @@ public class MainActivity extends Activity {
             replyArrow.setScaleX(.78f);
             replyArrow.setScaleY(.78f);
             replyArrow.setBackgroundColor(Color.TRANSPARENT);
-            replyArrow.setPadding(dp(7),dp(7),dp(7),dp(7));
+            replyArrow.setPadding(dp(5),dp(5),dp(5),dp(5));
 
             FrameLayout.LayoutParams arrowLp=
-                new FrameLayout.LayoutParams(dp(34),dp(34),mine
+                new FrameLayout.LayoutParams(dp(30),dp(30),mine
                     ?Gravity.END|Gravity.CENTER_VERTICAL
                     :Gravity.START|Gravity.CENTER_VERTICAL);
             arrowLp.leftMargin=mine?0:dp(35);
             arrowLp.rightMargin=mine?dp(2):0;
 
             FrameLayout.LayoutParams progressLp=
-                new FrameLayout.LayoutParams(dp(37),dp(37),mine
+                new FrameLayout.LayoutParams(dp(33),dp(33),mine
                     ?Gravity.END|Gravity.CENTER_VERTICAL
                     :Gravity.START|Gravity.CENTER_VERTICAL);
             progressLp.leftMargin=mine?0:dp(33);
@@ -1544,6 +1548,8 @@ public class MainActivity extends Activity {
             replyProgress.setTranslationX(0f);
 
             LinearLayout row=new LinearLayout(MainActivity.this);
+            row.setClipChildren(false);
+            row.setClipToPadding(false);
             row.setGravity(mine?Gravity.END|Gravity.BOTTOM:Gravity.START|Gravity.BOTTOM);
             swipeHost.addView(row,new FrameLayout.LayoutParams(-1,-2));
             replyArrow.bringToFront();
@@ -1558,6 +1564,8 @@ public class MainActivity extends Activity {
             }
 
             LinearLayout stack=new LinearLayout(MainActivity.this);
+            stack.setClipChildren(false);
+            stack.setClipToPadding(false);
             stack.setOrientation(LinearLayout.VERTICAL);
             stack.setGravity(mine?Gravity.END:Gravity.START);
             row.addView(stack,new LinearLayout.LayoutParams(-2,-2));
@@ -1565,7 +1573,7 @@ public class MainActivity extends Activity {
             if(mine&&m.optBoolean("pending")){
                 ImageView pendingIcon=new ImageView(MainActivity.this);
                 pendingIcon.setImageResource(R.drawable.ic_msg_send);
-                pendingIcon.clearColorFilter();
+                pendingIcon.setColorFilter(Color.rgb(145,148,154));
                 pendingIcon.setAlpha(1f);
                 pendingIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
                 pendingIcon.setPadding(0,0,0,0);
@@ -1667,8 +1675,10 @@ public class MainActivity extends Activity {
 
                     if(!replying[0])return true;
 
-                    // Once captured, ONLY horizontal distance matters.
-                    float raw=mine?Math.max(0f,-dx):Math.max(0f,dx);
+                    // Once captured, lock the reply direction. Crossing the
+                    // original touch point in the opposite direction no longer
+                    // cancels/restarts the reply gesture.
+                    float raw=Math.abs(dx);
 
                     // Instagram-like soft resistance.
                     float moved;
@@ -1713,7 +1723,7 @@ public class MainActivity extends Activity {
 
                         if(visibleProgress>=.995f){
                             // Activated state: fully gray circle, white arrow.
-                            replyArrow.setBackground(bg(replyGray,17));
+                            replyArrow.setBackground(bg(replyGray,15));
                             replyArrow.setColorFilter(Color.WHITE);
                         }else{
                             // Loading state: transparent circle, gray arrow/ring.
@@ -1740,7 +1750,7 @@ public class MainActivity extends Activity {
                     if(trigger){
                         replyProgress.setProgress(1f);
                         replyProgress.setAlpha(1f);
-                        replyArrow.setBackground(bg(Color.rgb(139,142,148),17));
+                        replyArrow.setBackground(bg(Color.rgb(139,142,148),15));
                         replyArrow.setColorFilter(Color.WHITE);
                     }
 
@@ -1797,58 +1807,46 @@ public class MainActivity extends Activity {
     private void loadOlderUntil(String target,int attempts){if(attempts>=40||beforeCursor==null||beforeCursor.isEmpty()){toast("Message is no longer available.");return;}String cursor=beforeCursor;api.get("/api/messaging/conversations/"+activeConversation.optString("id")+"/messages?limit=80&before="+cursor,(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONArray arr=json.optJSONArray("messages");beforeCursor=json.optString("nextBefore","");if(arr!=null){List<JSONObject> older=new ArrayList<>();for(int i=0;i<arr.length();i++){JSONObject x=arr.optJSONObject(i);if(x!=null)older.add(x);}messages.addAll(0,older);if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();}int idx=findMessageIndex(target);if(idx>=0)animateMessageTarget(idx);else if(!beforeCursor.isEmpty()&&!beforeCursor.equals(cursor))loadOlderUntil(target,attempts+1);else toast("Message is no longer available.");}));}
     private void animateMessageTarget(int messageIndex){
         if(list==null)return;
+
         int position=messageIndex+list.getHeaderViewsCount();
 
-        list.smoothScrollToPositionFromTop(
-            position,
-            Math.max(dp(70),list.getHeight()/2-dp(55)),
-            300
-        );
+        // ListView smoothScrollToPositionFromTop can overshoot a distant item
+        // and then correct backward. Position it exactly once instead.
+        list.post(()->{
+            int desiredTop=Math.max(
+                dp(70),
+                list.getHeight()/2-dp(55)
+            );
 
-        final Runnable pulse=new Runnable(){
-            int stable=0,last=-999,tries=0;
+            list.setSelectionFromTop(position,desiredTop);
 
-            public void run(){
-                tries++;
+            list.postDelayed(()->{
                 int first=list.getFirstVisiblePosition();
                 int child=position-first;
+                if(child<0||child>=list.getChildCount())return;
 
-                if(child>=0&&child<list.getChildCount()){
-                    View target=list.getChildAt(child);
-                    int y=target.getTop();
+                View target=list.getChildAt(child);
+                target.animate().cancel();
+                target.setScaleX(1f);
+                target.setScaleY(1f);
 
-                    if(Math.abs(y-last)<=1)stable++;
-                    else stable=0;
-                    last=y;
-
-                    if(stable>=2||tries>38){
-                        target.animate().cancel();
-                        target.setScaleX(1f);
-                        target.setScaleY(1f);
-
-                        target.animate()
-                            .scaleX(1.045f)
-                            .scaleY(1.045f)
-                            .setDuration(55)
+                target.animate()
+                    .scaleX(1.04f)
+                    .scaleY(1.04f)
+                    .setDuration(50)
+                    .setInterpolator(new DecelerateInterpolator())
+                    .withEndAction(()->main.postDelayed(
+                        ()->target.animate()
+                            .scaleX(1f)
+                            .scaleY(1f)
+                            .setDuration(70)
                             .setInterpolator(new DecelerateInterpolator())
-                            .withEndAction(()->main.postDelayed(
-                                ()->target.animate()
-                                    .scaleX(1f)
-                                    .scaleY(1f)
-                                    .setDuration(80)
-                                    .setInterpolator(new DecelerateInterpolator())
-                                    .start(),
-                                90
-                            ))
-                            .start();
-                        return;
-                    }
-                }
-
-                if(tries<45)main.postDelayed(this,20);
-            }
-        };
-        main.postDelayed(pulse,80);
+                            .start(),
+                        70
+                    ))
+                    .start();
+            },45);
+        });
     }
 
     private boolean isActuallyEdited(JSONObject m){String ea=m.optString("editedAt");if(ea.isEmpty())return false;Date e=parseDate(ea),c=parseDate(m.optString("createdAt"));return e!=null&&(c==null||e.getTime()-c.getTime()>1200);}
