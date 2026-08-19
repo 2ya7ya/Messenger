@@ -93,6 +93,7 @@ public class MainActivity extends Activity {
     private final Set<String> typingConversations=new HashSet<>();
     private final Set<String> stickerLastConversations=new HashSet<>();
     private final Map<String,Runnable> typingExpiry=new HashMap<>();
+    private final Map<String,Long> localSeenAt=new HashMap<>();
     private JSONObject activeConversation, replyTo; private EditText searchBox, messageInput; private TextView typingView; private LinearLayout replyBar, composer, recordBar;
     private int socketRetry=0; private boolean socketConnecting=false;
     private static final String COMMENT_STICKER_API_KEY="PvlaAZvthRs8jWekpX4blV5ORIDrykTm";
@@ -639,8 +640,64 @@ public class MainActivity extends Activity {
         }
     }
 
-    private JSONObject mergeMessage(JSONObject oldMessage,JSONObject update){try{JSONObject merged=new JSONObject(oldMessage==null?"{}":oldMessage.toString());if(update!=null){java.util.Iterator<String> keys=update.keys();while(keys.hasNext()){String k=keys.next();Object value=update.opt(k);if(value!=null&&value!=JSONObject.NULL)merged.put(k,value);}}return merged;}catch(Exception e){return update!=null?update:oldMessage;}}
+    private JSONObject mergeMessage(JSONObject oldMessage,JSONObject update){
+        try{
+            JSONObject merged=new JSONObject(oldMessage==null?"{}":oldMessage.toString());
+            boolean keepStickerVisual=oldMessage!=null&&isStickerMessage(oldMessage);
+            JSONArray stickerVisual=keepStickerVisual?oldMessage.optJSONArray("attachments"):null;
+
+            if(update!=null){
+                java.util.Iterator<String> keys=update.keys();
+                while(keys.hasNext()){
+                    String k=keys.next();
+                    Object value=update.opt(k);
+                    if(value!=null&&value!=JSONObject.NULL)merged.put(k,value);
+                }
+            }
+
+            if(keepStickerVisual&&stickerVisual!=null&&stickerVisual.length()>0){
+                merged.put("attachments",new JSONArray(stickerVisual.toString()));
+                merged.put("sticker",true);
+            }
+            return merged;
+        }catch(Exception e){
+            return update!=null?update:oldMessage;
+        }
+    }
     private void showEmojiPickerForReaction(JSONObject m){showEmojiPickerInternal(emoji->react(m,emoji));}
+    private String reactionAvatar(JSONObject reaction){
+        if(reaction==null)return"";
+
+        String direct=avatarUrl(reaction);
+        if(!direct.isEmpty())return direct;
+
+        JSONObject user=reaction.optJSONObject("user");
+        String nested=avatarUrl(user);
+        if(!nested.isEmpty())return nested;
+
+        JSONObject sender=reaction.optJSONObject("sender");
+        nested=avatarUrl(sender);
+        if(!nested.isEmpty())return nested;
+
+        boolean mine=reaction.optBoolean("mine");
+        String uid=reaction.optString("userId",reaction.optString("userid"));
+        if(mine||(!selfId.isEmpty()&&selfId.equals(uid))){
+            if(activeConversation!=null){
+                JSONArray ps=activeConversation.optJSONArray("participants");
+                if(ps!=null){
+                    for(int i=0;i<ps.length();i++){
+                        JSONObject person=ps.optJSONObject(i);
+                        if(person!=null&&person.optBoolean("isSelf")){
+                            String mineAvatar=avatarUrl(person);
+                            if(!mineAvatar.isEmpty())return mineAvatar;
+                        }
+                    }
+                }
+            }
+        }
+        return"";
+    }
+
     private void showReactionDetails(JSONObject m){
         JSONArray reactions=m.optJSONArray("reactions");if(reactions==null||reactions.length()==0)return;
         Dialog d=new Dialog(this);d.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -650,8 +707,8 @@ public class MainActivity extends Activity {
         View handle=new View(this);handle.setBackground(bg(Color.rgb(155,161,170),4));LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(dp(55),dp(4));hp.gravity=Gravity.CENTER_HORIZONTAL;hp.bottomMargin=dp(16);card.addView(handle,hp);
         TextView title=text("Reactions",18,Color.WHITE,Typeface.BOLD);card.addView(title,new LinearLayout.LayoutParams(-1,dp(36)));
         for(int i=0;i<reactions.length();i++){
-            JSONObject r=reactions.optJSONObject(i);if(r==null)continue;String uid=r.optString("userId",r.optString("userid")),name=r.optString("name");boolean mine=r.optBoolean("mine")||(!selfId.isEmpty()&&selfId.equals(uid));if(name.isEmpty())name=mine?"You":"Facebook user";String av=r.optString("avatar");
-            LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(3),dp(7),dp(3),dp(7));View avatar=buildUserAvatar(av,name,48);row.addView(avatar,new LinearLayout.LayoutParams(dp(48),dp(48)));LinearLayout names=new LinearLayout(this);names.setOrientation(LinearLayout.VERTICAL);LinearLayout.LayoutParams nlp=new LinearLayout.LayoutParams(0,dp(52),1);nlp.leftMargin=dp(11);row.addView(names,nlp);names.addView(text(name,17,Color.WHITE,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(29)));if(mine)names.addView(text("Tap to remove",13,Color.rgb(174,179,187),Typeface.NORMAL),new LinearLayout.LayoutParams(-1,dp(21)));TextView emo=text(r.optString("emoji"),22,Color.WHITE,Typeface.NORMAL);emo.setGravity(Gravity.CENTER);row.addView(emo,new LinearLayout.LayoutParams(dp(48),dp(48)));card.addView(row,new LinearLayout.LayoutParams(-1,dp(62)));if(mine)row.setOnClickListener(v->{d.dismiss();react(m,"");});
+            JSONObject r=reactions.optJSONObject(i);if(r==null)continue;String uid=r.optString("userId",r.optString("userid")),name=r.optString("name");boolean mine=r.optBoolean("mine")||(!selfId.isEmpty()&&selfId.equals(uid));if(name.isEmpty())name=mine?"You":"Facebook user";String av=reactionAvatar(r);
+            LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(3),dp(7),dp(3),dp(7));View avatar=buildUserAvatar(av,name,48);row.addView(avatar,new LinearLayout.LayoutParams(dp(48),dp(48)));LinearLayout names=new LinearLayout(this);names.setOrientation(LinearLayout.VERTICAL);names.setTranslationY(dp(3));LinearLayout.LayoutParams nlp=new LinearLayout.LayoutParams(0,dp(52),1);nlp.leftMargin=dp(11);row.addView(names,nlp);names.addView(text(name,17,Color.WHITE,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(29)));if(mine)names.addView(text("Tap to remove",13,Color.rgb(174,179,187),Typeface.NORMAL),new LinearLayout.LayoutParams(-1,dp(21)));TextView emo=text(r.optString("emoji"),22,Color.WHITE,Typeface.NORMAL);emo.setGravity(Gravity.CENTER);row.addView(emo,new LinearLayout.LayoutParams(dp(48),dp(48)));card.addView(row,new LinearLayout.LayoutParams(-1,dp(62)));if(mine)row.setOnClickListener(v->{d.dismiss();react(m,"");});
         }
         final float[] dragStart={Float.NaN};
         View.OnTouchListener sheetDrag=(v,e)->{switch(e.getActionMasked()){case MotionEvent.ACTION_DOWN:dragStart[0]=e.getRawY()-card.getTranslationY();card.animate().cancel();v.getParent().requestDisallowInterceptTouchEvent(true);return true;case MotionEvent.ACTION_MOVE:if(Float.isNaN(dragStart[0]))return true;float dy=Math.max(0,e.getRawY()-dragStart[0]);card.setTranslationY(dy);float ratio=Math.min(1f,dy/Math.max(dp(260f),card.getHeight()*.7f));overlay.setBackgroundColor(Color.argb((int)(170*(1f-ratio)),0,0,0));return true;case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:if(Float.isNaN(dragStart[0]))return true;float y=card.getTranslationY();dragStart[0]=Float.NaN;v.getParent().requestDisallowInterceptTouchEvent(false);if(y>dp(82)){card.animate().translationY(Math.max(card.getHeight(),dp(420))).setDuration(160).withEndAction(d::dismiss).start();}else{card.animate().translationY(0).setDuration(165).start();overlay.setBackgroundColor(Color.argb(170,0,0,0));}return true;}return true;};
@@ -696,12 +753,12 @@ public class MainActivity extends Activity {
         EditText search=new EditText(this);search.setSingleLine(true);search.setHint("Search stickers");search.setTextSize(15);search.setPadding(dp(13),0,dp(13),0);search.setBackground(bg(Color.rgb(240,242,245),18));dragHeader.addView(search,new LinearLayout.LayoutParams(-1,dp(42)));
 
         FrameLayout gridHost=new FrameLayout(this);sheet.addView(gridHost,new LinearLayout.LayoutParams(-1,0,1));
-        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);scroll.setPadding(0,0,0,dp(8));GridLayout grid=new GridLayout(this);grid.setColumnCount(2);scroll.addView(grid,new ScrollView.LayoutParams(-1,-2));gridHost.addView(scroll,new FrameLayout.LayoutParams(-1,-1));
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(false);scroll.setPadding(0,0,0,dp(8));GridLayout grid=new GridLayout(this);grid.setColumnCount(3);scroll.addView(grid,new ScrollView.LayoutParams(-1,-2));gridHost.addView(scroll,new FrameLayout.LayoutParams(-1,-1));
         ProgressBar loading=new ProgressBar(this);gridHost.addView(loading,new FrameLayout.LayoutParams(dp(30),dp(30),Gravity.CENTER));
 
         final int[] requestId={0};
         final View.OnTouchListener[] stickerContentDrag=new View.OnTouchListener[1];
-        class Loader{void load(String query){int my=++requestId[0];loading.setVisibility(View.VISIBLE);grid.removeAllViews();String q=query==null?"":query.trim();String url=q.isEmpty()?"https://api.giphy.com/v1/stickers/trending?api_key="+Uri.encode(COMMENT_STICKER_API_KEY)+"&limit=50&rating=g":"https://api.giphy.com/v1/stickers/search?api_key="+Uri.encode(COMMENT_STICKER_API_KEY)+"&q="+Uri.encode(q)+"&limit=50&offset=0&rating=g&lang=en";api.get(url,(json,error)->main.post(()->{if(my!=requestId[0]||host.getParent()==null)return;loading.setVisibility(View.GONE);if(error!=null){TextView err=text("Could not load stickers. Try again.",14,SUB,Typeface.NORMAL);err.setGravity(Gravity.CENTER);grid.addView(err,new GridLayout.LayoutParams(GridLayout.spec(0),GridLayout.spec(0,2)));return;}JSONArray items=json.optJSONArray("data");if(items==null||items.length()==0){TextView empty=text("No stickers found",14,SUB,Typeface.NORMAL);empty.setGravity(Gravity.CENTER);grid.addView(empty,new GridLayout.LayoutParams(GridLayout.spec(0),GridLayout.spec(0,2)));return;}for(int i=0;i<items.length();i++){JSONObject item=items.optJSONObject(i);if(item==null)continue;JSONObject imgs=item.optJSONObject("images");String src="";if(imgs!=null){String[] keys={"original","downsized","fixed_width","fixed_height","fixed_width_small","fixed_height_small"};for(String k:keys){JSONObject im=imgs.optJSONObject(k);if(im!=null){src=im.optString("url",im.optString("webp"));if(!src.isEmpty())break;}}}if(src.isEmpty())continue;FrameLayout cell=new FrameLayout(MainActivity.this);cell.setBackgroundColor(Color.TRANSPARENT);GridLayout.LayoutParams cp=new GridLayout.LayoutParams();cp.width=0;cp.height=dp(196);cp.columnSpec=GridLayout.spec(GridLayout.UNDEFINED,1f);cp.setMargins(dp(2),0,dp(2),0);grid.addView(cell,cp);ImageView iv=new ImageView(MainActivity.this);iv.setScaleType(ImageView.ScaleType.CENTER_INSIDE);iv.setBackgroundColor(Color.TRANSPARENT);cell.addView(iv,new FrameLayout.LayoutParams(dp(188),dp(188),Gravity.CENTER));stickers.load(src,iv);final String chosen=src;cell.setOnClickListener(v->{sendStickerFromUrl(chosen);});if(stickerContentDrag[0]!=null)cell.setOnTouchListener(stickerContentDrag[0]);}}));}}
+        class Loader{void load(String query){int my=++requestId[0];loading.setVisibility(View.VISIBLE);grid.removeAllViews();String q=query==null?"":query.trim();String url=q.isEmpty()?"https://api.giphy.com/v1/stickers/trending?api_key="+Uri.encode(COMMENT_STICKER_API_KEY)+"&limit=50&rating=g":"https://api.giphy.com/v1/stickers/search?api_key="+Uri.encode(COMMENT_STICKER_API_KEY)+"&q="+Uri.encode(q)+"&limit=50&offset=0&rating=g&lang=en";api.get(url,(json,error)->main.post(()->{if(my!=requestId[0]||host.getParent()==null)return;loading.setVisibility(View.GONE);if(error!=null){TextView err=text("Could not load stickers. Try again.",14,SUB,Typeface.NORMAL);err.setGravity(Gravity.CENTER);grid.addView(err,new GridLayout.LayoutParams(GridLayout.spec(0),GridLayout.spec(0,3)));return;}JSONArray items=json.optJSONArray("data");if(items==null||items.length()==0){TextView empty=text("No stickers found",14,SUB,Typeface.NORMAL);empty.setGravity(Gravity.CENTER);grid.addView(empty,new GridLayout.LayoutParams(GridLayout.spec(0),GridLayout.spec(0,3)));return;}for(int i=0;i<items.length();i++){JSONObject item=items.optJSONObject(i);if(item==null)continue;JSONObject imgs=item.optJSONObject("images");String src="";if(imgs!=null){String[] keys={"original","downsized","fixed_width","fixed_height","fixed_width_small","fixed_height_small"};for(String k:keys){JSONObject im=imgs.optJSONObject(k);if(im!=null){src=im.optString("url",im.optString("webp"));if(!src.isEmpty())break;}}}if(src.isEmpty())continue;FrameLayout cell=new FrameLayout(MainActivity.this);cell.setBackgroundColor(Color.TRANSPARENT);GridLayout.LayoutParams cp=new GridLayout.LayoutParams();cp.width=0;cp.height=dp(132);cp.columnSpec=GridLayout.spec(GridLayout.UNDEFINED,1f);cp.setMargins(dp(2),0,dp(2),0);grid.addView(cell,cp);ImageView iv=new ImageView(MainActivity.this);iv.setScaleType(ImageView.ScaleType.CENTER_INSIDE);iv.setBackgroundColor(Color.TRANSPARENT);cell.addView(iv,new FrameLayout.LayoutParams(dp(124),dp(124),Gravity.CENTER));stickers.load(src,iv);final String chosen=src;cell.setOnClickListener(v->{sendStickerFromUrl(chosen);});if(stickerContentDrag[0]!=null)cell.setOnTouchListener(stickerContentDrag[0]);}}));}}
         Loader loader=new Loader();final Runnable searchTask=()->loader.load(search.getText().toString());search.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int b,int c){main.removeCallbacks(searchTask);main.postDelayed(searchTask,220);}public void afterTextChanged(Editable e){}});
 
         final float[] startY={Float.NaN}; final boolean[] dragged={false};
@@ -902,20 +959,39 @@ public class MainActivity extends Activity {
     private String status(JSONObject m){
         if(m==null)return"";
         if(m.optBoolean("pending"))return"";
+
         String state=m.optString("status","sent");
+
         if("read".equals(state)){
             String at=m.optString("seenAt",m.optString("readAt",""));
             Date seen=parseDate(at);
-            if(seen==null)return"Seen";
-            long diff=Math.max(0,System.currentTimeMillis()-seen.getTime());
+            long seenMs;
+
+            if(seen!=null){
+                seenMs=seen.getTime();
+            }else{
+                String key=m.optString("id",m.optString("clientId"));
+                Long remembered=localSeenAt.get(key);
+                if(remembered==null){
+                    remembered=System.currentTimeMillis();
+                    if(key!=null&&!key.isEmpty())localSeenAt.put(key,remembered);
+                }
+                seenMs=remembered;
+            }
+
+            long diff=Math.max(0,System.currentTimeMillis()-seenMs);
             if(diff<60000)return"Seen";
+
             long minutes=diff/60000;
             if(minutes<60)return"Seen "+minutes+"m ago";
+
             long hours=minutes/60;
             if(hours<24)return"Seen "+hours+"h ago";
+
             long days=hours/24;
             return"Seen "+days+"d ago";
         }
+
         if("delivered".equals(state))return"Delivered";
         if("failed".equals(state))return"";
         return"Sent";
@@ -1351,9 +1427,10 @@ public class MainActivity extends Activity {
 
         ReplyProgressView(Context context){
             super(context);
+            setWillNotDraw(false);
             paint.setStyle(Paint.Style.STROKE);
             paint.setStrokeCap(Paint.Cap.ROUND);
-            paint.setStrokeWidth(dp(2));
+            paint.setStrokeWidth(dp(2.7f));
             paint.setColor(Color.WHITE);
             setAlpha(0f);
         }
@@ -1372,6 +1449,10 @@ public class MainActivity extends Activity {
                 getWidth()-inset,
                 getHeight()-inset
             );
+            paint.setColor(Color.argb(105,255,255,255));
+            canvas.drawArc(oval,-90f,360f,false,paint);
+
+            paint.setColor(Color.WHITE);
             canvas.drawArc(
                 oval,
                 -90f,
@@ -1409,23 +1490,22 @@ public class MainActivity extends Activity {
                 new FrameLayout.LayoutParams(dp(34),dp(34),mine
                     ?Gravity.END|Gravity.CENTER_VERTICAL
                     :Gravity.START|Gravity.CENTER_VERTICAL);
-            arrowLp.leftMargin=mine?0:dp(1);
+            arrowLp.leftMargin=mine?0:dp(35);
             arrowLp.rightMargin=mine?dp(1):0;
 
             FrameLayout.LayoutParams progressLp=
-                new FrameLayout.LayoutParams(dp(38),dp(38),mine
+                new FrameLayout.LayoutParams(dp(40),dp(40),mine
                     ?Gravity.END|Gravity.CENTER_VERTICAL
                     :Gravity.START|Gravity.CENTER_VERTICAL);
-            progressLp.leftMargin=mine?0:-dp(1);
-            progressLp.rightMargin=mine?-dp(1):0;
+            progressLp.leftMargin=mine?0:dp(32);
+            progressLp.rightMargin=mine?-dp(2):0;
 
-            swipeHost.addView(replyProgress,progressLp);
             swipeHost.addView(replyArrow,arrowLp);
+            swipeHost.addView(replyProgress,progressLp);
+            replyProgress.setClickable(false);
 
-            // Keep both the icon and its progress outline tucked just beyond
-            // the screen-side edge until the reply swipe starts.
-            replyArrow.setTranslationX(mine?dp(30):-dp(30));
-            replyProgress.setTranslationX(mine?dp(28):-dp(28));
+            replyArrow.setTranslationX(0);
+            replyProgress.setTranslationX(0);
 
             LinearLayout row=new LinearLayout(MainActivity.this);
             row.setGravity(mine?Gravity.END|Gravity.BOTTOM:Gravity.START|Gravity.BOTTOM);
@@ -1449,13 +1529,14 @@ public class MainActivity extends Activity {
                 pendingIcon.setImageResource(R.drawable.ic_msg_send);
                 pendingIcon.setColorFilter(Color.rgb(170,170,170));
                 pendingIcon.setAlpha(.62f);
-                pendingIcon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-                pendingIcon.setRotation(-21f);
-                pendingIcon.setTranslationY(dp(5));
+                pendingIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                pendingIcon.setPadding(dp(1),dp(1),dp(1),dp(1));
+                pendingIcon.setRotation(-27f);
+                pendingIcon.setTranslationY(dp(3));
 
                 LinearLayout.LayoutParams pendingLp=
-                    new LinearLayout.LayoutParams(dp(18),dp(22));
-                pendingLp.leftMargin=dp(3);
+                    new LinearLayout.LayoutParams(dp(25),dp(25));
+                pendingLp.leftMargin=dp(2);
                 row.addView(pendingIcon,pendingLp);
             }
 
@@ -1464,7 +1545,7 @@ public class MainActivity extends Activity {
 
 
             if(isActuallyEdited(m)){TextView ed=text("edited",9,mine?Color.rgb(220,232,255):Color.rgb(110,113,117),Typeface.NORMAL);LinearLayout.LayoutParams ep=new LinearLayout.LayoutParams(-2,dp(14));ep.gravity=mine?Gravity.END:Gravity.START;ep.leftMargin=dp(4);ep.rightMargin=dp(4);stack.addView(ed,ep);}JSONArray reactions=m.optJSONArray("reactions");if(reactions!=null&&reactions.length()>0){StringBuilder r=new StringBuilder();for(int i=0;i<reactions.length();i++){JSONObject rr=reactions.optJSONObject(i);if(rr!=null)r.append(rr.optString("emoji"));}if(reactions.length()>1)r.append(" ").append(reactions.length());TextView badge=text(r.toString(),12,TEXT,Typeface.NORMAL);badge.setGravity(Gravity.CENTER);badge.setPadding(reactions.length()==1?0:dp(5),0,reactions.length()==1?0:dp(5),0);badge.setBackground(bg(Color.WHITE,11));badge.setElevation(0f);LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(reactions.length()==1?dp(22):-2,dp(22));bp.gravity=mine?Gravity.END:Gravity.START;bp.topMargin=-dp(4);stack.addView(badge,bp);badge.setOnClickListener(v->showReactionDetails(m));}
-            wireMessageGesture(content,row,m,mine,replyArrow,replyProgress);if(mine&&p==lastMineIndex()&&p==messages.size()-1&&!m.optBoolean("pending")){String statusText=status(m);if(!statusText.isEmpty()){TextView st=text(statusText,10.5f,Color.rgb(138,141,145),Typeface.NORMAL);st.setGravity(Gravity.END);LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-2,dp(19));sp.gravity=Gravity.END;sp.rightMargin=dp(7);sp.topMargin=dp(1);outer.addView(st,sp);if("read".equals(m.optString("status")))main.postDelayed(()->{if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();},30000);}}return outer;}
+            wireMessageGesture(content,stack,m,mine,replyArrow,replyProgress);if(mine&&p==lastMineIndex()&&p==messages.size()-1&&!m.optBoolean("pending")){String statusText=status(m);if(!statusText.isEmpty()){TextView st=text(statusText,11.5f,Color.rgb(138,141,145),Typeface.NORMAL);st.setGravity(Gravity.END);LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-2,dp(19));sp.gravity=Gravity.END;sp.rightMargin=dp(7);sp.topMargin=dp(1);outer.addView(st,sp);if("read".equals(m.optString("status")))main.postDelayed(()->{if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();},15000);}}return outer;}
         private String replyPreviewFromReply(JSONObject r){String b=r.optString("body").replaceFirst("^[🎤📷🎥🎬]\\s*","").trim();if(!b.isEmpty())return b;String t=r.optString("type");if("audio".equals(t))return"Voice message";if("image".equals(t))return"Photo";if("video".equals(t))return"Video";if("file".equals(t))return"File";if("shared_reel".equals(t))return"Reel";if("shared_post".equals(t))return"Post";return"Message";}
     }
     private void wireMessageGesture(
@@ -1495,12 +1576,12 @@ public class MainActivity extends Activity {
                     replyArrow.setScaleX(.66f);
                     replyArrow.setScaleY(.66f);
                     replyArrow.setRotation(mine?8f:-8f);
-                    replyArrow.setTranslationX(mine?dp(30):-dp(30));
+                    replyArrow.setTranslationX(0);
 
                     replyProgress.animate().cancel();
                     replyProgress.setProgress(0f);
                     replyProgress.setAlpha(0f);
-                    replyProgress.setTranslationX(mine?dp(28):-dp(28));
+                    replyProgress.setTranslationX(0);
 
                     hold[0]=()->{
                         if(Float.isNaN(downX[0])||horizontal[0]||vertical[0])return;
@@ -1570,16 +1651,12 @@ public class MainActivity extends Activity {
                     float ringProgress=Math.min(1f,moved/dp(47f));
                     replyProgress.setProgress(ringProgress);
                     replyProgress.setAlpha(
-                        Math.max(0f,Math.min(1f,(ringProgress-.06f)/.70f))
+                        Math.max(.18f,Math.min(1f,ringProgress*1.30f))
                     );
 
-                    // Sent messages: right edge -> left/inward.
-                    // Received messages: left edge -> right/inward.
-                    float edgeTravel=dp(30)*(1f-progress);
-                    replyArrow.setTranslationX(mine?edgeTravel:-edgeTravel);
-
-                    float ringTravel=dp(28)*(1f-progress);
-                    replyProgress.setTranslationX(mine?ringTravel:-ringTravel);
+                    float indicatorTravel=dp(18)*progress;
+                    replyArrow.setTranslationX(mine?-indicatorTravel:indicatorTravel);
+                    replyProgress.setTranslationX(mine?-indicatorTravel:indicatorTravel);
                     return true;
 
                 case MotionEvent.ACTION_UP:
@@ -1613,14 +1690,14 @@ public class MainActivity extends Activity {
                         .scaleX(.66f)
                         .scaleY(.66f)
                         .rotation(mine?8f:-8f)
-                        .translationX(mine?dp(30):-dp(30))
+                        .translationX(0)
                         .setDuration(145)
                         .setInterpolator(new DecelerateInterpolator())
                         .start();
 
                     replyProgress.animate()
                         .alpha(0f)
-                        .translationX(mine?dp(28):-dp(28))
+                        .translationX(0)
                         .setDuration(trigger?175:145)
                         .setInterpolator(new DecelerateInterpolator())
                         .start();
