@@ -134,14 +134,14 @@ public class MainActivity extends Activity {
     private GradientDrawable bg(int color,float radius){GradientDrawable g=new GradientDrawable();g.setColor(color);g.setCornerRadius(dp(radius));return g;}
     private GradientDrawable topBg(int color,float radius){GradientDrawable g=new GradientDrawable();g.setColor(color);float r=dp(radius);g.setCornerRadii(new float[]{r,r,r,r,0,0,0,0});return g;}
     private String activeTheme(){return activeConversation==null?"default":activeConversation.optString("theme","default");}
-    private int themeAccent(){switch(activeTheme()){case"instagram":return Color.rgb(162,59,234);case"love":return Color.rgb(255,44,145);case"ocean":return Color.rgb(0,159,200);case"sunset":return Color.rgb(255,108,43);case"monochrome":return Color.rgb(34,34,34);case"glow-pup":return Color.rgb(166,140,255);case"odyssey":return Color.rgb(108,186,186);case"supergirl":return Color.rgb(255,156,32);case"avatar":return Color.rgb(129,181,165);case"olivia":return Color.rgb(255,171,195);case"backrooms":return Color.rgb(211,189,100);case"deli-boys":return Color.rgb(232,203,182);case"heart-drive":return Color.rgb(200,168,255);case"valentines":return Color.rgb(207,43,230);default:return BLUE;}}
-    private int themeDisabled(){switch(activeTheme()){case"instagram":return Color.rgb(184,166,200);case"love":return Color.rgb(185,138,164);case"ocean":return Color.rgb(129,174,185);case"sunset":return Color.rgb(197,160,140);case"monochrome":return Color.rgb(153,153,153);case"glow-pup":return Color.rgb(113,106,145);case"odyssey":return Color.rgb(98,128,130);case"supergirl":return Color.rgb(158,121,87);case"avatar":return Color.rgb(104,127,120);case"olivia":return Color.rgb(159,120,133);case"backrooms":return Color.rgb(130,122,85);case"deli-boys":return Color.rgb(141,130,121);case"heart-drive":return Color.rgb(120,109,147);case"valentines":return Color.rgb(128,91,134);default:return Color.rgb(169,185,209);}}
+    private int themeAccent(){switch(activeTheme()){case"instagram":return Color.WHITE;case"instagram-classic":return Color.rgb(162,59,234);case"love":return Color.rgb(255,44,145);case"ocean":return Color.rgb(0,159,200);case"sunset":return Color.rgb(255,108,43);case"monochrome":return Color.rgb(34,34,34);case"glow-pup":return Color.rgb(166,140,255);case"odyssey":return Color.rgb(108,186,186);case"supergirl":return Color.rgb(255,156,32);case"avatar":return Color.rgb(129,181,165);case"olivia":return Color.rgb(255,171,195);case"backrooms":return Color.rgb(211,189,100);case"deli-boys":return Color.rgb(232,203,182);case"heart-drive":return Color.rgb(200,168,255);case"valentines":return Color.rgb(207,43,230);default:return BLUE;}}
+    private int themeDisabled(){switch(activeTheme()){case"instagram":return Color.rgb(142,142,142);case"instagram-classic":return Color.rgb(184,166,200);case"love":return Color.rgb(185,138,164);case"ocean":return Color.rgb(129,174,185);case"sunset":return Color.rgb(197,160,140);case"monochrome":return Color.rgb(153,153,153);case"glow-pup":return Color.rgb(113,106,145);case"odyssey":return Color.rgb(98,128,130);case"supergirl":return Color.rgb(158,121,87);case"avatar":return Color.rgb(104,127,120);case"olivia":return Color.rgb(159,120,133);case"backrooms":return Color.rgb(130,122,85);case"deli-boys":return Color.rgb(141,130,121);case"heart-drive":return Color.rgb(120,109,147);case"valentines":return Color.rgb(128,91,134);default:return Color.rgb(169,185,209);}}
     private Bitmap themedIconBitmap(int res,int color){Bitmap src=BitmapFactory.decodeResource(getResources(),res);if(src==null)return null;Bitmap out=src.copy(Bitmap.Config.ARGB_8888,true);for(int y=0;y<out.getHeight();y++)for(int x=0;x<out.getWidth();x++){int px=out.getPixel(x,y),a=Color.alpha(px);if(a<20)continue;int r=Color.red(px),g=Color.green(px),b=Color.blue(px);if(r>238&&g>238&&b>238)continue;out.setPixel(x,y,Color.argb(a,Color.red(color),Color.green(color),Color.blue(color)));}return out;}
-    private int themeReceived(){switch(activeTheme()){case"monochrome":return Color.WHITE;case"glow-pup":return Color.rgb(36,44,88);case"odyssey":return Color.rgb(23,62,66);case"supergirl":return Color.rgb(58,43,39);case"avatar":return Color.rgb(37,62,60);case"olivia":return Color.rgb(33,30,32);case"backrooms":return Color.rgb(56,53,31);case"deli-boys":return Color.rgb(81,76,70);case"heart-drive":return Color.rgb(74,39,157);case"valentines":return Color.rgb(29,11,69);default:return RECEIVED;}}
-    private int themeReceivedText(){switch(activeTheme()){case"glow-pup":case"odyssey":case"supergirl":case"avatar":case"olivia":case"backrooms":case"deli-boys":case"heart-drive":case"valentines":return Color.WHITE;default:return TEXT;}}
+    private int themeReceived(){switch(activeTheme()){case"instagram":return Color.rgb(38,38,38);case"monochrome":return Color.WHITE;case"glow-pup":return Color.rgb(36,44,88);case"odyssey":return Color.rgb(23,62,66);case"supergirl":return Color.rgb(58,43,39);case"avatar":return Color.rgb(37,62,60);case"olivia":return Color.rgb(33,30,32);case"backrooms":return Color.rgb(56,53,31);case"deli-boys":return Color.rgb(81,76,70);case"heart-drive":return Color.rgb(74,39,157);case"valentines":return Color.rgb(29,11,69);default:return RECEIVED;}}
+    private int themeReceivedText(){switch(activeTheme()){case"instagram":case"glow-pup":case"odyssey":case"supergirl":case"avatar":case"olivia":case"backrooms":case"deli-boys":case"heart-drive":case"valentines":return Color.WHITE;default:return TEXT;}}
     private int themeSentText(){switch(activeTheme()){case"olivia":return Color.rgb(43,22,32);case"deli-boys":return Color.rgb(33,29,24);case"heart-drive":return Color.rgb(32,18,61);default:return Color.WHITE;}}
-    private int[] themeSentColors(){switch(activeTheme()){case"instagram":return new int[]{Color.rgb(131,58,180),Color.rgb(253,29,29),Color.rgb(252,176,69)};case"love":return new int[]{Color.rgb(255,77,141),Color.rgb(255,117,140)};case"ocean":return new int[]{Color.rgb(0,131,176),Color.rgb(0,180,219)};case"sunset":return new int[]{Color.rgb(255,81,47),Color.rgb(240,152,25)};case"monochrome":return new int[]{Color.rgb(17,17,17),Color.rgb(85,85,85)};case"glow-pup":return new int[]{Color.rgb(118,98,255),Color.rgb(178,143,255)};case"odyssey":return new int[]{Color.rgb(23,107,124),Color.rgb(92,170,169)};case"supergirl":return new int[]{Color.rgb(220,37,45),Color.rgb(255,153,23)};case"avatar":return new int[]{Color.rgb(64,123,119),Color.rgb(131,186,168)};case"olivia":return new int[]{Color.rgb(255,156,186),Color.rgb(255,191,209)};case"backrooms":return new int[]{Color.rgb(141,125,57),Color.rgb(212,188,95)};case"deli-boys":return new int[]{Color.rgb(241,220,203),Color.rgb(248,234,222)};case"heart-drive":return new int[]{Color.rgb(216,195,255),Color.rgb(240,230,255)};case"valentines":return new int[]{Color.rgb(158,33,228),Color.rgb(214,9,189)};default:return new int[]{BLUE,BLUE};}}
-    private android.graphics.drawable.Drawable themeConversationBackground(){int[] colors;switch(activeTheme()){case"instagram":colors=new int[]{Color.rgb(255,245,251),Color.rgb(238,232,255),Color.rgb(234,245,255)};break;case"love":colors=new int[]{Color.rgb(118,0,95),Color.rgb(39,0,45)};break;case"ocean":colors=new int[]{Color.rgb(223,248,255),Color.rgb(216,237,244),Color.rgb(237,250,255)};break;case"sunset":colors=new int[]{Color.rgb(255,243,222),Color.rgb(255,231,223),Color.rgb(255,248,236)};break;case"monochrome":colors=new int[]{Color.rgb(244,244,244),Color.rgb(222,222,222)};break;case"glow-pup":colors=new int[]{Color.rgb(3,0,25),Color.rgb(23,16,92),Color.rgb(33,19,173)};break;case"odyssey":colors=new int[]{Color.rgb(3,28,33),Color.rgb(10,59,66),Color.rgb(8,38,44)};break;case"supergirl":colors=new int[]{Color.rgb(17,17,17),Color.rgb(43,24,19),Color.rgb(73,23,15)};break;case"avatar":colors=new int[]{Color.rgb(16,44,45),Color.rgb(37,81,77),Color.rgb(113,110,77)};break;case"olivia":colors=new int[]{Color.rgb(61,41,55),Color.rgb(121,85,106),Color.rgb(83,97,65)};break;case"backrooms":colors=new int[]{Color.rgb(64,58,24),Color.rgb(119,108,46),Color.rgb(48,44,20)};break;case"deli-boys":colors=new int[]{Color.rgb(23,22,18),Color.rgb(42,39,31),Color.rgb(22,21,18)};break;case"heart-drive":colors=new int[]{Color.rgb(6,19,83),Color.rgb(38,18,113),Color.rgb(8,14,68)};break;case"valentines":colors=new int[]{Color.rgb(61,11,112),Color.rgb(19,5,47)};break;default:return new android.graphics.drawable.ColorDrawable(Color.WHITE);}return new GradientDrawable(GradientDrawable.Orientation.TL_BR,colors);}
+    private int[] themeSentColors(){switch(activeTheme()){case"instagram":return new int[]{Color.rgb(92,16,238),Color.rgb(172,0,238)};case"instagram-classic":return new int[]{Color.rgb(131,58,180),Color.rgb(253,29,29),Color.rgb(252,176,69)};case"love":return new int[]{Color.rgb(255,77,141),Color.rgb(255,117,140)};case"ocean":return new int[]{Color.rgb(0,131,176),Color.rgb(0,180,219)};case"sunset":return new int[]{Color.rgb(255,81,47),Color.rgb(240,152,25)};case"monochrome":return new int[]{Color.rgb(17,17,17),Color.rgb(85,85,85)};case"glow-pup":return new int[]{Color.rgb(118,98,255),Color.rgb(178,143,255)};case"odyssey":return new int[]{Color.rgb(23,107,124),Color.rgb(92,170,169)};case"supergirl":return new int[]{Color.rgb(220,37,45),Color.rgb(255,153,23)};case"avatar":return new int[]{Color.rgb(64,123,119),Color.rgb(131,186,168)};case"olivia":return new int[]{Color.rgb(255,156,186),Color.rgb(255,191,209)};case"backrooms":return new int[]{Color.rgb(141,125,57),Color.rgb(212,188,95)};case"deli-boys":return new int[]{Color.rgb(241,220,203),Color.rgb(248,234,222)};case"heart-drive":return new int[]{Color.rgb(216,195,255),Color.rgb(240,230,255)};case"valentines":return new int[]{Color.rgb(158,33,228),Color.rgb(214,9,189)};default:return new int[]{BLUE,BLUE};}}
+    private android.graphics.drawable.Drawable themeConversationBackground(){int[] colors;switch(activeTheme()){case"instagram":return new android.graphics.drawable.ColorDrawable(Color.BLACK);case"instagram-classic":colors=new int[]{Color.rgb(255,245,251),Color.rgb(238,232,255),Color.rgb(234,245,255)};break;case"love":colors=new int[]{Color.rgb(118,0,95),Color.rgb(39,0,45)};break;case"ocean":colors=new int[]{Color.rgb(223,248,255),Color.rgb(216,237,244),Color.rgb(237,250,255)};break;case"sunset":colors=new int[]{Color.rgb(255,243,222),Color.rgb(255,231,223),Color.rgb(255,248,236)};break;case"monochrome":colors=new int[]{Color.rgb(244,244,244),Color.rgb(222,222,222)};break;case"glow-pup":colors=new int[]{Color.rgb(3,0,25),Color.rgb(23,16,92),Color.rgb(33,19,173)};break;case"odyssey":colors=new int[]{Color.rgb(3,28,33),Color.rgb(10,59,66),Color.rgb(8,38,44)};break;case"supergirl":colors=new int[]{Color.rgb(17,17,17),Color.rgb(43,24,19),Color.rgb(73,23,15)};break;case"avatar":colors=new int[]{Color.rgb(16,44,45),Color.rgb(37,81,77),Color.rgb(113,110,77)};break;case"olivia":colors=new int[]{Color.rgb(61,41,55),Color.rgb(121,85,106),Color.rgb(83,97,65)};break;case"backrooms":colors=new int[]{Color.rgb(64,58,24),Color.rgb(119,108,46),Color.rgb(48,44,20)};break;case"deli-boys":colors=new int[]{Color.rgb(23,22,18),Color.rgb(42,39,31),Color.rgb(22,21,18)};break;case"heart-drive":colors=new int[]{Color.rgb(6,19,83),Color.rgb(38,18,113),Color.rgb(8,14,68)};break;case"valentines":colors=new int[]{Color.rgb(61,11,112),Color.rgb(19,5,47)};break;default:return new android.graphics.drawable.ColorDrawable(Color.WHITE);}return new GradientDrawable(GradientDrawable.Orientation.TL_BR,colors);}
 
     private GradientDrawable bubbleBg(boolean mine,boolean samePrev,boolean sameNext){float r=dp(18),small=dp(6);float tl=r,tr=r,br=r,bl=r;if(mine){if(samePrev)tr=small;if(sameNext)br=small;}else{if(samePrev)tl=small;if(sameNext)bl=small;}GradientDrawable g;if(mine&&!"default".equals(activeTheme())){g=new GradientDrawable(GradientDrawable.Orientation.TL_BR,themeSentColors());}else{g=new GradientDrawable();g.setColor(mine?BLUE:themeReceived());}g.setCornerRadii(new float[]{tl,tl,tr,tr,br,br,bl,bl});return g;}
     private TextView text(String v,float sp,int color,int style){TextView t=new TextView(this);t.setText(v==null?"":v);t.setTextSize(sp);t.setTextColor(color);t.setGravity(Gravity.CENTER_VERTICAL);if(style!=Typeface.NORMAL)t.setTypeface(Typeface.DEFAULT,style);return t;}
@@ -278,7 +278,14 @@ public class MainActivity extends Activity {
         }catch(Exception ignored){}
     }
 
-    private void openConversation(JSONObject c){activeConversation=c;replyTo=null;messages.clear();composerHasText=false;typingStateSent=false;root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(6),0,dp(6),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(49)));ImageButton back=icon(R.drawable.ic_msg_back,35,TEXT);head.addView(back);back.setOnClickListener(v->showInbox(false));View avatar=buildConversationAvatar(c,31);LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(dp(31),dp(31));ap.leftMargin=dp(1);head.addView(avatar,ap);LinearLayout names=new LinearLayout(this);names.setOrientation(LinearLayout.VERTICAL);names.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams np=new LinearLayout.LayoutParams(0,-1,1);np.leftMargin=dp(7);head.addView(names,np);TextView name=text(c.optString("name","Conversation"),14,TEXT,Typeface.BOLD);names.addView(name,new LinearLayout.LayoutParams(-1,dp(24)));TextView status=text(conversationStatus(c),10,SUB,Typeface.NORMAL);names.addView(status,new LinearLayout.LayoutParams(-1,dp(17)));ImageButton info=icon(R.drawable.ic_msg_info,35,TEXT);head.addView(info);info.setOnClickListener(v->showInfo());View divider=new View(this);divider.setBackgroundColor(DIV);page.addView(divider,new LinearLayout.LayoutParams(-1,dp(1)));
+    private void openConversation(JSONObject c){activeConversation=c;replyTo=null;messages.clear();composerHasText=false;typingStateSent=false;
+        boolean instagramTheme="instagram".equals(activeTheme());
+        if(instagramTheme){
+            getWindow().setStatusBarColor(Color.BLACK);
+            getWindow().setNavigationBarColor(Color.BLACK);
+            getWindow().getDecorView().setSystemUiVisibility(0);
+        }
+        root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(instagramTheme?Color.BLACK:Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(6),0,dp(6),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(49)));ImageButton back=icon(R.drawable.ic_msg_back,35,instagramTheme?Color.WHITE:TEXT);head.addView(back);back.setOnClickListener(v->showInbox(false));View avatar=buildConversationAvatar(c,31);LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(dp(31),dp(31));ap.leftMargin=dp(1);head.addView(avatar,ap);LinearLayout names=new LinearLayout(this);names.setOrientation(LinearLayout.VERTICAL);names.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams np=new LinearLayout.LayoutParams(0,-1,1);np.leftMargin=dp(7);head.addView(names,np);TextView name=text(c.optString("name","Conversation"),14,instagramTheme?Color.WHITE:TEXT,Typeface.BOLD);names.addView(name,new LinearLayout.LayoutParams(-1,dp(24)));TextView status=text(conversationStatus(c),10,instagramTheme?Color.rgb(142,142,142):SUB,Typeface.NORMAL);names.addView(status,new LinearLayout.LayoutParams(-1,dp(17)));ImageButton info=icon(R.drawable.ic_msg_info,35,instagramTheme?Color.WHITE:TEXT);head.addView(info);info.setOnClickListener(v->showInfo());View divider=new View(this);divider.setBackgroundColor(instagramTheme?Color.BLACK:DIV);page.addView(divider,new LinearLayout.LayoutParams(-1,dp(1)));
         FrameLayout messageArea=new FrameLayout(this);page.addView(messageArea,new LinearLayout.LayoutParams(-1,0,1));
         list=new ListView(this);
         list.setDivider(null);
@@ -324,6 +331,11 @@ public class MainActivity extends Activity {
                 int newState
             ){
                 state=newState;
+                if(newState!=SCROLL_STATE_IDLE && timeRevealOffset>0f){
+                    timeRevealOffset=0f;
+                    timeRevealDragging=false;
+                    applyConversationTimeReveal();
+                }
 
                 if(
                     newState==SCROLL_STATE_IDLE &&
@@ -414,10 +426,14 @@ public class MainActivity extends Activity {
     }
 
     private void buildComposer(LinearLayout page){
+        if("instagram".equals(activeTheme())){
+            buildInstagramComposer(page);
+            return;
+        }
         composer=new LinearLayout(this);composer.setGravity(Gravity.CENTER_VERTICAL);composer.setPadding(dp(7),dp(4),dp(7),dp(5));composer.setBackgroundColor(Color.WHITE);
         LinearLayout.LayoutParams composerLp=new LinearLayout.LayoutParams(-1,dp(49));composerLp.bottomMargin=dp(2);page.addView(composer,composerLp);
         int accent=themeAccent();ImageButton attach=icon(R.drawable.ic_msg_attach,35,accent);composer.addView(attach);ImageButton emoji=icon(R.drawable.comment_stickers,35,accent);emoji.setColorFilter(accent,android.graphics.PorterDuff.Mode.SRC_IN);emoji.setPadding(dp(8),dp(8),dp(8),dp(8));composer.addView(emoji);
-        messageInput=new EditText(this);messageInput.setHint("Message");messageInput.setTextSize(15);messageInput.setSingleLine(false);messageInput.setMaxLines(4);messageInput.setPadding(dp(12),dp(5),dp(12),dp(5));messageInput.setBackground(bg(LIGHT,20));
+        messageInput=new EditText(this);messageInput.setHint("Message...");messageInput.setTextSize(15);messageInput.setSingleLine(false);messageInput.setMaxLines(4);messageInput.setPadding(dp(12),dp(5),dp(12),dp(5));messageInput.setBackground(bg(LIGHT,20));
         LinearLayout.LayoutParams ilp=new LinearLayout.LayoutParams(0,dp(38),1);ilp.setMargins(dp(3),0,dp(3),0);composer.addView(messageInput,ilp);
         FrameLayout actions=new FrameLayout(this);composer.addView(actions,new LinearLayout.LayoutParams(dp(35),dp(35)));
         sendButton=icon(R.drawable.msg_send_enabled,35,accent);sendButton.clearColorFilter();sendButton.setPadding(dp(5),dp(5),dp(5),dp(5));
@@ -427,6 +443,80 @@ public class MainActivity extends Activity {
         messageInput.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence text,int st,int b,int c){}public void afterTextChanged(Editable e){boolean now=e!=null&&e.length()>0;if(now!=composerHasText){composerHasText=now;syncComposerAction();}queueTypingPulse();}});
         composerHasText=false;syncComposerAction();
     }
+
+    private void buildInstagramComposer(LinearLayout page){
+        composer=new LinearLayout(this);
+        composer.setGravity(Gravity.CENTER_VERTICAL);
+        composer.setPadding(dp(7),dp(4),dp(7),dp(4));
+        composer.setBackgroundColor(Color.BLACK);
+        LinearLayout.LayoutParams outerLp=new LinearLayout.LayoutParams(-1,dp(58));
+        outerLp.setMargins(dp(8),dp(2),dp(8),dp(4));
+        page.addView(composer,outerLp);
+
+        LinearLayout pill=new LinearLayout(this);
+        pill.setGravity(Gravity.CENTER_VERTICAL);
+        pill.setPadding(dp(5),0,dp(4),0);
+        pill.setBackground(bg(Color.rgb(38,38,38),28));
+        composer.addView(pill,new LinearLayout.LayoutParams(-1,dp(52)));
+
+        ImageButton camera=icon(R.drawable.ic_instagram_camera,42,Color.WHITE);
+        camera.setPadding(dp(8),dp(8),dp(8),dp(8));
+        camera.setBackground(bg(Color.rgb(88,72,238),21));
+        pill.addView(camera,new LinearLayout.LayoutParams(dp(42),dp(42)));
+
+        messageInput=new EditText(this);
+        messageInput.setHint("Message...");
+        messageInput.setHintTextColor(Color.rgb(142,142,142));
+        messageInput.setTextColor(Color.WHITE);
+        messageInput.setTextSize(15);
+        messageInput.setSingleLine(false);
+        messageInput.setMaxLines(4);
+        messageInput.setPadding(dp(10),dp(4),dp(4),dp(4));
+        messageInput.setBackgroundColor(Color.TRANSPARENT);
+        pill.addView(messageInput,new LinearLayout.LayoutParams(0,dp(42),1));
+
+        ImageButton mic=icon(R.drawable.ic_instagram_mic,34,Color.WHITE);
+        ImageButton gallery=icon(R.drawable.ic_instagram_gallery,34,Color.WHITE);
+        ImageButton sticker=icon(R.drawable.ic_instagram_sticker,34,Color.WHITE);
+        ImageButton plus=icon(R.drawable.ic_instagram_plus,34,Color.WHITE);
+        for(ImageButton b:new ImageButton[]{mic,gallery,sticker,plus}){
+            b.setPadding(dp(6),dp(6),dp(6),dp(6));
+            pill.addView(b,new LinearLayout.LayoutParams(dp(34),dp(34)));
+        }
+
+        sendButton=icon(R.drawable.msg_send_enabled,34,Color.WHITE);
+        sendButton.setVisibility(View.GONE);
+        pill.addView(sendButton,new LinearLayout.LayoutParams(dp(34),dp(34)));
+        micButton=mic;
+
+        camera.setOnClickListener(v->pickAttachment());
+        gallery.setOnClickListener(v->pickAttachment());
+        sticker.setOnClickListener(v->showMessengerStickerPicker());
+        plus.setOnClickListener(v->pickAttachment());
+        sendButton.setOnClickListener(v->sendText());
+        mic.setOnClickListener(v->{});
+        mic.setOnTouchListener((v,e)->{
+            v.getParent().requestDisallowInterceptTouchEvent(true);
+            return handleMicTouch(e);
+        });
+
+        messageInput.addTextChangedListener(new TextWatcher(){
+            public void beforeTextChanged(CharSequence cs,int st,int c,int a){}
+            public void onTextChanged(CharSequence cs,int st,int b,int c){}
+            public void afterTextChanged(Editable e){
+                boolean has=e!=null&&e.length()>0;
+                composerHasText=has;
+                sendButton.setVisibility(has?View.VISIBLE:View.GONE);
+                mic.setVisibility(has?View.GONE:View.VISIBLE);
+                gallery.setVisibility(has?View.GONE:View.VISIBLE);
+                sticker.setVisibility(has?View.GONE:View.VISIBLE);
+                plus.setVisibility(has?View.GONE:View.VISIBLE);
+                queueTypingPulse();
+            }
+        });
+        composerHasText=false;
+    }
+
     private void syncComposerAction(){boolean has=messageInput!=null&&composerHasText;if(sendButton!=null){sendButton.setVisibility(has?View.VISIBLE:View.GONE);sendButton.setImageResource(has?R.drawable.msg_send_enabled:R.drawable.msg_send_disabled);sendButton.setColorFilter(has?themeAccent():themeDisabled());}if(micButton!=null){micButton.setColorFilter(themeAccent());micButton.setVisibility(has?View.GONE:View.VISIBLE);}}
 
     private void loadCachedMessages(String cid){String raw=cache.get("messages:"+cid);if(raw==null)return;try{applyMessages(new JSONObject(raw).optJSONArray("messages"),false);}catch(Exception ignored){}}
@@ -932,8 +1022,8 @@ public class MainActivity extends Activity {
     private void toggleMute(JSONObject c){try{api.patch("/api/messaging/conversations/"+c.optString("id")+"/settings",new JSONObject().put("muted",c.optString("mutedUntil").isEmpty()),(json,error)->main.post(()->{if(error!=null)toast(error.getMessage());else{JSONObject nc=json.optJSONObject("conversation");if(nc!=null)activeConversation=nc;showInfo();}}));}catch(Exception e){toast(e.getMessage());}}
     private LinearLayout darkSubPage(String titleText,Runnable backAction){root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.rgb(11,15,20));root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(7),0,dp(7),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(50)));ImageButton back=icon(R.drawable.ic_msg_back,38,Color.WHITE);back.setPadding(dp(9),dp(9),dp(9),dp(9));head.addView(back);back.setOnClickListener(v->backAction.run());TextView title=text(titleText,17,Color.WHITE,Typeface.BOLD);head.addView(title,new LinearLayout.LayoutParams(0,-1,1));Space sp=new Space(this);head.addView(sp,new LinearLayout.LayoutParams(dp(38),dp(38)));return page;}
     private void showConversationSearch(JSONObject c){LinearLayout page=darkSubPage("Search",this::showInfo);LinearLayout wrap=new LinearLayout(this);wrap.setOrientation(LinearLayout.VERTICAL);wrap.setPadding(dp(16),dp(7),dp(16),0);page.addView(wrap,new LinearLayout.LayoutParams(-1,0,1));EditText q=new EditText(this);q.setHint("Search in conversation");q.setHintTextColor(Color.rgb(174,179,187));q.setTextColor(Color.WHITE);q.setSingleLine(true);q.setTextSize(16);q.setPadding(dp(16),0,dp(16),0);q.setBackground(bg(Color.rgb(36,40,46),22));wrap.addView(q,new LinearLayout.LayoutParams(-1,dp(43)));LinearLayout results=new LinearLayout(this);results.setOrientation(LinearLayout.VERTICAL);ScrollView scroll=new ScrollView(this);scroll.addView(results,new ScrollView.LayoutParams(-1,-2));LinearLayout.LayoutParams slp=new LinearLayout.LayoutParams(-1,0,1);slp.topMargin=dp(8);wrap.addView(scroll,slp);final Runnable[] run=new Runnable[1];run[0]=()->{String query=q.getText().toString().trim();if(query.isEmpty()){results.removeAllViews();return;}api.get("/api/messaging/search?q="+Uri.encode(query)+"&conversationId="+c.optString("id"),(json,error)->main.post(()->{results.removeAllViews();if(error!=null){TextView e=text(error.getMessage(),13,Color.rgb(174,179,187),Typeface.NORMAL);e.setGravity(Gravity.CENTER);results.addView(e,new LinearLayout.LayoutParams(-1,dp(80)));return;}JSONArray a=json.optJSONArray("results");if(a==null||a.length()==0){TextView empty=text("No messages found",13,Color.rgb(174,179,187),Typeface.NORMAL);empty.setGravity(Gravity.CENTER);results.addView(empty,new LinearLayout.LayoutParams(-1,dp(80)));return;}for(int i=0;i<a.length();i++){JSONObject m=a.optJSONObject(i);if(m==null)continue;LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.VERTICAL);row.setPadding(dp(7),dp(10),dp(7),dp(10));TextView sn=text(senderName(m),15,Color.WHITE,Typeface.BOLD);row.addView(sn,new LinearLayout.LayoutParams(-1,dp(25)));TextView body=text(m.optString("body",previewForType(m.optString("type"))),13,Color.rgb(174,179,187),Typeface.NORMAL);body.setSingleLine(true);body.setEllipsize(TextUtils.TruncateAt.END);row.addView(body,new LinearLayout.LayoutParams(-1,dp(22)));results.addView(row,new LinearLayout.LayoutParams(-1,dp(58)));View div=new View(this);div.setBackgroundColor(Color.rgb(32,36,42));results.addView(div,new LinearLayout.LayoutParams(-1,dp(1)));row.setOnClickListener(v->{String target=m.optString("id");openConversation(c);main.postDelayed(()->{int pos=-1;for(int x=0;x<messages.size();x++)if(target.equals(messages.get(x).optString("id"))){pos=x;break;}if(pos>=0&&list!=null){list.setSelection(Math.max(0,pos-2));}},260);});}}));};q.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c1,int a){}public void onTextChanged(CharSequence cs,int st,int b,int c1){main.removeCallbacks(run[0]);main.postDelayed(run[0],240);}public void afterTextChanged(Editable e){}});q.requestFocus();getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);}
-    private String themeLabel(String key){String k=key==null?"default":key;String[] keys={"default","instagram","love","ocean","sunset","monochrome","glow-pup","odyssey","supergirl","avatar","olivia","backrooms","deli-boys","heart-drive","valentines"};String[] labels={"Default","Instagram","Love","Ocean","Sunset","Monochrome","Glow Pup","The Odyssey","Supergirl","Avatar: The Last Airbender","Olivia Rodrigo","Backrooms","Deli Boys","Heart Drive","Valentine’s Day"};for(int i=0;i<keys.length;i++)if(keys[i].equals(k))return labels[i];return"Default";}
-    private void showThemePage(JSONObject c){LinearLayout page=darkSubPage("Theme",this::showInfo);ScrollView scroll=new ScrollView(this);page.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));GridLayout grid=new GridLayout(this);grid.setColumnCount(3);grid.setPadding(dp(16),dp(12),dp(16),dp(28));scroll.addView(grid,new ScrollView.LayoutParams(-1,-2));String[] keys={"default","instagram","love","ocean","sunset","monochrome","glow-pup","odyssey","supergirl","avatar","olivia","backrooms","deli-boys","heart-drive","valentines"};int totalW=getResources().getDisplayMetrics().widthPixels-dp(56);int cardW=totalW/3;int previewH=Math.round(cardW/.69f);for(String key:keys){LinearLayout card=new LinearLayout(this);card.setOrientation(LinearLayout.VERTICAL);card.setPadding(dp(3),0,dp(3),dp(12));ThemePreviewView preview=new ThemePreviewView(this,key,key.equals(c.optString("theme","default")));card.addView(preview,new LinearLayout.LayoutParams(-1,previewH));TextView label=text(themeLabel(key),12,Color.WHITE,Typeface.NORMAL);label.setGravity(Gravity.TOP|Gravity.START);LinearLayout.LayoutParams llp=new LinearLayout.LayoutParams(-1,dp(38));llp.topMargin=dp(8);card.addView(label,llp);GridLayout.LayoutParams cp=new GridLayout.LayoutParams();cp.width=cardW;cp.height=previewH+dp(58);cp.setMargins(dp(2),0,dp(2),dp(4));grid.addView(card,cp);card.setOnClickListener(v->{String previous=c.optString("theme","default");try{c.put("theme",key);activeConversation=c;}catch(Exception ignored){}showThemePage(c);try{api.patch("/api/messaging/conversations/"+c.optString("id")+"/theme",new JSONObject().put("theme",key),(json,error)->main.post(()->{if(error!=null){try{c.put("theme",previous);}catch(Exception ignored){}toast(error.getMessage());showThemePage(c);return;}JSONObject nc=json.optJSONObject("conversation");if(nc!=null)activeConversation=nc;}));}catch(Exception e){toast(e.getMessage());}});}}
+    private String themeLabel(String key){String k=key==null?"default":key;String[] keys={"default","instagram","instagram-classic","love","ocean","sunset","monochrome","glow-pup","odyssey","supergirl","avatar","olivia","backrooms","deli-boys","heart-drive","valentines"};String[] labels={"Default","Instagram","Classic Instagram","Love","Ocean","Sunset","Monochrome","Glow Pup","The Odyssey","Supergirl","Avatar: The Last Airbender","Olivia Rodrigo","Backrooms","Deli Boys","Heart Drive","Valentine’s Day"};for(int i=0;i<keys.length;i++)if(keys[i].equals(k))return labels[i];return"Default";}
+    private void showThemePage(JSONObject c){LinearLayout page=darkSubPage("Theme",this::showInfo);ScrollView scroll=new ScrollView(this);page.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));GridLayout grid=new GridLayout(this);grid.setColumnCount(3);grid.setPadding(dp(16),dp(12),dp(16),dp(28));scroll.addView(grid,new ScrollView.LayoutParams(-1,-2));String[] keys={"default","instagram","instagram-classic","love","ocean","sunset","monochrome","glow-pup","odyssey","supergirl","avatar","olivia","backrooms","deli-boys","heart-drive","valentines"};int totalW=getResources().getDisplayMetrics().widthPixels-dp(56);int cardW=totalW/3;int previewH=Math.round(cardW/.69f);for(String key:keys){LinearLayout card=new LinearLayout(this);card.setOrientation(LinearLayout.VERTICAL);card.setPadding(dp(3),0,dp(3),dp(12));ThemePreviewView preview=new ThemePreviewView(this,key,key.equals(c.optString("theme","default")));card.addView(preview,new LinearLayout.LayoutParams(-1,previewH));TextView label=text(themeLabel(key),12,Color.WHITE,Typeface.NORMAL);label.setGravity(Gravity.TOP|Gravity.START);LinearLayout.LayoutParams llp=new LinearLayout.LayoutParams(-1,dp(38));llp.topMargin=dp(8);card.addView(label,llp);GridLayout.LayoutParams cp=new GridLayout.LayoutParams();cp.width=cardW;cp.height=previewH+dp(58);cp.setMargins(dp(2),0,dp(2),dp(4));grid.addView(card,cp);card.setOnClickListener(v->{String previous=c.optString("theme","default");try{c.put("theme",key);activeConversation=c;}catch(Exception ignored){}showThemePage(c);try{api.patch("/api/messaging/conversations/"+c.optString("id")+"/theme",new JSONObject().put("theme",key),(json,error)->main.post(()->{if(error!=null){try{c.put("theme",previous);}catch(Exception ignored){}toast(error.getMessage());showThemePage(c);return;}JSONObject nc=json.optJSONObject("conversation");if(nc!=null)activeConversation=nc;}));}catch(Exception e){toast(e.getMessage());}});}}
     private void showNicknames(JSONObject c){LinearLayout page=darkSubPage("Nicknames",this::showInfo);ScrollView scroll=new ScrollView(this);page.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(dp(12),dp(4),dp(12),0);scroll.addView(body,new ScrollView.LayoutParams(-1,-2));JSONArray ps=c.optJSONArray("participants");if(ps==null)return;for(int i=0;i<ps.length();i++){JSONObject person=ps.optJSONObject(i);if(person==null)continue;LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(9),dp(6),dp(9),dp(6));row.setBackgroundColor(Color.TRANSPARENT);View av=buildUserAvatar(avatarUrl(person),person.optString("name"),46);row.addView(av,new LinearLayout.LayoutParams(dp(46),dp(46)));LinearLayout labels=new LinearLayout(this);labels.setOrientation(LinearLayout.VERTICAL);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(54),1);lp.leftMargin=dp(10);row.addView(labels,lp);String nick=person.optString("nickname");labels.addView(text(nick.isEmpty()?"Set nickname":nick,15,Color.WHITE,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(28)));labels.addView(text(person.optString("originalName",person.optString("name")),12,Color.rgb(174,179,187),Typeface.NORMAL),new LinearLayout.LayoutParams(-1,dp(23)));TextView chev=text("›",22,Color.rgb(174,179,187),Typeface.NORMAL);chev.setGravity(Gravity.CENTER);row.addView(chev,new LinearLayout.LayoutParams(dp(28),dp(54)));body.addView(row,new LinearLayout.LayoutParams(-1,dp(66)));row.setOnClickListener(v->editNickname(c,person));}}
     private void editNickname(JSONObject c,JSONObject person){Dialog d=new Dialog(this);d.requestWindowFeature(Window.FEATURE_NO_TITLE);FrameLayout overlay=new FrameLayout(this);overlay.setBackgroundColor(Color.argb(153,0,0,0));LinearLayout card=new LinearLayout(this);card.setOrientation(LinearLayout.VERTICAL);card.setPadding(dp(18),dp(16),dp(18),dp(16));card.setBackground(bg(Color.rgb(39,43,48),18));FrameLayout.LayoutParams cp=new FrameLayout.LayoutParams(Math.min(getResources().getDisplayMetrics().widthPixels-dp(40),dp(340)),-2,Gravity.CENTER);overlay.addView(card,cp);card.addView(text("Set nickname",20,Color.WHITE,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(34)));EditText input=new EditText(this);input.setSingleLine(true);input.setMaxLines(1);input.setText(person.optString("nickname"));input.setHint(person.optString("originalName",person.optString("name")));input.setHintTextColor(Color.rgb(174,179,187));input.setTextColor(Color.WHITE);input.setPadding(dp(12),0,dp(12),0);input.setBackground(bg(Color.rgb(23,25,29),10));LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(-1,dp(44));ip.topMargin=dp(6);card.addView(input,ip);LinearLayout actions=new LinearLayout(this);actions.setGravity(Gravity.END);LinearLayout.LayoutParams alp=new LinearLayout.LayoutParams(-1,dp(48));alp.topMargin=dp(10);card.addView(actions,alp);Button cancel=new Button(this);cancel.setText("Cancel");cancel.setTextColor(Color.WHITE);cancel.setAllCaps(false);cancel.setBackground(bg(Color.rgb(58,63,69),9));actions.addView(cancel,new LinearLayout.LayoutParams(dp(88),dp(39)));Button save=new Button(this);save.setText("Save");save.setTextColor(Color.WHITE);save.setAllCaps(false);save.setBackground(bg(Color.rgb(124,92,255),9));LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(dp(78),dp(39));sp.leftMargin=dp(8);actions.addView(save,sp);cancel.setOnClickListener(v->d.dismiss());save.setOnClickListener(v->{String value=input.getText().toString().trim(),old=person.optString("nickname");try{person.put("nickname",value);}catch(Exception ignored){}d.dismiss();showNicknames(c);try{api.patch("/api/messaging/conversations/"+c.optString("id")+"/nicknames/"+person.optString("id"),new JSONObject().put("nickname",value),(json,error)->main.post(()->{if(error!=null){try{person.put("nickname",old);}catch(Exception ignored){}toast(error.getMessage());showNicknames(c);return;}JSONObject nc=json.optJSONObject("conversation");if(nc!=null)activeConversation=nc;}));}catch(Exception e){toast(e.getMessage());}});d.setContentView(overlay);d.show();Window w=d.getWindow();if(w!=null){w.setBackgroundDrawableResource(android.R.color.transparent);w.setDimAmount(0);w.setLayout(-1,-1);}input.requestFocus();input.setSelection(input.length());}
     private void showCreateGroupFromActive(JSONObject c){Set<String> selected=new HashSet<>();JSONArray existing=c.optJSONArray("participants");if(existing!=null)for(int i=0;i<existing.length();i++){JSONObject p=existing.optJSONObject(i);if(p!=null&&!p.optBoolean("isSelf"))selected.add(p.optString("id"));}root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(8),0,dp(8),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(56)));ImageButton back=icon(R.drawable.ic_msg_back,40,TEXT);head.addView(back);back.setOnClickListener(v->showInfo());TextView title=text("New group",20,TEXT,Typeface.BOLD);head.addView(title,new LinearLayout.LayoutParams(0,-1,1));EditText q=new EditText(this);q.setHint("Search people");q.setSingleLine(true);q.setPadding(dp(15),0,dp(15),0);q.setBackground(bg(LIGHT,22));LinearLayout.LayoutParams qp=new LinearLayout.LayoutParams(-1,dp(40));qp.setMargins(dp(12),dp(4),dp(12),dp(5));page.addView(q,qp);FrameLayout content=new FrameLayout(this);page.addView(content,new LinearLayout.LayoutParams(-1,0,1));ListView contacts=new ListView(this);contacts.setDivider(null);content.addView(contacts,new FrameLayout.LayoutParams(-1,-1));Button create=new Button(this);create.setAllCaps(false);create.setTextColor(Color.WHITE);create.setTextSize(14);create.setBackground(bg(BLUE,10));FrameLayout.LayoutParams cfp=new FrameLayout.LayoutParams(-1,dp(48),Gravity.BOTTOM);cfp.setMargins(dp(12),dp(8),dp(12),dp(10));content.addView(create,cfp);final List<JSONObject> data=new ArrayList<>();BaseAdapter a=new BaseAdapter(){public int getCount(){return data.size();}public Object getItem(int p){return data.get(p);}public long getItemId(int p){return p;}public View getView(int pos,View cv,ViewGroup parent){JSONObject person=data.get(pos);LinearLayout row=new LinearLayout(MainActivity.this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(12),dp(6),dp(12),dp(6));View av=buildUserAvatar(person.optString("avatar"),person.optString("name"),48);row.addView(av,new LinearLayout.LayoutParams(dp(48),dp(48)));LinearLayout labels=new LinearLayout(MainActivity.this);labels.setOrientation(LinearLayout.VERTICAL);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(60),1);lp.leftMargin=dp(10);row.addView(labels,lp);labels.addView(text(person.optString("name"),15,TEXT,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(30)));String sub=person.optBoolean("isFriend")?"Friend":person.optBoolean("online")?"Active now":"";labels.addView(text(sub,12,SUB,Typeface.NORMAL),new LinearLayout.LayoutParams(-1,dp(24)));GroupSelectView check=new GroupSelectView(MainActivity.this,selected.contains(person.optString("id")));row.addView(check,new LinearLayout.LayoutParams(dp(28),dp(28)));return row;}};contacts.setAdapter(a);Runnable syncCreate=()->{create.setText("Create group ("+selected.size()+")");create.setVisibility(selected.isEmpty()?View.GONE:View.VISIBLE);};syncCreate.run();Runnable load=()->api.get("/api/messaging/contacts?q="+Uri.encode(q.getText().toString()),(json,error)->main.post(()->{if(error!=null)return;data.clear();JSONArray ar=json.optJSONArray("contacts");if(ar!=null)for(int i=0;i<ar.length();i++){JSONObject o=ar.optJSONObject(i);if(o!=null)data.add(o);}a.notifyDataSetChanged();syncCreate.run();}));load.run();q.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c1,int a1){}public void onTextChanged(CharSequence cs,int st,int b,int c1){main.removeCallbacks(load);main.postDelayed(load,250);}public void afterTextChanged(Editable e){}});contacts.setOnItemClickListener((pp,v,pos,id)->{String uid=data.get(pos).optString("id");if(selected.contains(uid))selected.remove(uid);else selected.add(uid);a.notifyDataSetChanged();syncCreate.run();});create.setOnClickListener(v->{if(selected.isEmpty())return;try{JSONArray ids=new JSONArray();for(String id:selected)ids.put(id);JSONObject req=new JSONObject().put("type","group").put("title","").put("memberIds",ids);api.post("/api/messaging/conversations",req,(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONObject conv=json.optJSONObject("conversation");if(conv!=null)openConversation(conv);}));}catch(Exception e){toast(e.getMessage());}});}
@@ -1662,7 +1752,7 @@ public class MainActivity extends Activity {
                         :timeRevealOffset+dp(10);
                 moving.setTranslationX(-edgeTravel);
 
-                float max=dp(78);
+                float max=dp(58);
                 float progress=max<=0f?0f:
                     Math.max(0f,Math.min(1f,timeRevealOffset/max));
 
@@ -1719,6 +1809,8 @@ public class MainActivity extends Activity {
         list.setOnTouchListener((v,e)->{
             switch(e.getActionMasked()){
                 case MotionEvent.ACTION_DOWN:
+                    timeRevealOffset=0f;
+                    applyConversationTimeReveal();
                     timeRevealDownX=e.getRawX();
                     timeRevealDownY=e.getRawY();
                     timeRevealDragging=false;
@@ -1732,7 +1824,13 @@ public class MainActivity extends Activity {
                     float ax=Math.abs(dx),ay=Math.abs(dy);
 
                     if(!timeRevealDragging){
-                        if(dx<-dp(12)&&ax>ay*1.2f){
+                        if(ay>dp(9)&&ay>ax*1.15f){
+                            timeRevealDownX=Float.NaN;
+                            timeRevealOffset=0f;
+                            applyConversationTimeReveal();
+                            return false;
+                        }
+                        if(dx<-dp(18)&&ax>ay*1.8f){
                             timeRevealDragging=true;
 
                             ViewParent parent=v.getParent();
@@ -1745,7 +1843,7 @@ public class MainActivity extends Activity {
                     }
 
                     timeRevealOffset=
-                        Math.max(0f,Math.min(-dx,dp(78)));
+                        Math.max(0f,Math.min(-dx,dp(58)));
                     applyConversationTimeReveal();
                     return true;
 
@@ -1784,7 +1882,7 @@ public class MainActivity extends Activity {
             outer.setClipToPadding(false);
             LinearLayout.LayoutParams swipeHostLp=new LinearLayout.LayoutParams(-1,-2);
             swipeHostLp.leftMargin=dp(10);
-            swipeHostLp.rightMargin=dp(10);
+            swipeHostLp.rightMargin=mine?dp(4):dp(10);
             swipeHostLp.topMargin=dp(samePrev?1:3);
             swipeHostLp.bottomMargin=dp(sameNext?1:3);
             outer.addView(swipeHost,swipeHostLp);
@@ -1834,11 +1932,11 @@ public class MainActivity extends Activity {
 
             FrameLayout.LayoutParams sideTimeLp=
                 new FrameLayout.LayoutParams(
-                    dp(72),
+                    dp(54),
                     -1,
                     Gravity.END|Gravity.CENTER_VERTICAL
                 );
-            sideTimeLp.rightMargin=dp(4);
+            sideTimeLp.rightMargin=dp(3);
             swipeHost.addView(sideTime,sideTimeLp);
 
             LinearLayout row=new LinearLayout(MainActivity.this);
