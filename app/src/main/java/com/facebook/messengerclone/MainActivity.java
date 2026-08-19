@@ -559,7 +559,86 @@ public class MainActivity extends Activity {
             ?actionRow("Unsend",R.drawable.ic_msg_unsend,true)
             :actionRow("Delete for me",0,false);actionCard.addView(del);del.setOnClickListener(v->{d.dismiss();deleteMessage(m,mine);});
         bundle.setClickable(true);reactionsCard.setClickable(true);actionCard.setClickable(true);overlay.setClickable(true);overlay.setOnClickListener(v->d.dismiss());bundle.setOnClickListener(v->d.dismiss());reactionsCard.setOnClickListener(v->{});actionCard.setOnClickListener(v->{});d.setContentView(overlay);Window w=d.getWindow();d.show();if(w!=null){w.setBackgroundDrawableResource(android.R.color.transparent);w.setDimAmount(0f);w.setLayout(-1,-1);}}
-    private void react(JSONObject m,String emoji){try{api.post("/api/messaging/messages/"+m.optString("id")+"/reaction",new JSONObject().put("emoji",emoji),(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONObject n=json.optJSONObject("message");if(n!=null){JSONObject merged=mergeMessage(m,n);upsertMessage(merged);cacheMessagesNow();}}));}catch(Exception e){toast(e.getMessage());}}
+    private void react(JSONObject m,String emoji){
+        if(m==null)return;
+
+        JSONArray before;
+        try{
+            JSONArray existing=m.optJSONArray("reactions");
+            before=existing==null?new JSONArray():new JSONArray(existing.toString());
+        }catch(Exception e){
+            before=new JSONArray();
+        }
+
+        JSONArray next=new JSONArray();
+        try{
+            JSONArray current=m.optJSONArray("reactions");
+            if(current!=null){
+                for(int i=0;i<current.length();i++){
+                    JSONObject r=current.optJSONObject(i);
+                    if(r==null)continue;
+
+                    String uid=r.optString("userId",r.optString("userid"));
+                    boolean mine=r.optBoolean("mine")||(!selfId.isEmpty()&&selfId.equals(uid));
+                    if(!mine)next.put(new JSONObject(r.toString()));
+                }
+            }
+
+            if(emoji!=null&&!emoji.isEmpty()){
+                JSONObject mineReaction=new JSONObject()
+                    .put("emoji",emoji)
+                    .put("mine",true);
+                if(!selfId.isEmpty())mineReaction.put("userId",selfId);
+                mineReaction.put("name","You");
+                next.put(mineReaction);
+            }
+
+            m.put("reactions",next);
+        }catch(Exception ignored){}
+
+        if(messageAdapter!=null){
+            messageAdapter.notifyDataSetChanged();
+            if(list!=null)list.invalidateViews();
+        }
+        cacheMessagesNow();
+
+        final JSONArray rollback=before;
+
+        try{
+            api.post(
+                "/api/messaging/messages/"+m.optString("id")+"/reaction",
+                new JSONObject().put("emoji",emoji==null?"":emoji),
+                (json,error)->main.post(()->{
+                    if(error!=null){
+                        try{m.put("reactions",rollback);}catch(Exception ignored){}
+                        if(messageAdapter!=null){
+                            messageAdapter.notifyDataSetChanged();
+                            if(list!=null)list.invalidateViews();
+                        }
+                        cacheMessagesNow();
+                        toast(error.getMessage());
+                        return;
+                    }
+
+                    JSONObject n=json.optJSONObject("message");
+                    if(n!=null){
+                        JSONObject merged=mergeMessage(m,n);
+                        upsertMessage(merged);
+                        cacheMessagesNow();
+                    }
+                })
+            );
+        }catch(Exception e){
+            try{m.put("reactions",rollback);}catch(Exception ignored){}
+            if(messageAdapter!=null){
+                messageAdapter.notifyDataSetChanged();
+                if(list!=null)list.invalidateViews();
+            }
+            cacheMessagesNow();
+            toast(e.getMessage());
+        }
+    }
+
     private JSONObject mergeMessage(JSONObject oldMessage,JSONObject update){try{JSONObject merged=new JSONObject(oldMessage==null?"{}":oldMessage.toString());if(update!=null){java.util.Iterator<String> keys=update.keys();while(keys.hasNext()){String k=keys.next();Object value=update.opt(k);if(value!=null&&value!=JSONObject.NULL)merged.put(k,value);}}return merged;}catch(Exception e){return update!=null?update:oldMessage;}}
     private void showEmojiPickerForReaction(JSONObject m){showEmojiPickerInternal(emoji->react(m,emoji));}
     private void showReactionDetails(JSONObject m){
@@ -1268,150 +1347,199 @@ public class MainActivity extends Activity {
 
     private final class MessageAdapter extends BaseAdapter{public int getCount(){return messages.size();}public Object getItem(int p){return messages.get(p);}public long getItemId(int p){return p;}
         private int lastMineIndex(){for(int i=messages.size()-1;i>=0;i--)if(isMine(messages.get(i))&&!messages.get(i).optBoolean("pending"))return i;return-1;}
-        public View getView(int p,View cv,ViewGroup parent){JSONObject m=messages.get(p);LinearLayout outer=new LinearLayout(MainActivity.this);outer.setOrientation(LinearLayout.VERTICAL);if(needsStamp(p)){TextView stamp=text(clusterStamp(m.optString("createdAt")),11,Color.rgb(138,141,145),Typeface.NORMAL);stamp.setGravity(Gravity.CENTER);LinearLayout.LayoutParams slp=new LinearLayout.LayoutParams(-1,dp(31));slp.topMargin=dp(7);slp.bottomMargin=dp(2);outer.addView(stamp,slp);}if("system".equals(m.optString("type"))){TextView sys=text(m.optString("body"),12,Color.rgb(138,141,145),Typeface.NORMAL);sys.setGravity(Gravity.CENTER);sys.setPadding(dp(25),dp(8),dp(25),dp(8));outer.addView(sys,new LinearLayout.LayoutParams(-1,-2));return outer;}boolean mine=isMine(m),samePrev=p>0&&sameBurst(messages.get(p-1),m),sameNext=p+1<messages.size()&&sameBurst(m,messages.get(p+1));LinearLayout row=new LinearLayout(MainActivity.this);row.setGravity(mine?Gravity.END|Gravity.BOTTOM:Gravity.START|Gravity.BOTTOM);LinearLayout.LayoutParams rlp=new LinearLayout.LayoutParams(-1,-2);rlp.topMargin=dp(samePrev?1:3);rlp.bottomMargin=dp(sameNext?1:3);outer.addView(row,rlp);ImageView replyArrow=new ImageView(MainActivity.this);replyArrow.setImageResource(R.drawable.ic_msg_reply);replyArrow.setColorFilter(BLUE);replyArrow.setScaleType(ImageView.ScaleType.CENTER_INSIDE);replyArrow.setAlpha(0f);if(!mine)row.addView(replyArrow,new LinearLayout.LayoutParams(dp(28),dp(40)));if(!mine){View av=buildUserAvatar(senderAvatar(m),senderName(m),30);LinearLayout.LayoutParams alp=new LinearLayout.LayoutParams(dp(30),dp(30));alp.rightMargin=dp(5);if(samePrev)av.setVisibility(View.INVISIBLE);row.addView(av,alp);}LinearLayout stack=new LinearLayout(MainActivity.this);stack.setOrientation(LinearLayout.VERTICAL);stack.setGravity(mine?Gravity.END:Gravity.START);row.addView(stack,new LinearLayout.LayoutParams(-2,-2));if(mine&&m.optBoolean("pending")){ImageView pendingIcon=new ImageView(MainActivity.this);pendingIcon.setImageResource(R.drawable.ic_msg_send);pendingIcon.setColorFilter(Color.rgb(170,170,170));pendingIcon.setAlpha(.62f);pendingIcon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);LinearLayout.LayoutParams pendingLp=new LinearLayout.LayoutParams(dp(18),dp(22));pendingLp.leftMargin=dp(4);pendingLp.bottomMargin=dp(1);row.addView(pendingIcon,pendingLp);}if(mine)row.addView(replyArrow,new LinearLayout.LayoutParams(dp(28),dp(40)));
+        public View getView(int p,View cv,ViewGroup parent){JSONObject m=messages.get(p);LinearLayout outer=new LinearLayout(MainActivity.this);outer.setOrientation(LinearLayout.VERTICAL);if(needsStamp(p)){TextView stamp=text(clusterStamp(m.optString("createdAt")),11,Color.rgb(138,141,145),Typeface.NORMAL);stamp.setGravity(Gravity.CENTER);LinearLayout.LayoutParams slp=new LinearLayout.LayoutParams(-1,dp(31));slp.topMargin=dp(7);slp.bottomMargin=dp(2);outer.addView(stamp,slp);}if("system".equals(m.optString("type"))){TextView sys=text(m.optString("body"),12,Color.rgb(138,141,145),Typeface.NORMAL);sys.setGravity(Gravity.CENTER);sys.setPadding(dp(25),dp(8),dp(25),dp(8));outer.addView(sys,new LinearLayout.LayoutParams(-1,-2));return outer;}boolean mine=isMine(m),samePrev=p>0&&sameBurst(messages.get(p-1),m),sameNext=p+1<messages.size()&&sameBurst(m,messages.get(p+1));
+
+            FrameLayout swipeHost=new FrameLayout(MainActivity.this);
+            LinearLayout.LayoutParams swipeHostLp=new LinearLayout.LayoutParams(-1,-2);
+            swipeHostLp.topMargin=dp(samePrev?1:3);
+            swipeHostLp.bottomMargin=dp(sameNext?1:3);
+            outer.addView(swipeHost,swipeHostLp);
+
+            ImageView replyArrow=new ImageView(MainActivity.this);
+            replyArrow.setImageResource(R.drawable.ic_msg_reply);
+            replyArrow.setColorFilter(Color.WHITE);
+            replyArrow.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            replyArrow.setAlpha(0f);
+            replyArrow.setScaleX(.66f);
+            replyArrow.setScaleY(.66f);
+            replyArrow.setBackground(bg(Color.rgb(46,46,49),18));
+            replyArrow.setPadding(dp(7),dp(7),dp(7),dp(7));
+
+            FrameLayout.LayoutParams arrowLp=
+                new FrameLayout.LayoutParams(dp(34),dp(34),mine
+                    ?Gravity.END|Gravity.CENTER_VERTICAL
+                    :Gravity.START|Gravity.CENTER_VERTICAL);
+            arrowLp.leftMargin=mine?0:dp(4);
+            arrowLp.rightMargin=mine?dp(4):0;
+            swipeHost.addView(replyArrow,arrowLp);
+
+            LinearLayout row=new LinearLayout(MainActivity.this);
+            row.setGravity(mine?Gravity.END|Gravity.BOTTOM:Gravity.START|Gravity.BOTTOM);
+            swipeHost.addView(row,new FrameLayout.LayoutParams(-1,-2));
+
+            if(!mine){
+                View av=buildUserAvatar(senderAvatar(m),senderName(m),30);
+                LinearLayout.LayoutParams alp=new LinearLayout.LayoutParams(dp(30),dp(30));
+                alp.rightMargin=dp(5);
+                if(samePrev)av.setVisibility(View.INVISIBLE);
+                row.addView(av,alp);
+            }
+
+            LinearLayout stack=new LinearLayout(MainActivity.this);
+            stack.setOrientation(LinearLayout.VERTICAL);
+            stack.setGravity(mine?Gravity.END:Gravity.START);
+            row.addView(stack,new LinearLayout.LayoutParams(-2,-2));
+
+            if(mine&&m.optBoolean("pending")){
+                ImageView pendingIcon=new ImageView(MainActivity.this);
+                pendingIcon.setImageResource(R.drawable.ic_msg_send);
+                pendingIcon.setColorFilter(Color.rgb(170,170,170));
+                pendingIcon.setAlpha(.62f);
+                pendingIcon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+                pendingIcon.setRotation(-12f);
+                pendingIcon.setTranslationY(dp(4));
+
+                LinearLayout.LayoutParams pendingLp=
+                    new LinearLayout.LayoutParams(dp(18),dp(22));
+                pendingLp.leftMargin=dp(3);
+                row.addView(pendingIcon,pendingLp);
+            }
+
             JSONObject reply=m.optJSONObject("reply");if(reply!=null){LinearLayout rpWrap=new LinearLayout(MainActivity.this);rpWrap.setOrientation(LinearLayout.VERTICAL);rpWrap.setGravity(Gravity.START);int replyBg=themeReplyBackground();int replyText=themeReplyText();rpWrap.setBackground(bg(replyBg,18));TextView rp=text(replyPreviewFromReply(reply),12,replyText,Typeface.NORMAL);rp.setSingleLine(true);rp.setEllipsize(TextUtils.TruncateAt.END);rp.setPadding(dp(12),dp(8),dp(12),dp(8));rp.setMaxWidth((int)(getResources().getDisplayMetrics().widthPixels*.64f));rpWrap.addView(rp,new LinearLayout.LayoutParams(-2,-2));String replyId=reply.optString("id",reply.optString("messageId"));if(!replyId.isEmpty()){rpWrap.setClickable(true);rpWrap.setOnClickListener(v->jumpToMessage(replyId));}LinearLayout.LayoutParams rpp=new LinearLayout.LayoutParams(-2,-2);rpp.bottomMargin=dp(5);rpp.gravity=mine?Gravity.END:Gravity.START;stack.addView(rpWrap,rpp);}
             View content=buildMessageContent(m,mine,samePrev,sameNext);stack.addView(content,new LinearLayout.LayoutParams(-2,-2));
 
 
             if(isActuallyEdited(m)){TextView ed=text("edited",9,mine?Color.rgb(220,232,255):Color.rgb(110,113,117),Typeface.NORMAL);LinearLayout.LayoutParams ep=new LinearLayout.LayoutParams(-2,dp(14));ep.gravity=mine?Gravity.END:Gravity.START;ep.leftMargin=dp(4);ep.rightMargin=dp(4);stack.addView(ed,ep);}JSONArray reactions=m.optJSONArray("reactions");if(reactions!=null&&reactions.length()>0){StringBuilder r=new StringBuilder();for(int i=0;i<reactions.length();i++){JSONObject rr=reactions.optJSONObject(i);if(rr!=null)r.append(rr.optString("emoji"));}if(reactions.length()>1)r.append(" ").append(reactions.length());TextView badge=text(r.toString(),12,TEXT,Typeface.NORMAL);badge.setGravity(Gravity.CENTER);badge.setPadding(reactions.length()==1?0:dp(5),0,reactions.length()==1?0:dp(5),0);badge.setBackground(bg(Color.WHITE,11));badge.setElevation(0f);LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(reactions.length()==1?dp(22):-2,dp(22));bp.gravity=mine?Gravity.END:Gravity.START;bp.topMargin=-dp(4);stack.addView(badge,bp);badge.setOnClickListener(v->showReactionDetails(m));}
-            wireMessageGesture(row,stack,m,mine,replyArrow);if(mine&&p==lastMineIndex()&&p==messages.size()-1&&!m.optBoolean("pending")){String statusText=status(m);if(!statusText.isEmpty()){TextView st=text(statusText,10.5f,Color.rgb(138,141,145),Typeface.NORMAL);st.setGravity(Gravity.END);LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-2,dp(19));sp.gravity=Gravity.END;sp.rightMargin=dp(7);sp.topMargin=dp(1);outer.addView(st,sp);if("read".equals(m.optString("status")))main.postDelayed(()->{if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();},30000);}}return outer;}
+            wireMessageGesture(swipeHost,row,m,mine,replyArrow);if(mine&&p==lastMineIndex()&&p==messages.size()-1&&!m.optBoolean("pending")){String statusText=status(m);if(!statusText.isEmpty()){TextView st=text(statusText,10.5f,Color.rgb(138,141,145),Typeface.NORMAL);st.setGravity(Gravity.END);LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-2,dp(19));sp.gravity=Gravity.END;sp.rightMargin=dp(7);sp.topMargin=dp(1);outer.addView(st,sp);if("read".equals(m.optString("status")))main.postDelayed(()->{if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();},30000);}}return outer;}
         private String replyPreviewFromReply(JSONObject r){String b=r.optString("body").replaceFirst("^[🎤📷🎥🎬]\\s*","").trim();if(!b.isEmpty())return b;String t=r.optString("type");if("audio".equals(t))return"Voice message";if("image".equals(t))return"Photo";if("video".equals(t))return"Video";if("file".equals(t))return"File";if("shared_reel".equals(t))return"Reel";if("shared_post".equals(t))return"Post";return"Message";}
     }
     private void wireMessageGesture(
         View touchTarget,
-        View content,
+        View messageTrack,
         JSONObject m,
         boolean mine,
         View replyArrow
     ){
-        final float[] sx={Float.NaN},sy={0f},offset={0f};
-        final boolean[] dragging={false},longOpened={false},vertical={false};
+        final float[] downX={Float.NaN},downY={0f},offset={0f};
+        final boolean[] horizontal={false},vertical={false},longOpened={false};
         final Runnable[] hold={null};
 
         touchTarget.setOnTouchListener((v,e)->{
             switch(e.getActionMasked()){
                 case MotionEvent.ACTION_DOWN:
-                    sx[0]=e.getRawX();
-                    sy[0]=e.getRawY();
-                    offset[0]=0;
-                    dragging[0]=false;
+                    downX[0]=e.getRawX();
+                    downY[0]=e.getRawY();
+                    offset[0]=0f;
+                    horizontal[0]=false;
                     vertical[0]=false;
                     longOpened[0]=false;
 
-                    content.animate().cancel();
+                    messageTrack.animate().cancel();
                     replyArrow.animate().cancel();
                     replyArrow.setAlpha(0f);
-                    replyArrow.setScaleX(.72f);
-                    replyArrow.setScaleY(.72f);
+                    replyArrow.setScaleX(.66f);
+                    replyArrow.setScaleY(.66f);
+                    replyArrow.setRotation(mine?8f:-8f);
 
                     hold[0]=()->{
-                        if(
-                            Float.isNaN(sx[0]) ||
-                            dragging[0] ||
-                            vertical[0]
-                        )return;
-
+                        if(Float.isNaN(downX[0])||horizontal[0]||vertical[0])return;
                         longOpened[0]=true;
-                        showMessageActions(m,content);
+                        showMessageActions(m,messageTrack);
                     };
-
                     main.postDelayed(hold[0],300);
                     return true;
 
                 case MotionEvent.ACTION_MOVE:
-                    if(Float.isNaN(sx[0]))return false;
+                    if(Float.isNaN(downX[0]))return false;
 
-                    float dx=e.getRawX()-sx[0];
-                    float dy=e.getRawY()-sy[0];
+                    float dx=e.getRawX()-downX[0];
+                    float dy=e.getRawY()-downY[0];
                     float ax=Math.abs(dx);
                     float ay=Math.abs(dy);
 
-                    if(!dragging[0]){
-                        if(ay>dp(10)&&ay>ax*1.15f){
+                    if(!horizontal[0]){
+                        if(ay>dp(8)&&ay>ax*1.15f){
                             vertical[0]=true;
                             if(hold[0]!=null)main.removeCallbacks(hold[0]);
-                            sx[0]=Float.NaN;
-
+                            downX[0]=Float.NaN;
                             ViewParent parent=v.getParent();
-                            if(parent!=null){
-                                parent.requestDisallowInterceptTouchEvent(false);
-                            }
+                            if(parent!=null)parent.requestDisallowInterceptTouchEvent(false);
                             return false;
                         }
 
-                        if(ax>dp(8)&&ax>ay*1.25f){
-                            boolean allowed=mine?dx<0:dx>0;
-                            if(!allowed)return true;
+                        if(ax>dp(7)&&ax>ay*1.20f){
+                            boolean correctDirection=mine?dx<0:dx>0;
+                            if(!correctDirection)return true;
 
-                            dragging[0]=true;
+                            horizontal[0]=true;
                             if(hold[0]!=null)main.removeCallbacks(hold[0]);
-
                             ViewParent parent=v.getParent();
-                            if(parent!=null){
-                                parent.requestDisallowInterceptTouchEvent(true);
-                            }
+                            if(parent!=null)parent.requestDisallowInterceptTouchEvent(true);
                         }
                     }
 
-                    if(!dragging[0])return true;
+                    if(!horizontal[0])return true;
 
-                    float directional=mine?Math.max(0,-dx):Math.max(0,dx);
+                    float raw=mine?Math.max(0f,-dx):Math.max(0f,dx);
 
-                    float resisted;
-                    if(directional<=dp(42)){
-                        resisted=directional;
+                    float moved;
+                    if(raw<=dp(34)){
+                        moved=raw;
+                    }else if(raw<=dp(58)){
+                        moved=dp(34)+(raw-dp(34))*.62f;
                     }else{
-                        resisted=dp(42)+(directional-dp(42))*.34f;
+                        moved=dp(48.9f)+(raw-dp(58))*.20f;
                     }
+                    moved=Math.min(dp(63),moved);
 
-                    resisted=Math.min(dp(74),resisted);
-                    offset[0]=mine?-resisted:resisted;
+                    offset[0]=mine?-moved:moved;
+                    messageTrack.setTranslationX(offset[0]);
 
-                    content.setTranslationX(offset[0]);
+                    float progress=Math.min(1f,moved/dp(48f));
+                    float iconAlpha=Math.max(0f,Math.min(1f,(progress-.10f)/.72f));
+                    replyArrow.setAlpha(iconAlpha);
 
-                    float progress=Math.min(1f,resisted/dp(54f));
-                    replyArrow.setAlpha(Math.min(1f,progress*1.15f));
-
-                    float scale=.72f+(.28f*progress);
+                    float scale=.66f+.34f*progress;
                     replyArrow.setScaleX(scale);
                     replyArrow.setScaleY(scale);
-
+                    replyArrow.setRotation((mine?8f:-8f)*(1f-progress));
                     return true;
 
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
                     if(hold[0]!=null)main.removeCallbacks(hold[0]);
-
-                    if(Float.isNaN(sx[0]))return false;
+                    if(Float.isNaN(downX[0]))return false;
 
                     boolean trigger=
                         e.getActionMasked()==MotionEvent.ACTION_UP &&
-                        dragging[0] &&
-                        Math.abs(offset[0])>=dp(52);
+                        horizontal[0] &&
+                        Math.abs(offset[0])>=dp(47);
 
                     ViewParent parent=v.getParent();
-                    if(parent!=null){
-                        parent.requestDisallowInterceptTouchEvent(false);
-                    }
+                    if(parent!=null)parent.requestDisallowInterceptTouchEvent(false);
 
-                    content.animate()
-                        .translationX(0)
-                        .setDuration(225)
-                        .setInterpolator(
-                            new android.view.animation.OvershootInterpolator(.62f)
-                        )
+                    messageTrack.animate()
+                        .translationX(mine?dp(2):-dp(2))
+                        .setDuration(115)
+                        .setInterpolator(new DecelerateInterpolator())
+                        .withEndAction(()->messageTrack.animate()
+                            .translationX(0)
+                            .setDuration(135)
+                            .setInterpolator(new android.view.animation.OvershootInterpolator(.55f))
+                            .start())
                         .start();
 
                     replyArrow.animate()
                         .alpha(0f)
-                        .scaleX(.72f)
-                        .scaleY(.72f)
-                        .setDuration(175)
+                        .scaleX(.66f)
+                        .scaleY(.66f)
+                        .rotation(mine?8f:-8f)
+                        .setDuration(145)
                         .setInterpolator(new DecelerateInterpolator())
                         .start();
 
-                    sx[0]=Float.NaN;
-                    dragging[0]=false;
+                    downX[0]=Float.NaN;
+                    horizontal[0]=false;
 
                     if(trigger&&!longOpened[0]){
                         setReply(m);
@@ -1420,9 +1548,7 @@ public class MainActivity extends Activity {
                             messageInput.requestFocus();
                             messageInput.postDelayed(()->{
                                 InputMethodManager imm=
-                                    (InputMethodManager)getSystemService(
-                                        Context.INPUT_METHOD_SERVICE
-                                    );
+                                    (InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
                                 if(imm!=null){
                                     imm.showSoftInput(
                                         messageInput,
@@ -1432,7 +1558,6 @@ public class MainActivity extends Activity {
                             },55);
                         }
                     }
-
                     return true;
             }
             return false;
