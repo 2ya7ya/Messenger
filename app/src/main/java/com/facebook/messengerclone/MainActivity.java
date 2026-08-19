@@ -304,7 +304,7 @@ public class MainActivity extends Activity {
         loaderRow.addView(olderMessagesSpinner,spinnerLp);
 
         android.widget.AbsListView.LayoutParams loaderRowLp=
-            new android.widget.AbsListView.LayoutParams(-1,0);
+            new android.widget.AbsListView.LayoutParams(-1,dp(46));
         loaderRow.setLayoutParams(loaderRowLp);
         list.addHeaderView(loaderRow,null,false);
 
@@ -325,7 +325,7 @@ public class MainActivity extends Activity {
 
                 if(
                     newState==SCROLL_STATE_IDLE &&
-                    view.getFirstVisiblePosition()<=1
+                    view.getFirstVisiblePosition()<=list.getHeaderViewsCount()
                 ){
                     loadOlderMessagesPage();
                 }
@@ -1932,23 +1932,9 @@ public class MainActivity extends Activity {
         });
     }
     private void setOlderLoaderVisible(boolean visible){
-        if(olderMessagesLoaderRow==null)return;
-
-        ViewGroup.LayoutParams lp=olderMessagesLoaderRow.getLayoutParams();
-        if(lp==null){
-            lp=new android.widget.AbsListView.LayoutParams(-1,0);
-        }
-
-        int wanted=visible?dp(46):0;
-        if(lp.height!=wanted){
-            lp.height=wanted;
-            olderMessagesLoaderRow.setLayoutParams(lp);
-        }
-
-        if(olderMessagesSpinner!=null){
-            if(visible)olderMessagesSpinner.start();
-            else olderMessagesSpinner.stop();
-        }
+        if(olderMessagesSpinner==null)return;
+        if(visible)olderMessagesSpinner.start();
+        else olderMessagesSpinner.stop();
     }
 
     private void loadOlderMessagesPage(){
@@ -2042,6 +2028,8 @@ public class MainActivity extends Activity {
                     }
                 }
 
+                final int added=older.size();
+
                 if(!older.isEmpty()){
                     messages.addAll(0,older);
                     cacheMessagesNow();
@@ -2051,31 +2039,44 @@ public class MainActivity extends Activity {
                     }
                 }
 
-                final int added=older.size();
-
-                // First remove loader row height, then restore the exact
-                // pre-load message to exactly the same pixel position.
                 setOlderLoaderVisible(false);
 
-                list.post(()->list.post(()->{
-                    if(!stableAnchorId.isEmpty()){
-                        int newIndex=findMessageIndex(stableAnchorId);
+                // Calculate the target adapter position once from the stable
+                // anchor and apply it immediately before the next frame.
+                int targetPosition=-1;
 
-                        if(newIndex>=0){
+                if(!stableAnchorId.isEmpty()){
+                    int newIndex=findMessageIndex(stableAnchorId);
+                    if(newIndex>=0){
+                        targetPosition=
+                            newIndex+list.getHeaderViewsCount();
+                    }
+                }else if(fallbackPosition>=0){
+                    targetPosition=fallbackPosition+added;
+                }
+
+                final int stableTargetPosition=targetPosition;
+
+                if(stableTargetPosition>=0){
+                    list.setSelectionFromTop(
+                        stableTargetPosition,
+                        stableAnchorTop
+                    );
+
+                    // One post-layout correction only, using the exact same
+                    // message position and offset. No double-post bounce.
+                    list.post(()->{
+                        if(list!=null){
                             list.setSelectionFromTop(
-                                newIndex+list.getHeaderViewsCount(),
+                                stableTargetPosition,
                                 stableAnchorTop
                             );
                         }
-                    }else if(fallbackPosition>=0){
-                        list.setSelectionFromTop(
-                            fallbackPosition+added,
-                            stableAnchorTop
-                        );
-                    }
-
+                        loadingOlderMessages=false;
+                    });
+                }else{
                     loadingOlderMessages=false;
-                }));
+                }
             })
         );
     }
