@@ -116,7 +116,17 @@ public class MainActivity extends Activity {
         super.onPause();
     }
     @Override protected void onDestroy(){main.removeCallbacks(socketReconnect);if(socket!=null)socket.close(1000,"bye");socket=null;stopRecorder(false);super.onDestroy();}
-    @Override public void onBackPressed(){if(activeConversation!=null)showInbox(false);else super.onBackPressed();}
+    @Override public void onBackPressed(){
+        if(root!=null){
+            View stickerSheet=root.findViewWithTag("messenger-native-sticker-sheet");
+            if(stickerSheet!=null){
+                dismissMessengerStickerPicker(stickerSheet);
+                return;
+            }
+        }
+        if(activeConversation!=null)showInbox(false);
+        else super.onBackPressed();
+    }
 
     private int dp(float n){return Math.round(n*getResources().getDisplayMetrics().density);}    
     private GradientDrawable bg(int color,float radius){GradientDrawable g=new GradientDrawable();g.setColor(color);g.setCornerRadius(dp(radius));return g;}
@@ -558,7 +568,7 @@ public class MainActivity extends Activity {
         LinearLayout actionCard=new LinearLayout(this);actionCard.setOrientation(LinearLayout.VERTICAL);actionCard.setPadding(0,dp(5),0,dp(5));actionCard.setBackground(bg(Color.argb(239,36,39,43),17));LinearLayout.LayoutParams acLp=new LinearLayout.LayoutParams(actionW,-2);acLp.topMargin=dp(8);acLp.gravity=mine?Gravity.END:Gravity.START;bundle.addView(actionCard,acLp);
         LinearLayout reply=actionRow("Reply",R.drawable.ic_msg_reply,false);actionCard.addView(reply);reply.setOnClickListener(v->{d.dismiss();setReply(m);messageInput.requestFocus();});if(editable){LinearLayout edit=actionRow("Edit",R.drawable.ic_msg_edit,false);actionCard.addView(edit);edit.setOnClickListener(v->{d.dismiss();editMessage(m);});}LinearLayout forward=actionRow("Forward",R.drawable.ic_msg_forward,false);actionCard.addView(forward);forward.setOnClickListener(v->{d.dismiss();forwardMessagePicker(m);});if("text".equals(m.optString("type"))&&!m.optString("body").isEmpty()){LinearLayout copy=actionRow("Copy",R.drawable.ic_msg_copy,false);actionCard.addView(copy);copy.setOnClickListener(v->{d.dismiss();ClipboardManager cm=(ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);cm.setPrimaryClip(ClipData.newPlainText("message",m.optString("body")));toast("Copied");});}LinearLayout del=mine
             ?actionRow("Unsend",R.drawable.ic_msg_unsend,true)
-            :actionRow("Delete for me",0,false);actionCard.addView(del);del.setOnClickListener(v->{d.dismiss();deleteMessage(m,mine);});
+            :actionRow("Delete for me",R.drawable.ic_msg_delete_me,false);actionCard.addView(del);del.setOnClickListener(v->{d.dismiss();deleteMessage(m,mine);});
         bundle.setClickable(true);reactionsCard.setClickable(true);actionCard.setClickable(true);overlay.setClickable(true);overlay.setOnClickListener(v->d.dismiss());bundle.setOnClickListener(v->d.dismiss());reactionsCard.setOnClickListener(v->{});actionCard.setOnClickListener(v->{});d.setContentView(overlay);Window w=d.getWindow();d.show();if(w!=null){w.setBackgroundDrawableResource(android.R.color.transparent);w.setDimAmount(0f);w.setLayout(-1,-1);}}
     private void react(JSONObject m,String emoji){
         if(m==null)return;
@@ -1422,16 +1432,25 @@ public class MainActivity extends Activity {
     private int themeReplyText(){switch(activeTheme()){case"glow-pup":return Color.rgb(238,233,255);case"odyssey":return Color.rgb(227,255,255);case"supergirl":return Color.rgb(255,240,228);case"avatar":return Color.rgb(234,255,248);case"olivia":return Color.rgb(255,230,239);case"backrooms":return Color.rgb(255,251,216);case"deli-boys":return Color.rgb(255,244,233);case"heart-drive":return Color.rgb(238,231,255);case"valentines":return Color.rgb(243,229,255);default:return Color.rgb(75,79,86);}}
 
     private final class ReplyProgressView extends View{
-        private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint trackPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint progressPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
         private float progress=0f;
 
         ReplyProgressView(Context context){
             super(context);
             setWillNotDraw(false);
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeCap(Paint.Cap.ROUND);
-            paint.setStrokeWidth(dp(2.7f));
-            paint.setColor(Color.WHITE);
+            setLayerType(View.LAYER_TYPE_SOFTWARE,null);
+
+            trackPaint.setStyle(Paint.Style.STROKE);
+            trackPaint.setStrokeCap(Paint.Cap.ROUND);
+            trackPaint.setStrokeWidth(dp(2.25f));
+            trackPaint.setColor(Color.argb(105,255,255,255));
+
+            progressPaint.setStyle(Paint.Style.STROKE);
+            progressPaint.setStrokeCap(Paint.Cap.ROUND);
+            progressPaint.setStrokeWidth(dp(2.65f));
+            progressPaint.setColor(Color.WHITE);
+
             setAlpha(0f);
         }
 
@@ -1442,24 +1461,24 @@ public class MainActivity extends Activity {
 
         @Override protected void onDraw(Canvas canvas){
             super.onDraw(canvas);
-            float inset=dp(1.8f);
+            float inset=dp(2.1f);
             android.graphics.RectF oval=new android.graphics.RectF(
                 inset,
                 inset,
                 getWidth()-inset,
                 getHeight()-inset
             );
-            paint.setColor(Color.argb(105,255,255,255));
-            canvas.drawArc(oval,-90f,360f,false,paint);
 
-            paint.setColor(Color.WHITE);
-            canvas.drawArc(
-                oval,
-                -90f,
-                360f*progress,
-                false,
-                paint
-            );
+            canvas.drawArc(oval,-90f,360f,false,trackPaint);
+            if(progress>0f){
+                canvas.drawArc(
+                    oval,
+                    -90f,
+                    360f*progress,
+                    false,
+                    progressPaint
+                );
+            }
         }
     }
 
@@ -1481,31 +1500,30 @@ public class MainActivity extends Activity {
             replyArrow.setColorFilter(Color.WHITE);
             replyArrow.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
             replyArrow.setAlpha(0f);
-            replyArrow.setScaleX(.66f);
-            replyArrow.setScaleY(.66f);
-            replyArrow.setBackground(bg(Color.rgb(46,46,49),18));
-            replyArrow.setPadding(dp(7),dp(7),dp(7),dp(7));
+            replyArrow.setScaleX(.78f);
+            replyArrow.setScaleY(.78f);
+            replyArrow.setBackground(bg(Color.rgb(41,42,45),17));
+            replyArrow.setPadding(dp(8),dp(8),dp(8),dp(8));
 
             FrameLayout.LayoutParams arrowLp=
                 new FrameLayout.LayoutParams(dp(34),dp(34),mine
                     ?Gravity.END|Gravity.CENTER_VERTICAL
                     :Gravity.START|Gravity.CENTER_VERTICAL);
             arrowLp.leftMargin=mine?0:dp(35);
-            arrowLp.rightMargin=mine?dp(1):0;
+            arrowLp.rightMargin=mine?dp(2):0;
 
             FrameLayout.LayoutParams progressLp=
-                new FrameLayout.LayoutParams(dp(40),dp(40),mine
+                new FrameLayout.LayoutParams(dp(42),dp(42),mine
                     ?Gravity.END|Gravity.CENTER_VERTICAL
                     :Gravity.START|Gravity.CENTER_VERTICAL);
-            progressLp.leftMargin=mine?0:dp(32);
+            progressLp.leftMargin=mine?0:dp(31);
             progressLp.rightMargin=mine?-dp(2):0;
 
             swipeHost.addView(replyArrow,arrowLp);
             swipeHost.addView(replyProgress,progressLp);
-            replyProgress.setClickable(false);
 
-            replyArrow.setTranslationX(0);
-            replyProgress.setTranslationX(0);
+            replyArrow.setTranslationX(0f);
+            replyProgress.setTranslationX(0f);
 
             LinearLayout row=new LinearLayout(MainActivity.this);
             row.setGravity(mine?Gravity.END|Gravity.BOTTOM:Gravity.START|Gravity.BOTTOM);
@@ -1557,7 +1575,7 @@ public class MainActivity extends Activity {
         ReplyProgressView replyProgress
     ){
         final float[] downX={Float.NaN},downY={0f},offset={0f};
-        final boolean[] horizontal={false},vertical={false},longOpened={false};
+        final boolean[] replying={false},vertical={false},longOpened={false};
         final Runnable[] hold={null};
 
         touchTarget.setOnTouchListener((v,e)->{
@@ -1566,25 +1584,26 @@ public class MainActivity extends Activity {
                     downX[0]=e.getRawX();
                     downY[0]=e.getRawY();
                     offset[0]=0f;
-                    horizontal[0]=false;
+                    replying[0]=false;
                     vertical[0]=false;
                     longOpened[0]=false;
 
                     messageTrack.animate().cancel();
                     replyArrow.animate().cancel();
-                    replyArrow.setAlpha(0f);
-                    replyArrow.setScaleX(.66f);
-                    replyArrow.setScaleY(.66f);
-                    replyArrow.setRotation(mine?8f:-8f);
-                    replyArrow.setTranslationX(0);
-
                     replyProgress.animate().cancel();
+
+                    replyArrow.setAlpha(0f);
+                    replyArrow.setScaleX(.78f);
+                    replyArrow.setScaleY(.78f);
+                    replyArrow.setRotation(0f);
+                    replyArrow.setTranslationX(0f);
+
                     replyProgress.setProgress(0f);
                     replyProgress.setAlpha(0f);
-                    replyProgress.setTranslationX(0);
+                    replyProgress.setTranslationX(0f);
 
                     hold[0]=()->{
-                        if(Float.isNaN(downX[0])||horizontal[0]||vertical[0])return;
+                        if(Float.isNaN(downX[0])||replying[0]||vertical[0])return;
                         longOpened[0]=true;
                         showMessageActions(m,messageTrack);
                     };
@@ -1598,9 +1617,17 @@ public class MainActivity extends Activity {
                     float dy=e.getRawY()-downY[0];
                     float ax=Math.abs(dx);
                     float ay=Math.abs(dy);
+                    boolean correctDirection=mine?dx<0:dx>0;
 
-                    if(!horizontal[0]){
-                        if(ay>dp(8)&&ay>ax*1.15f){
+                    if(!replying[0]){
+                        // Capture the reply gesture very early. A later up/down
+                        // movement must not cancel it.
+                        if(correctDirection&&ax>=dp(5)&&ax>=ay*.55f){
+                            replying[0]=true;
+                            if(hold[0]!=null)main.removeCallbacks(hold[0]);
+                            ViewParent parent=v.getParent();
+                            if(parent!=null)parent.requestDisallowInterceptTouchEvent(true);
+                        }else if(ay>dp(15)&&ax<dp(5)){
                             vertical[0]=true;
                             if(hold[0]!=null)main.removeCallbacks(hold[0]);
                             downX[0]=Float.NaN;
@@ -1608,102 +1635,88 @@ public class MainActivity extends Activity {
                             if(parent!=null)parent.requestDisallowInterceptTouchEvent(false);
                             return false;
                         }
-
-                        if(ax>dp(7)&&ax>ay*1.20f){
-                            boolean correctDirection=mine?dx<0:dx>0;
-                            if(!correctDirection)return true;
-
-                            horizontal[0]=true;
-                            if(hold[0]!=null)main.removeCallbacks(hold[0]);
-                            ViewParent parent=v.getParent();
-                            if(parent!=null)parent.requestDisallowInterceptTouchEvent(true);
-                        }
                     }
 
-                    if(!horizontal[0])return true;
+                    if(!replying[0])return true;
 
+                    // Once captured, ONLY horizontal distance matters.
                     float raw=mine?Math.max(0f,-dx):Math.max(0f,dx);
 
+                    // Instagram-like soft resistance.
                     float moved;
-                    if(raw<=dp(34)){
+                    if(raw<=dp(30)){
                         moved=raw;
                     }else if(raw<=dp(58)){
-                        moved=dp(34)+(raw-dp(34))*.62f;
+                        moved=dp(30)+(raw-dp(30))*.58f;
                     }else{
-                        moved=dp(48.9f)+(raw-dp(58))*.20f;
+                        moved=dp(46.25f)+(raw-dp(58))*.18f;
                     }
-                    moved=Math.min(dp(63),moved);
+                    moved=Math.min(dp(58),moved);
 
                     offset[0]=mine?-moved:moved;
                     messageTrack.setTranslationX(offset[0]);
 
-                    float progress=Math.min(1f,moved/dp(48f));
-                    float iconAlpha=Math.max(0f,Math.min(1f,(progress-.10f)/.72f));
-                    replyArrow.setAlpha(iconAlpha);
+                    float triggerDistance=dp(46f);
+                    float progress=Math.min(1f,moved/triggerDistance);
 
-                    float scale=.66f+.34f*progress;
-                    replyArrow.setScaleX(scale);
-                    replyArrow.setScaleY(scale);
-                    replyArrow.setRotation((mine?8f:-8f)*(1f-progress));
+                    // Reply button slides into position while scaling up.
+                    float iconTravel=dp(12f)*progress;
+                    replyArrow.setTranslationX(mine?-iconTravel:iconTravel);
+                    replyArrow.setAlpha(Math.min(1f,progress*1.55f));
+                    float iconScale=.78f+.22f*progress;
+                    replyArrow.setScaleX(iconScale);
+                    replyArrow.setScaleY(iconScale);
 
-                    // The outer stroke fills clockwise as the user approaches
-                    // the reply activation threshold, completing at trigger.
-                    float ringProgress=Math.min(1f,moved/dp(47f));
-                    replyProgress.setProgress(ringProgress);
-                    replyProgress.setAlpha(
-                        Math.max(.18f,Math.min(1f,ringProgress*1.30f))
-                    );
-
-                    float indicatorTravel=dp(18)*progress;
-                    replyArrow.setTranslationX(mine?-indicatorTravel:indicatorTravel);
-                    replyProgress.setTranslationX(mine?-indicatorTravel:indicatorTravel);
+                    // Visible circular track + clockwise progress.
+                    replyProgress.setTranslationX(mine?-iconTravel:iconTravel);
+                    replyProgress.setProgress(progress);
+                    replyProgress.setAlpha(Math.min(1f,.35f+progress*.65f));
                     return true;
 
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
                     if(hold[0]!=null)main.removeCallbacks(hold[0]);
+
                     if(Float.isNaN(downX[0]))return false;
 
                     boolean trigger=
                         e.getActionMasked()==MotionEvent.ACTION_UP &&
-                        horizontal[0] &&
-                        Math.abs(offset[0])>=dp(47);
+                        replying[0] &&
+                        Math.abs(offset[0])>=dp(46);
 
                     ViewParent parent=v.getParent();
                     if(parent!=null)parent.requestDisallowInterceptTouchEvent(false);
 
-                    messageTrack.animate()
-                        .translationX(mine?dp(2):-dp(2))
-                        .setDuration(115)
-                        .setInterpolator(new DecelerateInterpolator())
-                        .withEndAction(()->messageTrack.animate()
-                            .translationX(0)
-                            .setDuration(135)
-                            .setInterpolator(new android.view.animation.OvershootInterpolator(.55f))
-                            .start())
-                        .start();
+                    if(trigger){
+                        replyProgress.setProgress(1f);
+                        replyProgress.setAlpha(1f);
+                    }
 
-                    if(trigger)replyProgress.setProgress(1f);
+                    // Fast, subtle spring return.
+                    messageTrack.animate()
+                        .translationX(0f)
+                        .setDuration(190)
+                        .setInterpolator(new android.view.animation.OvershootInterpolator(.42f))
+                        .start();
 
                     replyArrow.animate()
                         .alpha(0f)
-                        .scaleX(.66f)
-                        .scaleY(.66f)
-                        .rotation(mine?8f:-8f)
-                        .translationX(0)
-                        .setDuration(145)
+                        .scaleX(.78f)
+                        .scaleY(.78f)
+                        .translationX(0f)
+                        .setDuration(150)
                         .setInterpolator(new DecelerateInterpolator())
                         .start();
 
                     replyProgress.animate()
                         .alpha(0f)
-                        .translationX(0)
-                        .setDuration(trigger?175:145)
+                        .translationX(0f)
+                        .setDuration(trigger?180:145)
                         .setInterpolator(new DecelerateInterpolator())
                         .start();
 
                     downX[0]=Float.NaN;
-                    horizontal[0]=false;
+                    replying[0]=false;
 
                     if(trigger&&!longOpened[0]){
                         setReply(m);
@@ -1730,11 +1743,65 @@ public class MainActivity extends Activity {
     private void jumpToMessage(String messageId){if(messageId==null||messageId.isEmpty()||activeConversation==null)return;int index=findMessageIndex(messageId);if(index>=0){animateMessageTarget(index);return;}loadOlderUntil(messageId,0);}
     private int findMessageIndex(String id){for(int i=0;i<messages.size();i++)if(id.equals(messages.get(i).optString("id")))return i;return-1;}
     private void loadOlderUntil(String target,int attempts){if(attempts>=40||beforeCursor==null||beforeCursor.isEmpty()){toast("Message is no longer available.");return;}String cursor=beforeCursor;api.get("/api/messaging/conversations/"+activeConversation.optString("id")+"/messages?limit=80&before="+cursor,(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONArray arr=json.optJSONArray("messages");beforeCursor=json.optString("nextBefore","");if(arr!=null){List<JSONObject> older=new ArrayList<>();for(int i=0;i<arr.length();i++){JSONObject x=arr.optJSONObject(i);if(x!=null)older.add(x);}messages.addAll(0,older);if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();}int idx=findMessageIndex(target);if(idx>=0)animateMessageTarget(idx);else if(!beforeCursor.isEmpty()&&!beforeCursor.equals(cursor))loadOlderUntil(target,attempts+1);else toast("Message is no longer available.");}));}
-    private void animateMessageTarget(int messageIndex){if(list==null)return;int position=messageIndex+list.getHeaderViewsCount();list.smoothScrollToPositionFromTop(position,Math.max(dp(70),list.getHeight()/2-dp(55)),520);final Runnable pulse=new Runnable(){int stable=0,last=-999,tries=0;public void run(){tries++;int first=list.getFirstVisiblePosition(),child=position-first;if(child>=0&&child<list.getChildCount()){View target=list.getChildAt(child);int y=target.getTop();if(Math.abs(y-last)<=1)stable++;else stable=0;last=y;if(stable>=5||tries>70){target.animate().cancel();target.setScaleX(1f);target.setScaleY(1f);target.animate().scaleX(1.12f).scaleY(1.12f).setDuration(420).setInterpolator(new DecelerateInterpolator()).withEndAction(()->main.postDelayed(()->target.animate().scaleX(1f).scaleY(1f).setDuration(520).setInterpolator(new DecelerateInterpolator()).start(),3600)).start();return;}}if(tries<90)main.postDelayed(this,32);}};main.postDelayed(pulse,180);}
+    private void animateMessageTarget(int messageIndex){
+        if(list==null)return;
+        int position=messageIndex+list.getHeaderViewsCount();
+
+        list.smoothScrollToPositionFromTop(
+            position,
+            Math.max(dp(70),list.getHeight()/2-dp(55)),
+            420
+        );
+
+        final Runnable pulse=new Runnable(){
+            int stable=0,last=-999,tries=0;
+
+            public void run(){
+                tries++;
+                int first=list.getFirstVisiblePosition();
+                int child=position-first;
+
+                if(child>=0&&child<list.getChildCount()){
+                    View target=list.getChildAt(child);
+                    int y=target.getTop();
+
+                    if(Math.abs(y-last)<=1)stable++;
+                    else stable=0;
+                    last=y;
+
+                    if(stable>=4||tries>55){
+                        target.animate().cancel();
+                        target.setScaleX(1f);
+                        target.setScaleY(1f);
+
+                        target.animate()
+                            .scaleX(1.075f)
+                            .scaleY(1.075f)
+                            .setDuration(160)
+                            .setInterpolator(new DecelerateInterpolator())
+                            .withEndAction(()->main.postDelayed(
+                                ()->target.animate()
+                                    .scaleX(1f)
+                                    .scaleY(1f)
+                                    .setDuration(220)
+                                    .setInterpolator(new DecelerateInterpolator())
+                                    .start(),
+                                650
+                            ))
+                            .start();
+                        return;
+                    }
+                }
+
+                if(tries<70)main.postDelayed(this,28);
+            }
+        };
+        main.postDelayed(pulse,140);
+    }
 
     private boolean isActuallyEdited(JSONObject m){String ea=m.optString("editedAt");if(ea.isEmpty())return false;Date e=parseDate(ea),c=parseDate(m.optString("createdAt"));return e!=null&&(c==null||e.getTime()-c.getTime()>1200);}
 
-    private View buildMessageContent(JSONObject m,boolean mine,boolean samePrev,boolean sameNext){String type=m.optString("type","text");JSONArray att=m.optJSONArray("attachments");JSONObject a=att!=null&&att.length()>0?att.optJSONObject(0):null;if("audio".equals(type)&&a!=null){int voiceBg=mine?themeSentColors()[0]:themeReceived();int voiceText=mine?themeSentText():themeReceivedText();int voiceAccent=contrastAccent(voiceBg,themeAccent(),voiceText);VoiceMessageView v=new VoiceMessageView(this,api.absolute(a.optString("url")),a.optString("name"),api.mediaHeaders(),voiceAccent,voiceBg,voiceText,voiceText);v.setLayoutParams(new LinearLayout.LayoutParams(Math.min(dp(310),(int)(getResources().getDisplayMetrics().widthPixels*.72f)),dp(78)));return v;}if("image".equals(type)&&a!=null){String mediaUrl=a.optString("url"),mime=a.optString("mime",a.optString("mimeType",a.optString("type")));String fileName=a.optString("name","");boolean stickerLike=m.optBoolean("sticker")||a.optBoolean("sticker")||mime.toLowerCase(Locale.ROOT).contains("gif")||fileName.toLowerCase(Locale.ROOT).endsWith(".gif")||fileName.toLowerCase(Locale.ROOT).startsWith("sticker-")||mediaUrl.contains("giphy.com");ImageView im=new ImageView(this);im.setAdjustViewBounds(true);im.setScaleType(ImageView.ScaleType.FIT_CENTER);im.setBackgroundColor(Color.TRANSPARENT);im.setClipToOutline(false);int max=stickerLike?dp(200):Math.min(dp(260),(int)(getResources().getDisplayMetrics().widthPixels*.72f));im.setMaxWidth(max);im.setMaxHeight(stickerLike?dp(220):dp(310));im.setLayoutParams(new LinearLayout.LayoutParams(-2,-2));if(stickerLike)stickers.load(mediaUrl,im);else{im.setClipToOutline(true);im.setBackground(bg(Color.rgb(17,17,17),15));images.load(mediaUrl,im);im.setOnClickListener(v->showMediaViewer(m,a));}return im;}if("video".equals(type)&&a!=null){VideoView vv=new VideoView(this);vv.setVideoURI(Uri.parse(api.absolute(a.optString("url"))),api.mediaHeaders());vv.setOnClickListener(v->{if(vv.isPlaying())vv.pause();else vv.start();});int w=Math.min(dp(260),(int)(getResources().getDisplayMetrics().widthPixels*.72f));vv.setLayoutParams(new LinearLayout.LayoutParams(w,dp(190)));return vv;}if("file".equals(type)&&a!=null){LinearLayout file=new LinearLayout(this);file.setGravity(Gravity.CENTER_VERTICAL);file.setPadding(dp(10),dp(8),dp(10),dp(8));TextView clip=text("📎",20,TEXT,Typeface.NORMAL);file.addView(clip,new LinearLayout.LayoutParams(dp(34),dp(42)));LinearLayout copy=new LinearLayout(this);copy.setOrientation(LinearLayout.VERTICAL);file.addView(copy,new LinearLayout.LayoutParams(dp(190),dp(48)));copy.addView(text(a.optString("name","File"),13,TEXT,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(27)));copy.addView(text(fileSize(a.optLong("size")),10,SUB,Typeface.NORMAL),new LinearLayout.LayoutParams(-1,dp(18)));return file;}if("shared_reel".equals(type)||"shared_post".equals(type)){TextView card=text("shared_reel".equals(type)?"Reel":"Post",15,TEXT,Typeface.BOLD);card.setGravity(Gravity.CENTER);card.setPadding(dp(18),dp(18),dp(18),dp(18));card.setBackground(bg(RECEIVED,15));return card;}String body=m.optString("body");TextView bubble=text(body,15,mine?themeSentText():themeReceivedText(),Typeface.NORMAL);bubble.setPadding(dp(12),dp(9),dp(12),dp(9));bubble.setMaxWidth((int)(getResources().getDisplayMetrics().widthPixels*.78f));bubble.setBackground(bubbleBg(mine,samePrev,sameNext));return bubble;}
+    private View buildMessageContent(JSONObject m,boolean mine,boolean samePrev,boolean sameNext){String type=m.optString("type","text");JSONArray att=m.optJSONArray("attachments");JSONObject a=att!=null&&att.length()>0?att.optJSONObject(0):null;if("audio".equals(type)&&a!=null){int voiceBg=mine?themeSentColors()[0]:themeReceived();int voiceText=mine?themeSentText():themeReceivedText();int voiceAccent=contrastAccent(voiceBg,themeAccent(),voiceText);VoiceMessageView v=new VoiceMessageView(this,api.absolute(a.optString("url")),a.optString("name"),api.mediaHeaders(),voiceAccent,voiceBg,voiceText,voiceText);v.setLayoutParams(new LinearLayout.LayoutParams(Math.min(dp(310),(int)(getResources().getDisplayMetrics().widthPixels*.72f)),dp(78)));return v;}if("image".equals(type)&&a!=null){String mediaUrl=a.optString("url"),mime=a.optString("mime",a.optString("mimeType",a.optString("type")));String fileName=a.optString("name","");boolean stickerLike=m.optBoolean("sticker")||a.optBoolean("sticker")||mime.toLowerCase(Locale.ROOT).contains("gif")||fileName.toLowerCase(Locale.ROOT).endsWith(".gif")||fileName.toLowerCase(Locale.ROOT).startsWith("sticker-")||mediaUrl.contains("giphy.com");ImageView im=new ImageView(this);im.setAdjustViewBounds(true);im.setScaleType(ImageView.ScaleType.FIT_CENTER);im.setBackgroundColor(Color.TRANSPARENT);im.setClipToOutline(false);int max=stickerLike?dp(178):Math.min(dp(260),(int)(getResources().getDisplayMetrics().widthPixels*.72f));im.setMaxWidth(max);im.setMaxHeight(stickerLike?dp(196):dp(310));im.setLayoutParams(new LinearLayout.LayoutParams(-2,-2));if(stickerLike)stickers.load(mediaUrl,im);else{im.setClipToOutline(true);im.setBackground(bg(Color.rgb(17,17,17),15));images.load(mediaUrl,im);im.setOnClickListener(v->showMediaViewer(m,a));}return im;}if("video".equals(type)&&a!=null){VideoView vv=new VideoView(this);vv.setVideoURI(Uri.parse(api.absolute(a.optString("url"))),api.mediaHeaders());vv.setOnClickListener(v->{if(vv.isPlaying())vv.pause();else vv.start();});int w=Math.min(dp(260),(int)(getResources().getDisplayMetrics().widthPixels*.72f));vv.setLayoutParams(new LinearLayout.LayoutParams(w,dp(190)));return vv;}if("file".equals(type)&&a!=null){LinearLayout file=new LinearLayout(this);file.setGravity(Gravity.CENTER_VERTICAL);file.setPadding(dp(10),dp(8),dp(10),dp(8));TextView clip=text("📎",20,TEXT,Typeface.NORMAL);file.addView(clip,new LinearLayout.LayoutParams(dp(34),dp(42)));LinearLayout copy=new LinearLayout(this);copy.setOrientation(LinearLayout.VERTICAL);file.addView(copy,new LinearLayout.LayoutParams(dp(190),dp(48)));copy.addView(text(a.optString("name","File"),13,TEXT,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(27)));copy.addView(text(fileSize(a.optLong("size")),10,SUB,Typeface.NORMAL),new LinearLayout.LayoutParams(-1,dp(18)));return file;}if("shared_reel".equals(type)||"shared_post".equals(type)){TextView card=text("shared_reel".equals(type)?"Reel":"Post",15,TEXT,Typeface.BOLD);card.setGravity(Gravity.CENTER);card.setPadding(dp(18),dp(18),dp(18),dp(18));card.setBackground(bg(RECEIVED,15));return card;}String body=m.optString("body");TextView bubble=text(body,15,mine?themeSentText():themeReceivedText(),Typeface.NORMAL);bubble.setPadding(dp(12),dp(9),dp(12),dp(9));bubble.setMaxWidth((int)(getResources().getDisplayMetrics().widthPixels*.78f));bubble.setBackground(bubbleBg(mine,samePrev,sameNext));return bubble;}
     private int contrastAccent(int bg,int preferred,int text){int br=Color.red(bg),bgc=Color.green(bg),bb=Color.blue(bg),pr=Color.red(preferred),pg=Color.green(preferred),pb=Color.blue(preferred);double lumBg=.299*br+.587*bgc+.114*bb,lumPref=.299*pr+.587*pg+.114*pb;return Math.abs(lumBg-lumPref)<68?text:preferred;}
     private String relativeTime(String value){Date dt=parseDate(value);if(dt==null)return"";long sec=Math.max(0,(System.currentTimeMillis()-dt.getTime())/1000);if(sec<60)return"Just now";long m=sec/60;if(m<60)return m+"m";long h=m/60;if(h<24)return h+"h";return(h/24)+"d";}
     private void showVideoMediaViewer(JSONObject message,JSONObject attachment){
