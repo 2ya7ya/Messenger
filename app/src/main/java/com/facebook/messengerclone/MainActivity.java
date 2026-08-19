@@ -1587,7 +1587,7 @@ public class MainActivity extends Activity {
         View messageTrack,
         JSONObject m,
         boolean mine,
-        View replyArrow,
+        ImageView replyArrow,
         ReplyProgressView replyProgress
     ){
         final float[] downX={Float.NaN},downY={0f},offset={0f};
