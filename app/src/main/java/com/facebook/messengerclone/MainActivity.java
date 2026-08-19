@@ -1345,6 +1345,43 @@ public class MainActivity extends Activity {
     private int themeReplyBackground(){switch(activeTheme()){case"monochrome":return Color.rgb(214,214,214);case"glow-pup":return Color.rgb(52,43,105);case"odyssey":return Color.rgb(36,85,90);case"supergirl":return Color.rgb(82,43,38);case"avatar":return Color.rgb(52,85,80);case"olivia":return Color.rgb(86,64,76);case"backrooms":return Color.rgb(81,76,41);case"deli-boys":return Color.rgb(61,57,52);case"heart-drive":return Color.rgb(50,27,112);case"valentines":return Color.rgb(73,18,118);default:return Color.rgb(223,225,229);}}
     private int themeReplyText(){switch(activeTheme()){case"glow-pup":return Color.rgb(238,233,255);case"odyssey":return Color.rgb(227,255,255);case"supergirl":return Color.rgb(255,240,228);case"avatar":return Color.rgb(234,255,248);case"olivia":return Color.rgb(255,230,239);case"backrooms":return Color.rgb(255,251,216);case"deli-boys":return Color.rgb(255,244,233);case"heart-drive":return Color.rgb(238,231,255);case"valentines":return Color.rgb(243,229,255);default:return Color.rgb(75,79,86);}}
 
+    private final class ReplyProgressView extends View{
+        private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        private float progress=0f;
+
+        ReplyProgressView(Context context){
+            super(context);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeWidth(dp(2));
+            paint.setColor(Color.WHITE);
+            setAlpha(0f);
+        }
+
+        void setProgress(float value){
+            progress=Math.max(0f,Math.min(1f,value));
+            invalidate();
+        }
+
+        @Override protected void onDraw(Canvas canvas){
+            super.onDraw(canvas);
+            float inset=dp(1.8f);
+            android.graphics.RectF oval=new android.graphics.RectF(
+                inset,
+                inset,
+                getWidth()-inset,
+                getHeight()-inset
+            );
+            canvas.drawArc(
+                oval,
+                -90f,
+                360f*progress,
+                false,
+                paint
+            );
+        }
+    }
+
     private final class MessageAdapter extends BaseAdapter{public int getCount(){return messages.size();}public Object getItem(int p){return messages.get(p);}public long getItemId(int p){return p;}
         private int lastMineIndex(){for(int i=messages.size()-1;i>=0;i--)if(isMine(messages.get(i))&&!messages.get(i).optBoolean("pending"))return i;return-1;}
         public View getView(int p,View cv,ViewGroup parent){JSONObject m=messages.get(p);LinearLayout outer=new LinearLayout(MainActivity.this);outer.setOrientation(LinearLayout.VERTICAL);if(needsStamp(p)){TextView stamp=text(clusterStamp(m.optString("createdAt")),11,Color.rgb(138,141,145),Typeface.NORMAL);stamp.setGravity(Gravity.CENTER);LinearLayout.LayoutParams slp=new LinearLayout.LayoutParams(-1,dp(31));slp.topMargin=dp(7);slp.bottomMargin=dp(2);outer.addView(stamp,slp);}if("system".equals(m.optString("type"))){TextView sys=text(m.optString("body"),12,Color.rgb(138,141,145),Typeface.NORMAL);sys.setGravity(Gravity.CENTER);sys.setPadding(dp(25),dp(8),dp(25),dp(8));outer.addView(sys,new LinearLayout.LayoutParams(-1,-2));return outer;}boolean mine=isMine(m),samePrev=p>0&&sameBurst(messages.get(p-1),m),sameNext=p+1<messages.size()&&sameBurst(m,messages.get(p+1));
@@ -1354,6 +1391,9 @@ public class MainActivity extends Activity {
             swipeHostLp.topMargin=dp(samePrev?1:3);
             swipeHostLp.bottomMargin=dp(sameNext?1:3);
             outer.addView(swipeHost,swipeHostLp);
+
+            ReplyProgressView replyProgress=
+                new ReplyProgressView(MainActivity.this);
 
             ImageView replyArrow=new ImageView(MainActivity.this);
             replyArrow.setImageResource(R.drawable.ic_msg_reply);
@@ -1369,9 +1409,23 @@ public class MainActivity extends Activity {
                 new FrameLayout.LayoutParams(dp(34),dp(34),mine
                     ?Gravity.END|Gravity.CENTER_VERTICAL
                     :Gravity.START|Gravity.CENTER_VERTICAL);
-            arrowLp.leftMargin=mine?0:dp(4);
-            arrowLp.rightMargin=mine?dp(4):0;
+            arrowLp.leftMargin=mine?0:dp(1);
+            arrowLp.rightMargin=mine?dp(1):0;
+
+            FrameLayout.LayoutParams progressLp=
+                new FrameLayout.LayoutParams(dp(38),dp(38),mine
+                    ?Gravity.END|Gravity.CENTER_VERTICAL
+                    :Gravity.START|Gravity.CENTER_VERTICAL);
+            progressLp.leftMargin=mine?0:-dp(1);
+            progressLp.rightMargin=mine?-dp(1):0;
+
+            swipeHost.addView(replyProgress,progressLp);
             swipeHost.addView(replyArrow,arrowLp);
+
+            // Keep both the icon and its progress outline tucked just beyond
+            // the screen-side edge until the reply swipe starts.
+            replyArrow.setTranslationX(mine?dp(30):-dp(30));
+            replyProgress.setTranslationX(mine?dp(28):-dp(28));
 
             LinearLayout row=new LinearLayout(MainActivity.this);
             row.setGravity(mine?Gravity.END|Gravity.BOTTOM:Gravity.START|Gravity.BOTTOM);
@@ -1396,8 +1450,8 @@ public class MainActivity extends Activity {
                 pendingIcon.setColorFilter(Color.rgb(170,170,170));
                 pendingIcon.setAlpha(.62f);
                 pendingIcon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-                pendingIcon.setRotation(-12f);
-                pendingIcon.setTranslationY(dp(4));
+                pendingIcon.setRotation(-21f);
+                pendingIcon.setTranslationY(dp(5));
 
                 LinearLayout.LayoutParams pendingLp=
                     new LinearLayout.LayoutParams(dp(18),dp(22));
@@ -1410,7 +1464,7 @@ public class MainActivity extends Activity {
 
 
             if(isActuallyEdited(m)){TextView ed=text("edited",9,mine?Color.rgb(220,232,255):Color.rgb(110,113,117),Typeface.NORMAL);LinearLayout.LayoutParams ep=new LinearLayout.LayoutParams(-2,dp(14));ep.gravity=mine?Gravity.END:Gravity.START;ep.leftMargin=dp(4);ep.rightMargin=dp(4);stack.addView(ed,ep);}JSONArray reactions=m.optJSONArray("reactions");if(reactions!=null&&reactions.length()>0){StringBuilder r=new StringBuilder();for(int i=0;i<reactions.length();i++){JSONObject rr=reactions.optJSONObject(i);if(rr!=null)r.append(rr.optString("emoji"));}if(reactions.length()>1)r.append(" ").append(reactions.length());TextView badge=text(r.toString(),12,TEXT,Typeface.NORMAL);badge.setGravity(Gravity.CENTER);badge.setPadding(reactions.length()==1?0:dp(5),0,reactions.length()==1?0:dp(5),0);badge.setBackground(bg(Color.WHITE,11));badge.setElevation(0f);LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(reactions.length()==1?dp(22):-2,dp(22));bp.gravity=mine?Gravity.END:Gravity.START;bp.topMargin=-dp(4);stack.addView(badge,bp);badge.setOnClickListener(v->showReactionDetails(m));}
-            wireMessageGesture(swipeHost,row,m,mine,replyArrow);if(mine&&p==lastMineIndex()&&p==messages.size()-1&&!m.optBoolean("pending")){String statusText=status(m);if(!statusText.isEmpty()){TextView st=text(statusText,10.5f,Color.rgb(138,141,145),Typeface.NORMAL);st.setGravity(Gravity.END);LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-2,dp(19));sp.gravity=Gravity.END;sp.rightMargin=dp(7);sp.topMargin=dp(1);outer.addView(st,sp);if("read".equals(m.optString("status")))main.postDelayed(()->{if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();},30000);}}return outer;}
+            wireMessageGesture(content,row,m,mine,replyArrow,replyProgress);if(mine&&p==lastMineIndex()&&p==messages.size()-1&&!m.optBoolean("pending")){String statusText=status(m);if(!statusText.isEmpty()){TextView st=text(statusText,10.5f,Color.rgb(138,141,145),Typeface.NORMAL);st.setGravity(Gravity.END);LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-2,dp(19));sp.gravity=Gravity.END;sp.rightMargin=dp(7);sp.topMargin=dp(1);outer.addView(st,sp);if("read".equals(m.optString("status")))main.postDelayed(()->{if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();},30000);}}return outer;}
         private String replyPreviewFromReply(JSONObject r){String b=r.optString("body").replaceFirst("^[🎤📷🎥🎬]\\s*","").trim();if(!b.isEmpty())return b;String t=r.optString("type");if("audio".equals(t))return"Voice message";if("image".equals(t))return"Photo";if("video".equals(t))return"Video";if("file".equals(t))return"File";if("shared_reel".equals(t))return"Reel";if("shared_post".equals(t))return"Post";return"Message";}
     }
     private void wireMessageGesture(
@@ -1418,7 +1472,8 @@ public class MainActivity extends Activity {
         View messageTrack,
         JSONObject m,
         boolean mine,
-        View replyArrow
+        View replyArrow,
+        ReplyProgressView replyProgress
     ){
         final float[] downX={Float.NaN},downY={0f},offset={0f};
         final boolean[] horizontal={false},vertical={false},longOpened={false};
@@ -1440,6 +1495,12 @@ public class MainActivity extends Activity {
                     replyArrow.setScaleX(.66f);
                     replyArrow.setScaleY(.66f);
                     replyArrow.setRotation(mine?8f:-8f);
+                    replyArrow.setTranslationX(mine?dp(30):-dp(30));
+
+                    replyProgress.animate().cancel();
+                    replyProgress.setProgress(0f);
+                    replyProgress.setAlpha(0f);
+                    replyProgress.setTranslationX(mine?dp(28):-dp(28));
 
                     hold[0]=()->{
                         if(Float.isNaN(downX[0])||horizontal[0]||vertical[0])return;
@@ -1503,6 +1564,22 @@ public class MainActivity extends Activity {
                     replyArrow.setScaleX(scale);
                     replyArrow.setScaleY(scale);
                     replyArrow.setRotation((mine?8f:-8f)*(1f-progress));
+
+                    // The outer stroke fills clockwise as the user approaches
+                    // the reply activation threshold, completing at trigger.
+                    float ringProgress=Math.min(1f,moved/dp(47f));
+                    replyProgress.setProgress(ringProgress);
+                    replyProgress.setAlpha(
+                        Math.max(0f,Math.min(1f,(ringProgress-.06f)/.70f))
+                    );
+
+                    // Sent messages: right edge -> left/inward.
+                    // Received messages: left edge -> right/inward.
+                    float edgeTravel=dp(30)*(1f-progress);
+                    replyArrow.setTranslationX(mine?edgeTravel:-edgeTravel);
+
+                    float ringTravel=dp(28)*(1f-progress);
+                    replyProgress.setTranslationX(mine?ringTravel:-ringTravel);
                     return true;
 
                 case MotionEvent.ACTION_UP:
@@ -1529,12 +1606,22 @@ public class MainActivity extends Activity {
                             .start())
                         .start();
 
+                    if(trigger)replyProgress.setProgress(1f);
+
                     replyArrow.animate()
                         .alpha(0f)
                         .scaleX(.66f)
                         .scaleY(.66f)
                         .rotation(mine?8f:-8f)
+                        .translationX(mine?dp(30):-dp(30))
                         .setDuration(145)
+                        .setInterpolator(new DecelerateInterpolator())
+                        .start();
+
+                    replyProgress.animate()
+                        .alpha(0f)
+                        .translationX(mine?dp(28):-dp(28))
+                        .setDuration(trigger?175:145)
                         .setInterpolator(new DecelerateInterpolator())
                         .start();
 
