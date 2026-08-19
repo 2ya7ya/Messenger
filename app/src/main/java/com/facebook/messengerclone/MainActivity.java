@@ -88,7 +88,7 @@ public class MainActivity extends Activity {
     private static final long BURST_MS=5*60*1000L, STAMP_MS=15*60*1000L;
     private final Handler main=new Handler(Looper.getMainLooper());
     private ApiClient api; private MessengerCache cache; private ImageLoader images; private StickerLoader stickers; private WebSocket socket;
-    private FrameLayout root; private ListView list; private InboxAdapter inboxAdapter; private MessageAdapter messageAdapter;
+    private FrameLayout root; private ListView list; private ProgressBar olderMessagesLoader; private InboxAdapter inboxAdapter; private MessageAdapter messageAdapter;
     private final List<JSONObject> inbox=new ArrayList<>(), filteredInbox=new ArrayList<>(), messages=new ArrayList<>();
     private final Set<String> typingConversations=new HashSet<>();
     private final Set<String> stickerLastConversations=new HashSet<>();
@@ -278,7 +278,20 @@ public class MainActivity extends Activity {
 
     private void openConversation(JSONObject c){activeConversation=c;replyTo=null;messages.clear();composerHasText=false;typingStateSent=false;root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(6),0,dp(6),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(49)));ImageButton back=icon(R.drawable.ic_msg_back,35,TEXT);head.addView(back);back.setOnClickListener(v->showInbox(false));View avatar=buildConversationAvatar(c,31);LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(dp(31),dp(31));ap.leftMargin=dp(1);head.addView(avatar,ap);LinearLayout names=new LinearLayout(this);names.setOrientation(LinearLayout.VERTICAL);names.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams np=new LinearLayout.LayoutParams(0,-1,1);np.leftMargin=dp(7);head.addView(names,np);TextView name=text(c.optString("name","Conversation"),14,TEXT,Typeface.BOLD);names.addView(name,new LinearLayout.LayoutParams(-1,dp(24)));TextView status=text(conversationStatus(c),10,SUB,Typeface.NORMAL);names.addView(status,new LinearLayout.LayoutParams(-1,dp(17)));ImageButton info=icon(R.drawable.ic_msg_info,35,TEXT);head.addView(info);info.setOnClickListener(v->showInfo());View divider=new View(this);divider.setBackgroundColor(DIV);page.addView(divider,new LinearLayout.LayoutParams(-1,dp(1)));
         FrameLayout messageArea=new FrameLayout(this);page.addView(messageArea,new LinearLayout.LayoutParams(-1,0,1));
-        list=new ListView(this);list.setDivider(null);list.setSelector(android.R.color.transparent);list.setTranscriptMode(ListView.TRANSCRIPT_MODE_NORMAL);list.setPadding(dp(10),dp(12),dp(10),dp(26));list.setClipToPadding(false);list.setBackground(themeConversationBackground());messageArea.addView(list,new FrameLayout.LayoutParams(-1,-1));if("group".equals(c.optString("type")))list.addHeaderView(buildGroupConversationIntro(c),null,false);messageAdapter=new MessageAdapter();list.setAdapter(messageAdapter);
+        list=new ListView(this);list.setDivider(null);list.setSelector(android.R.color.transparent);list.setTranscriptMode(ListView.TRANSCRIPT_MODE_NORMAL);list.setPadding(dp(10),dp(12),dp(10),dp(26));list.setClipToPadding(false);list.setBackground(themeConversationBackground());messageArea.addView(list,new FrameLayout.LayoutParams(-1,-1));
+
+        olderMessagesLoader=new ProgressBar(this);
+        olderMessagesLoader.setIndeterminate(true);
+        olderMessagesLoader.setVisibility(View.GONE);
+        if(Build.VERSION.SDK_INT>=21){
+            olderMessagesLoader.getIndeterminateDrawable().setTint(Color.rgb(150,153,159));
+        }
+        FrameLayout.LayoutParams olderLoaderLp=
+            new FrameLayout.LayoutParams(dp(34),dp(34),Gravity.TOP|Gravity.CENTER_HORIZONTAL);
+        olderLoaderLp.topMargin=dp(10);
+        messageArea.addView(olderMessagesLoader,olderLoaderLp);
+
+        if("group".equals(c.optString("type")))list.addHeaderView(buildGroupConversationIntro(c),null,false);messageAdapter=new MessageAdapter();list.setAdapter(messageAdapter);
         list.setOnScrollListener(new android.widget.AbsListView.OnScrollListener(){
             @Override public void onScrollStateChanged(android.widget.AbsListView view,int state){}
 
@@ -1539,7 +1552,7 @@ public class MainActivity extends Activity {
             replyArrow.setScaleX(.78f);
             replyArrow.setScaleY(.78f);
             replyArrow.setBackgroundColor(Color.TRANSPARENT);
-            replyArrow.setPadding(dp(3.5f),dp(3.5f),dp(3.5f),dp(3.5f));
+            replyArrow.setPadding(dp(2.5f),dp(2.5f),dp(2.5f),dp(2.5f));
 
             FrameLayout.LayoutParams arrowLp=
                 new FrameLayout.LayoutParams(dp(27),dp(27),mine
@@ -1827,19 +1840,36 @@ public class MainActivity extends Activity {
         )return;
 
         loadingOlderMessages=true;
+        if(olderMessagesLoader!=null){
+            olderMessagesLoader.setVisibility(View.VISIBLE);
+            olderMessagesLoader.bringToFront();
+        }
 
         final String conversationId=activeConversation.optString("id");
         final String cursor=beforeCursor;
-        final int first=list.getFirstVisiblePosition();
-        View firstChild=list.getChildAt(0);
-        final int top=firstChild==null?0:firstChild.getTop();
         final int headers=list.getHeaderViewsCount();
+
+        // Anchor to the exact top visible message instead of relying on raw
+        // adapter positions, which shift when older rows are inserted.
+        final int firstVisible=list.getFirstVisiblePosition();
+        final int adapterIndex=firstVisible-headers;
+        String anchor="";
+        if(adapterIndex>=0&&adapterIndex<messages.size()){
+            anchor=messages.get(adapterIndex).optString("id","");
+        }
+        final String anchorId=anchor;
+
+        View firstChild=list.getChildAt(0);
+        final int anchorTop=firstChild==null?0:firstChild.getTop();
 
         api.get(
             "/api/messaging/conversations/"+conversationId+
             "/messages?limit=80&before="+cursor,
             (json,error)->main.post(()->{
                 loadingOlderMessages=false;
+                if(olderMessagesLoader!=null){
+                    olderMessagesLoader.setVisibility(View.GONE);
+                }
 
                 if(
                     activeConversation==null ||
@@ -1880,15 +1910,25 @@ public class MainActivity extends Activity {
                 if(messageAdapter!=null){
                     messageAdapter.notifyDataSetChanged();
 
-                    // Preserve exactly what the user was looking at while
-                    // inserting the older rows above it.
-                    final int added=older.size();
                     list.post(()->{
-                        if(headers>0&&first<headers){
-                            list.setSelectionFromTop(first,top);
-                        }else{
-                            list.setSelectionFromTop(first+added,top);
+                        // Re-find the same visible message by ID after prepend.
+                        // This keeps the viewport visually stationary.
+                        if(!anchorId.isEmpty()){
+                            int newIndex=findMessageIndex(anchorId);
+                            if(newIndex>=0){
+                                list.setSelectionFromTop(
+                                    newIndex+list.getHeaderViewsCount(),
+                                    anchorTop
+                                );
+                                return;
+                            }
                         }
+
+                        // Fallback only if the anchor had no stable server ID.
+                        list.setSelectionFromTop(
+                            firstVisible+older.size(),
+                            anchorTop
+                        );
                     });
                 }
             })
