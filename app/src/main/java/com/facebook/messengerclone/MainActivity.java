@@ -100,6 +100,8 @@ public class MainActivity extends Activity {
     private final Runnable socketReconnect=()->{ if(api!=null&&api.hasSession()) connectSocket(); };
     private ImageButton sendButton, micButton; private String selfId=""; private boolean refreshingMessages=false;
     private boolean composerHasText=false, typingStateSent=false, typingStartQueued=false; private long lastTypingWireAt=0L;
+    private float timeRevealOffset=0f,timeRevealDownX=Float.NaN,timeRevealDownY=Float.NaN;
+    private boolean timeRevealDragging=false;
     private MediaRecorder recorder; private File recordFile; private long recordStarted; private Runnable recordTicker; private float recordDownX,recordDownY; private boolean recordLocked=false,recordCanceled=false,pendingMicStart=false;
     private ImageButton recordCancelButton; private TextView recordCancelHint; private final float[] recordLevels=new float[34];
     private FrameLayout recordOverlay; private View recordLockIndicator; private TextView recordLockHint; private boolean recordLockReady=false,recordDeleteHot=false,recordLockHot=false;
@@ -341,6 +343,7 @@ public class MainActivity extends Activity {
                 // That was causing the viewport to jump between batches.
             }
         });
+        wireConversationTimeRevealGesture();
         typingView=text("",13,Color.rgb(138,141,145),Typeface.NORMAL);typingView.setPadding(dp(14),0,dp(8),0);typingView.setBackgroundColor(Color.TRANSPARENT);typingView.setVisibility(View.GONE);FrameLayout.LayoutParams tvp=new FrameLayout.LayoutParams(-2,dp(21),Gravity.START|Gravity.BOTTOM);tvp.leftMargin=dp(4);tvp.bottomMargin=dp(2);messageArea.addView(typingView,tvp);
         replyBar=new LinearLayout(this);replyBar.setGravity(Gravity.CENTER_VERTICAL);replyBar.setPadding(dp(15),dp(2),dp(8),dp(2));replyBar.setBackgroundColor(Color.WHITE);replyBar.setVisibility(View.GONE);page.addView(replyBar,new LinearLayout.LayoutParams(-1,dp(52)));
         buildComposer(page);loadCachedMessages(c.optString("id"));refreshMessages(c.optString("id"));markRead();}
@@ -1629,6 +1632,143 @@ public class MainActivity extends Activity {
         }
     }
 
+    private String revealMessageTime(JSONObject m){
+        if(m==null)return"";
+        Date d=parseDate(m.optString("createdAt"));
+        if(d==null)return"";
+        return new SimpleDateFormat("h:mm a",Locale.getDefault()).format(d);
+    }
+
+    private void applyConversationTimeReveal(){
+        if(list==null)return;
+        for(int i=0;i<list.getChildCount();i++){
+            applyConversationTimeRevealToTree(list.getChildAt(i));
+        }
+    }
+
+    private void applyConversationTimeRevealToTree(View v){
+        if(v==null)return;
+
+        Object tag=v.getTag();
+        if(tag instanceof Object[]){
+            Object[] parts=(Object[])tag;
+            if(parts.length==2&&parts[0] instanceof View&&parts[1] instanceof View){
+                View moving=(View)parts[0];
+                View time=(View)parts[1];
+
+                moving.setTranslationX(-timeRevealOffset);
+
+                float max=dp(78);
+                float progress=max<=0f?0f:
+                    Math.max(0f,Math.min(1f,timeRevealOffset/max));
+
+                time.setAlpha(progress);
+                time.setTranslationX(dp(16)*(1f-progress));
+            }
+        }
+
+        if(v instanceof ViewGroup){
+            ViewGroup g=(ViewGroup)v;
+            for(int i=0;i<g.getChildCount();i++){
+                applyConversationTimeRevealToTree(g.getChildAt(i));
+            }
+        }
+    }
+
+    private void resetConversationTimeReveal(){
+        final float start=timeRevealOffset;
+
+        if(start<=0f){
+            timeRevealOffset=0f;
+            applyConversationTimeReveal();
+            return;
+        }
+
+        final long started=SystemClock.uptimeMillis();
+        final long duration=145L;
+
+        Runnable anim=new Runnable(){
+            @Override public void run(){
+                float t=Math.min(
+                    1f,
+                    (SystemClock.uptimeMillis()-started)/(float)duration
+                );
+                float eased=1f-(1f-t)*(1f-t);
+
+                timeRevealOffset=start*(1f-eased);
+                applyConversationTimeReveal();
+
+                if(t<1f)main.postDelayed(this,16);
+                else{
+                    timeRevealOffset=0f;
+                    applyConversationTimeReveal();
+                }
+            }
+        };
+
+        main.post(anim);
+    }
+
+    private void wireConversationTimeRevealGesture(){
+        if(list==null)return;
+
+        list.setOnTouchListener((v,e)->{
+            switch(e.getActionMasked()){
+                case MotionEvent.ACTION_DOWN:
+                    timeRevealDownX=e.getRawX();
+                    timeRevealDownY=e.getRawY();
+                    timeRevealDragging=false;
+                    return false;
+
+                case MotionEvent.ACTION_MOVE:
+                    if(Float.isNaN(timeRevealDownX))return false;
+
+                    float dx=e.getRawX()-timeRevealDownX;
+                    float dy=e.getRawY()-timeRevealDownY;
+                    float ax=Math.abs(dx),ay=Math.abs(dy);
+
+                    if(!timeRevealDragging){
+                        if(dx<-dp(12)&&ax>ay*1.2f){
+                            timeRevealDragging=true;
+
+                            ViewParent parent=v.getParent();
+                            if(parent!=null){
+                                parent.requestDisallowInterceptTouchEvent(true);
+                            }
+                        }else{
+                            return false;
+                        }
+                    }
+
+                    timeRevealOffset=
+                        Math.max(0f,Math.min(-dx,dp(78)));
+                    applyConversationTimeReveal();
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    timeRevealDownX=Float.NaN;
+                    timeRevealDownY=Float.NaN;
+
+                    if(timeRevealDragging){
+                        timeRevealDragging=false;
+
+                        ViewParent parent=v.getParent();
+                        if(parent!=null){
+                            parent.requestDisallowInterceptTouchEvent(false);
+                        }
+
+                        resetConversationTimeReveal();
+                        return true;
+                    }
+
+                    return false;
+            }
+
+            return false;
+        });
+    }
+
     private final class MessageAdapter extends BaseAdapter{public int getCount(){return messages.size();}public Object getItem(int p){return messages.get(p);}public long getItemId(int p){return p;}
         private int lastMineIndex(){for(int i=messages.size()-1;i>=0;i--)if(isMine(messages.get(i))&&!messages.get(i).optBoolean("pending"))return i;return-1;}
         public View getView(int p,View cv,ViewGroup parent){JSONObject m=messages.get(p);LinearLayout outer=new LinearLayout(MainActivity.this);outer.setOrientation(LinearLayout.VERTICAL);if(needsStamp(p)){TextView stamp=text(clusterStamp(m.optString("createdAt")),11,Color.rgb(138,141,145),Typeface.NORMAL);stamp.setGravity(Gravity.CENTER);LinearLayout.LayoutParams slp=new LinearLayout.LayoutParams(-1,dp(31));slp.topMargin=dp(7);slp.bottomMargin=dp(2);outer.addView(stamp,slp);}if("system".equals(m.optString("type"))){TextView sys=text(m.optString("body"),12,Color.rgb(138,141,145),Typeface.NORMAL);sys.setGravity(Gravity.CENTER);sys.setPadding(dp(25),dp(8),dp(25),dp(8));outer.addView(sys,new LinearLayout.LayoutParams(-1,-2));return outer;}boolean mine=isMine(m),samePrev=p>0&&sameBurst(messages.get(p-1),m),sameNext=p+1<messages.size()&&sameBurst(m,messages.get(p+1));
@@ -1676,11 +1816,34 @@ public class MainActivity extends Activity {
             replyArrow.setTranslationX(0f);
             replyProgress.setTranslationX(0f);
 
+            TextView sideTime=text(
+                revealMessageTime(m),
+                12.5f,
+                Color.rgb(138,141,145),
+                Typeface.NORMAL
+            );
+            sideTime.setSingleLine(true);
+            sideTime.setAlpha(0f);
+            sideTime.setGravity(Gravity.CENTER_VERTICAL|Gravity.END);
+
+            FrameLayout.LayoutParams sideTimeLp=
+                new FrameLayout.LayoutParams(
+                    dp(72),
+                    -1,
+                    Gravity.END|Gravity.CENTER_VERTICAL
+                );
+            sideTimeLp.rightMargin=dp(4);
+            swipeHost.addView(sideTime,sideTimeLp);
+
             LinearLayout row=new LinearLayout(MainActivity.this);
             row.setClipChildren(false);
             row.setClipToPadding(false);
             row.setGravity(mine?Gravity.END|Gravity.BOTTOM:Gravity.START|Gravity.BOTTOM);
             swipeHost.addView(row,new FrameLayout.LayoutParams(-1,-2));
+
+            swipeHost.setTag(new Object[]{row,sideTime});
+            applyConversationTimeRevealToTree(swipeHost);
+
             replyArrow.bringToFront();
             replyProgress.bringToFront();
 
@@ -1710,8 +1873,8 @@ public class MainActivity extends Activity {
                 pendingIcon.setTranslationY(dp(2));
 
                 LinearLayout.LayoutParams pendingLp=
-                    new LinearLayout.LayoutParams(dp(21),dp(20));
-                pendingLp.leftMargin=dp(2);
+                    new LinearLayout.LayoutParams(dp(16),dp(16));
+                pendingLp.leftMargin=dp(3);
                 row.addView(pendingIcon,pendingLp);
             }
 
