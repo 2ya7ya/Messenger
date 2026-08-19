@@ -1738,10 +1738,9 @@ public class MainActivity extends Activity {
                     if(parent!=null)parent.requestDisallowInterceptTouchEvent(false);
 
                     if(trigger){
-                        int replyGray=Color.rgb(139,142,148);
                         replyProgress.setProgress(1f);
                         replyProgress.setAlpha(1f);
-                        replyArrow.setBackground(bg(replyGray,17));
+                        replyArrow.setBackground(bg(Color.rgb(139,142,148),17));
                         replyArrow.setColorFilter(Color.WHITE);
                     }
 
