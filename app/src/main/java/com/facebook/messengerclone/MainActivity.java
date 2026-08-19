@@ -1062,28 +1062,6 @@ public class MainActivity extends Activity {
         showInstagramMediaPicker();
     }
 
-    @Override public void onRequestPermissionsResult(
-        int requestCode,
-        String[] permissions,
-        int[] grantResults
-    ){
-        super.onRequestPermissionsResult(requestCode,permissions,grantResults);
-        if(requestCode==REQ_MEDIA){
-            if(hasInstagramMediaPermission())showInstagramMediaPicker();
-            else toast("Allow photo and video access to open your gallery.");
-            return;
-        }
-        if(requestCode==REQ_MIC){
-            if(grantResults.length>0&&grantResults[0]==PackageManager.PERMISSION_GRANTED){
-                pendingMicStart=false;
-                startRecorder();
-            }else{
-                pendingMicStart=false;
-                toast("Microphone permission is required.");
-            }
-        }
-    }
-
     private void showInstagramMediaPicker(){
         final Dialog d=new Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen);
         final LinearLayout page=new LinearLayout(this);
@@ -1303,7 +1281,35 @@ public class MainActivity extends Activity {
     private void showRecordingLocked(){if(recordBar==null)return;recordBar.setAlpha(1f);}
     private void stopRecorder(boolean send){if(recorder==null)return;long duration=System.currentTimeMillis()-recordStarted;boolean finalized=true;try{recorder.stop();}catch(Exception ex){finalized=false;}try{recorder.release();}catch(Exception ignored){}recorder=null;if(recordTicker!=null)main.removeCallbacks(recordTicker);if(recordOverlay!=null&&recordOverlay.getParent()!=null)((ViewGroup)recordOverlay.getParent()).removeView(recordOverlay);recordOverlay=null;if(composer!=null)composer.setAlpha(1f);File file=recordFile;recordFile=null;recordLocked=false;recordCanceled=false;recordLockReady=false;recordDeleteHot=false;recordLockHot=false;pendingMicStart=false;recordCancelButton=null;recordCancelHint=null;recordLockHint=null;recordLockIndicator=null;if(send&&finalized&&duration>=300&&file!=null&&file.exists())sendRecordedVoice(file,duration);else if(send&&duration>=300)toast("Voice recording could not be finalized.");else if(file!=null)file.delete();}
     private void sendRecordedVoice(File file,long duration){final String cid=activeConversation==null?"":activeConversation.optString("id");final String reply=replyTo==null?"":replyTo.optString("id");if(replyTo!=null)setReply(null);new Thread(()->{byte[] bytes=null;try{for(int i=0;i<8;i++){if(file.exists()&&file.length()>64){bytes=readAll(new FileInputStream(file));if(bytes.length>64)break;}Thread.sleep(80);}if(bytes==null||bytes.length<=64){main.post(()->toast("Voice recording is empty. Please try again."));file.delete();return;}String client="voice-native-"+UUID.randomUUID();byte[] payload=bytes;api.upload("/api/messaging/conversations/"+cid+"/attachment",payload,"voice-"+System.currentTimeMillis()+"-"+duration+"ms.m4a","audio/mp4","",client,reply,(json,error)->main.post(()->{try{file.delete();}catch(Exception ignored){}if(error!=null){toast(error.getMessage());return;}JSONObject m=json.optJSONObject("message");if(m!=null){upsertMessage(m);cacheMessagesNow();refreshInbox();}}));}catch(Exception e){try{file.delete();}catch(Exception ignored){}main.post(()->toast(e.getMessage()));}}).start();}
-    @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grantResults){super.onRequestPermissionsResult(requestCode,permissions,grantResults);if(requestCode==REQ_MIC){if(grantResults.length>0&&grantResults[0]==PackageManager.PERMISSION_GRANTED&&pendingMicStart){pendingMicStart=false;recordLocked=true;recordDownX=recordDownY=0;startRecorder();showRecordingLocked();vibrateSafe(18);}else pendingMicStart=false;}}
+    @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grantResults){
+        super.onRequestPermissionsResult(requestCode,permissions,grantResults);
+
+        if(requestCode==REQ_MEDIA){
+            if(hasInstagramMediaPermission()){
+                showInstagramMediaPicker();
+            }else{
+                toast("Allow photo and video access to open your gallery.");
+            }
+            return;
+        }
+
+        if(requestCode==REQ_MIC){
+            if(
+                grantResults.length>0 &&
+                grantResults[0]==PackageManager.PERMISSION_GRANTED &&
+                pendingMicStart
+            ){
+                pendingMicStart=false;
+                recordLocked=true;
+                recordDownX=recordDownY=0;
+                startRecorder();
+                showRecordingLocked();
+                vibrateSafe(18);
+            }else{
+                pendingMicStart=false;
+            }
+        }
+    }
 
     private void showContacts(){root.removeAllViews();activeConversation=null;LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(8),0,dp(8),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(56)));ImageButton back=icon(R.drawable.ic_msg_back,40,TEXT);head.addView(back);back.setOnClickListener(v->showInbox(false));TextView t=text("New message",20,TEXT,Typeface.BOLD);head.addView(t,new LinearLayout.LayoutParams(0,-1,1));EditText q=new EditText(this);q.setHint("Search people");q.setSingleLine(true);q.setBackground(bg(LIGHT,22));q.setPadding(dp(15),0,dp(15),0);LinearLayout.LayoutParams qp=new LinearLayout.LayoutParams(-1,dp(40));qp.setMargins(dp(12),dp(8),dp(12),dp(5));page.addView(q,qp);ListView contacts=new ListView(this);contacts.setDivider(null);page.addView(contacts,new LinearLayout.LayoutParams(-1,0,1));final List<JSONObject> data=new ArrayList<>();BaseAdapter a=new BaseAdapter(){public int getCount(){return data.size();}public Object getItem(int p){return data.get(p);}public long getItemId(int p){return p;}public View getView(int p,View cv,ViewGroup parent){JSONObject c=data.get(p);LinearLayout r=new LinearLayout(MainActivity.this);r.setGravity(Gravity.CENTER_VERTICAL);r.setPadding(dp(12),dp(6),dp(12),dp(6));View av=buildUserAvatar(c.optString("avatar"),c.optString("name"),48);r.addView(av,new LinearLayout.LayoutParams(dp(48),dp(48)));TextView n=text(c.optString("name"),15,TEXT,Typeface.BOLD);LinearLayout.LayoutParams nl=new LinearLayout.LayoutParams(0,dp(60),1);nl.leftMargin=dp(10);r.addView(n,nl);return r;}};contacts.setAdapter(a);Runnable load=()->api.get("/api/messaging/contacts?q="+Uri.encode(q.getText().toString()),(json,error)->main.post(()->{if(error!=null)return;data.clear();JSONArray ar=json.optJSONArray("contacts");if(ar!=null)for(int i=0;i<ar.length();i++){JSONObject o=ar.optJSONObject(i);if(o!=null)data.add(o);}a.notifyDataSetChanged();}));load.run();q.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int b,int c){main.removeCallbacks(load);main.postDelayed(load,250);}public void afterTextChanged(Editable e){}});contacts.setOnItemClickListener((p,v,pos,id)->{JSONObject c=data.get(pos);try{api.post("/api/messaging/conversations",new JSONObject().put("type","direct").put("userId",c.optString("id")),(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONObject conv=json.optJSONObject("conversation");if(conv!=null)openConversation(conv);}));}catch(Exception e){toast(e.getMessage());}});}
 
