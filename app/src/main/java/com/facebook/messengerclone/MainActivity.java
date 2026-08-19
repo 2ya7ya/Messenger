@@ -1194,7 +1194,7 @@ public class MainActivity extends Activity {
                         opened[0]=true;
                         showThreadActions(c,downY[0]);
                     };
-                    main.postDelayed(hold[0],330);
+                    main.postDelayed(hold[0],220);
                     return true;
 
                 case MotionEvent.ACTION_MOVE:
@@ -1284,6 +1284,22 @@ public class MainActivity extends Activity {
         threadSheetDragStart=Float.NaN;
     }
 
+    private boolean conversationIsMuted(JSONObject c){
+        if(c==null)return false;
+        if(c.optBoolean("muted"))return true;
+
+        String until=c.optString("mutedUntil","");
+        if(until==null)return false;
+        until=until.trim();
+        if(until.isEmpty()||"null".equalsIgnoreCase(until)||"false".equalsIgnoreCase(until))return false;
+
+        Date d=parseDate(until);
+        if(d!=null)return d.getTime()>System.currentTimeMillis();
+
+        // Some backends use a non-date sentinel only while muted.
+        return !"0".equals(until);
+    }
+
     private void showThreadActions(JSONObject c,float initialFingerY){
         final Dialog d=new Dialog(this);
         d.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -1334,9 +1350,9 @@ public class MainActivity extends Activity {
         );
         LinearLayout mute=threadActionRow(
             R.drawable.ic_info_mute,
-            c.optString("mutedUntil").isEmpty()
-                ?"Mute messages"
-                :"Unmute messages",
+            conversationIsMuted(c)
+                ?"Unmute messages"
+                :"Mute messages",
             false
         );
 
@@ -1426,7 +1442,7 @@ public class MainActivity extends Activity {
             .start();
     }
     private LinearLayout threadActionRow(int iconRes,String label,boolean danger){LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(22),0,dp(22),0);row.setMinimumHeight(dp(55));ImageView iv=new ImageView(this);iv.setImageResource(iconRes);int col=danger?Color.rgb(255,64,92):Color.WHITE;iv.setColorFilter(col);row.addView(iv,new LinearLayout.LayoutParams(dp(22),dp(22)));TextView t=text(label,16,col,Typeface.NORMAL);LinearLayout.LayoutParams tp=new LinearLayout.LayoutParams(0,dp(55),1);tp.leftMargin=dp(14);row.addView(t,tp);return row;}
-    private void runThreadAction(JSONObject c,String action){try{if("delete".equals(action)){api.patch("/api/messaging/conversations/"+c.optString("id")+"/settings",new JSONObject().put("archived",true),(json,error)->main.post(()->{if(error!=null)toast(error.getMessage());else{inbox.removeIf(x->x.optString("id").equals(c.optString("id")));filterInbox(searchBox==null?"":searchBox.getText().toString());toast("Conversation deleted");}}));return;}boolean on="pin".equals(action)?!c.optBoolean("pinned"):c.optString("mutedUntil").isEmpty();JSONObject req=new JSONObject();if("pin".equals(action))req.put("pinned",on);else req.put("muted",on);api.patch("/api/messaging/conversations/"+c.optString("id")+"/settings",req,(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONObject nc=json.optJSONObject("conversation");if(nc!=null){for(int i=0;i<inbox.size();i++)if(inbox.get(i).optString("id").equals(nc.optString("id"))){inbox.set(i,nc);break;}}filterInbox(searchBox==null?"":searchBox.getText().toString());toast("pin".equals(action)?(on?"Pinned":"Unpinned"):(on?"Messages muted":"Messages unmuted"));}));}catch(Exception e){toast(e.getMessage());}}
+    private void runThreadAction(JSONObject c,String action){try{if("delete".equals(action)){api.patch("/api/messaging/conversations/"+c.optString("id")+"/settings",new JSONObject().put("archived",true),(json,error)->main.post(()->{if(error!=null)toast(error.getMessage());else{inbox.removeIf(x->x.optString("id").equals(c.optString("id")));filterInbox(searchBox==null?"":searchBox.getText().toString());toast("Conversation deleted");}}));return;}boolean on="pin".equals(action)?!c.optBoolean("pinned"):!conversationIsMuted(c);JSONObject req=new JSONObject();if("pin".equals(action))req.put("pinned",on);else req.put("muted",on);api.patch("/api/messaging/conversations/"+c.optString("id")+"/settings",req,(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONObject nc=json.optJSONObject("conversation");if(nc!=null){for(int i=0;i<inbox.size();i++)if(inbox.get(i).optString("id").equals(nc.optString("id"))){inbox.set(i,nc);break;}}filterInbox(searchBox==null?"":searchBox.getText().toString());toast("pin".equals(action)?(on?"Pinned":"Unpinned"):(on?"Messages muted":"Messages unmuted"));}));}catch(Exception e){toast(e.getMessage());}}
 
     private int themeReplyBackground(){switch(activeTheme()){case"monochrome":return Color.rgb(214,214,214);case"glow-pup":return Color.rgb(52,43,105);case"odyssey":return Color.rgb(36,85,90);case"supergirl":return Color.rgb(82,43,38);case"avatar":return Color.rgb(52,85,80);case"olivia":return Color.rgb(86,64,76);case"backrooms":return Color.rgb(81,76,41);case"deli-boys":return Color.rgb(61,57,52);case"heart-drive":return Color.rgb(50,27,112);case"valentines":return Color.rgb(73,18,118);default:return Color.rgb(223,225,229);}}
     private int themeReplyText(){switch(activeTheme()){case"glow-pup":return Color.rgb(238,233,255);case"odyssey":return Color.rgb(227,255,255);case"supergirl":return Color.rgb(255,240,228);case"avatar":return Color.rgb(234,255,248);case"olivia":return Color.rgb(255,230,239);case"backrooms":return Color.rgb(255,251,216);case"deli-boys":return Color.rgb(255,244,233);case"heart-drive":return Color.rgb(238,231,255);case"valentines":return Color.rgb(243,229,255);default:return Color.rgb(75,79,86);}}
@@ -1502,8 +1518,8 @@ public class MainActivity extends Activity {
             replyArrow.setAlpha(0f);
             replyArrow.setScaleX(.78f);
             replyArrow.setScaleY(.78f);
-            replyArrow.setBackground(bg(Color.rgb(41,42,45),17));
-            replyArrow.setPadding(dp(8),dp(8),dp(8),dp(8));
+            replyArrow.setBackgroundColor(Color.TRANSPARENT);
+            replyArrow.setPadding(dp(7),dp(7),dp(7),dp(7));
 
             FrameLayout.LayoutParams arrowLp=
                 new FrameLayout.LayoutParams(dp(34),dp(34),mine
@@ -1549,7 +1565,7 @@ public class MainActivity extends Activity {
                 pendingIcon.setAlpha(.62f);
                 pendingIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
                 pendingIcon.setPadding(dp(1),dp(1),dp(1),dp(1));
-                pendingIcon.setRotation(-27f);
+                pendingIcon.setRotation(-14f);
                 pendingIcon.setTranslationY(dp(3));
 
                 LinearLayout.LayoutParams pendingLp=
@@ -1597,6 +1613,7 @@ public class MainActivity extends Activity {
                     replyArrow.setScaleY(.78f);
                     replyArrow.setRotation(0f);
                     replyArrow.setTranslationX(0f);
+                    replyArrow.setColorFilter(Color.WHITE);
 
                     replyProgress.setProgress(0f);
                     replyProgress.setAlpha(0f);
@@ -1607,7 +1624,7 @@ public class MainActivity extends Activity {
                         longOpened[0]=true;
                         showMessageActions(m,messageTrack);
                     };
-                    main.postDelayed(hold[0],300);
+                    main.postDelayed(hold[0],220);
                     return true;
 
                 case MotionEvent.ACTION_MOVE:
@@ -1656,21 +1673,36 @@ public class MainActivity extends Activity {
                     offset[0]=mine?-moved:moved;
                     messageTrack.setTranslationX(offset[0]);
 
-                    float triggerDistance=dp(46f);
-                    float progress=Math.min(1f,moved/triggerDistance);
+                    float triggerDistance=dp(48f);
+                    float revealAt=dp(23f);
 
-                    // Reply button slides into position while scaling up.
-                    float iconTravel=dp(12f)*progress;
+                    // Don't draw the reply indicator underneath the bubble.
+                    // Wait until the swipe has physically opened enough room.
+                    float visibleProgress=
+                        moved<=revealAt
+                            ?0f
+                            :Math.min(1f,(moved-revealAt)/(triggerDistance-revealAt));
+
+                    float iconTravel=dp(10f)*visibleProgress;
                     replyArrow.setTranslationX(mine?-iconTravel:iconTravel);
-                    replyArrow.setAlpha(Math.min(1f,progress*1.55f));
-                    float iconScale=.78f+.22f*progress;
+                    replyArrow.setAlpha(visibleProgress);
+
+                    float iconScale=.84f+.16f*visibleProgress;
                     replyArrow.setScaleX(iconScale);
                     replyArrow.setScaleY(iconScale);
 
-                    // Visible circular track + clockwise progress.
+                    // Circular outline starts only after the icon has room.
                     replyProgress.setTranslationX(mine?-iconTravel:iconTravel);
-                    replyProgress.setProgress(progress);
-                    replyProgress.setAlpha(Math.min(1f,.35f+progress*.65f));
+                    replyProgress.setProgress(visibleProgress);
+                    replyProgress.setAlpha(visibleProgress);
+
+                    // Instagram reference: arrow changes to gray once the
+                    // circular progress reaches completion.
+                    replyArrow.setColorFilter(
+                        visibleProgress>=.999f
+                            ?Color.rgb(155,158,164)
+                            :Color.WHITE
+                    );
                     return true;
 
                 case MotionEvent.ACTION_UP:
@@ -1682,7 +1714,7 @@ public class MainActivity extends Activity {
                     boolean trigger=
                         e.getActionMasked()==MotionEvent.ACTION_UP &&
                         replying[0] &&
-                        Math.abs(offset[0])>=dp(46);
+                        Math.abs(offset[0])>=dp(48);
 
                     ViewParent parent=v.getParent();
                     if(parent!=null)parent.requestDisallowInterceptTouchEvent(false);
@@ -1690,6 +1722,7 @@ public class MainActivity extends Activity {
                     if(trigger){
                         replyProgress.setProgress(1f);
                         replyProgress.setAlpha(1f);
+                        replyArrow.setColorFilter(Color.rgb(155,158,164));
                     }
 
                     // Fast, subtle spring return.
@@ -1750,7 +1783,7 @@ public class MainActivity extends Activity {
         list.smoothScrollToPositionFromTop(
             position,
             Math.max(dp(70),list.getHeight()/2-dp(55)),
-            420
+            360
         );
 
         final Runnable pulse=new Runnable(){
@@ -1769,34 +1802,34 @@ public class MainActivity extends Activity {
                     else stable=0;
                     last=y;
 
-                    if(stable>=4||tries>55){
+                    if(stable>=3||tries>45){
                         target.animate().cancel();
                         target.setScaleX(1f);
                         target.setScaleY(1f);
 
                         target.animate()
-                            .scaleX(1.075f)
-                            .scaleY(1.075f)
-                            .setDuration(160)
+                            .scaleX(1.06f)
+                            .scaleY(1.06f)
+                            .setDuration(90)
                             .setInterpolator(new DecelerateInterpolator())
                             .withEndAction(()->main.postDelayed(
                                 ()->target.animate()
                                     .scaleX(1f)
                                     .scaleY(1f)
-                                    .setDuration(220)
+                                    .setDuration(130)
                                     .setInterpolator(new DecelerateInterpolator())
                                     .start(),
-                                650
+                                220
                             ))
                             .start();
                         return;
                     }
                 }
 
-                if(tries<70)main.postDelayed(this,28);
+                if(tries<55)main.postDelayed(this,24);
             }
         };
-        main.postDelayed(pulse,140);
+        main.postDelayed(pulse,100);
     }
 
     private boolean isActuallyEdited(JSONObject m){String ea=m.optString("editedAt");if(ea.isEmpty())return false;Date e=parseDate(ea),c=parseDate(m.optString("createdAt"));return e!=null&&(c==null||e.getTime()-c.getTime()>1200);}
