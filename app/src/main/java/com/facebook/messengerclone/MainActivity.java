@@ -460,8 +460,10 @@ public class MainActivity extends Activity {
         composer.addView(pill,new LinearLayout.LayoutParams(-1,dp(52)));
 
         ImageButton camera=icon(R.drawable.ic_instagram_camera,42,Color.WHITE);
-        camera.setPadding(dp(8),dp(8),dp(8),dp(8));
-        camera.setBackground(bg(Color.rgb(88,72,238),21));
+        camera.clearColorFilter();
+        camera.setPadding(0,0,0,0);
+        camera.setBackgroundColor(Color.TRANSPARENT);
+        camera.setScaleType(ImageView.ScaleType.FIT_CENTER);
         pill.addView(camera,new LinearLayout.LayoutParams(dp(42),dp(42)));
 
         messageInput=new EditText(this);
@@ -480,7 +482,10 @@ public class MainActivity extends Activity {
         ImageButton sticker=icon(R.drawable.ic_instagram_sticker,34,Color.WHITE);
         ImageButton plus=icon(R.drawable.ic_instagram_plus,34,Color.WHITE);
         for(ImageButton b:new ImageButton[]{mic,gallery,sticker,plus}){
-            b.setPadding(dp(6),dp(6),dp(6),dp(6));
+            b.clearColorFilter();
+            b.setBackgroundColor(Color.TRANSPARENT);
+            b.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            b.setPadding(dp(4),dp(4),dp(4),dp(4));
             pill.addView(b,new LinearLayout.LayoutParams(dp(34),dp(34)));
         }
 
@@ -1174,8 +1179,8 @@ public class MainActivity extends Activity {
         fallback.setImageResource(R.drawable.default_profile);
         fallback.setScaleType(ImageView.ScaleType.CENTER_CROP);
         fallback.setBackgroundColor(Color.TRANSPARENT);
-        fallback.setScaleX(1.025f);
-        fallback.setScaleY(1.025f);
+        fallback.setScaleX(1.14f);
+        fallback.setScaleY(1.14f);
         box.addView(fallback,new FrameLayout.LayoutParams(-1,-1));
 
         if(url!=null&&!url.isEmpty()&&!"null".equalsIgnoreCase(url)){
