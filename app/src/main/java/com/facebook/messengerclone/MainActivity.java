@@ -1194,7 +1194,7 @@ public class MainActivity extends Activity {
                         opened[0]=true;
                         showThreadActions(c,downY[0]);
                     };
-                    main.postDelayed(hold[0],220);
+                    main.postDelayed(hold[0],165);
                     return true;
 
                 case MotionEvent.ACTION_MOVE:
@@ -1459,12 +1459,12 @@ public class MainActivity extends Activity {
 
             trackPaint.setStyle(Paint.Style.STROKE);
             trackPaint.setStrokeCap(Paint.Cap.ROUND);
-            trackPaint.setStrokeWidth(dp(2.25f));
-            trackPaint.setColor(Color.argb(105,255,255,255));
+            trackPaint.setStrokeWidth(dp(2.1f));
+            trackPaint.setColor(Color.argb(120,255,255,255));
 
             progressPaint.setStyle(Paint.Style.STROKE);
             progressPaint.setStrokeCap(Paint.Cap.ROUND);
-            progressPaint.setStrokeWidth(dp(2.65f));
+            progressPaint.setStrokeWidth(dp(3.0f));
             progressPaint.setColor(Color.WHITE);
 
             setAlpha(0f);
@@ -1544,6 +1544,8 @@ public class MainActivity extends Activity {
             LinearLayout row=new LinearLayout(MainActivity.this);
             row.setGravity(mine?Gravity.END|Gravity.BOTTOM:Gravity.START|Gravity.BOTTOM);
             swipeHost.addView(row,new FrameLayout.LayoutParams(-1,-2));
+            replyArrow.bringToFront();
+            replyProgress.bringToFront();
 
             if(!mine){
                 View av=buildUserAvatar(senderAvatar(m),senderName(m),30);
@@ -1561,15 +1563,15 @@ public class MainActivity extends Activity {
             if(mine&&m.optBoolean("pending")){
                 ImageView pendingIcon=new ImageView(MainActivity.this);
                 pendingIcon.setImageResource(R.drawable.ic_msg_send);
-                pendingIcon.setColorFilter(Color.rgb(170,170,170));
-                pendingIcon.setAlpha(.62f);
+                pendingIcon.clearColorFilter();
+                pendingIcon.setAlpha(.78f);
                 pendingIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                pendingIcon.setPadding(dp(1),dp(1),dp(1),dp(1));
-                pendingIcon.setRotation(-14f);
-                pendingIcon.setTranslationY(dp(3));
+                pendingIcon.setPadding(0,0,0,0);
+                pendingIcon.setRotation(0f);
+                pendingIcon.setTranslationY(dp(2));
 
                 LinearLayout.LayoutParams pendingLp=
-                    new LinearLayout.LayoutParams(dp(25),dp(25));
+                    new LinearLayout.LayoutParams(dp(28),dp(26));
                 pendingLp.leftMargin=dp(2);
                 row.addView(pendingIcon,pendingLp);
             }
@@ -1624,7 +1626,7 @@ public class MainActivity extends Activity {
                         longOpened[0]=true;
                         showMessageActions(m,messageTrack);
                     };
-                    main.postDelayed(hold[0],220);
+                    main.postDelayed(hold[0],165);
                     return true;
 
                 case MotionEvent.ACTION_MOVE:
@@ -1673,36 +1675,39 @@ public class MainActivity extends Activity {
                     offset[0]=mine?-moved:moved;
                     messageTrack.setTranslationX(offset[0]);
 
-                    float triggerDistance=dp(48f);
-                    float revealAt=dp(23f);
+                    float triggerDistance=dp(46f);
+                    float revealAt=dp(27f);
 
-                    // Don't draw the reply indicator underneath the bubble.
-                    // Wait until the swipe has physically opened enough room.
+                    // Nothing is visible while the bubble still covers the
+                    // indicator's physical area.
                     float visibleProgress=
                         moved<=revealAt
                             ?0f
                             :Math.min(1f,(moved-revealAt)/(triggerDistance-revealAt));
 
-                    float iconTravel=dp(10f)*visibleProgress;
-                    replyArrow.setTranslationX(mine?-iconTravel:iconTravel);
-                    replyArrow.setAlpha(visibleProgress);
+                    if(visibleProgress<=0f){
+                        replyArrow.setAlpha(0f);
+                        replyProgress.setAlpha(0f);
+                        replyProgress.setProgress(0f);
+                    }else{
+                        float iconTravel=dp(8f)*visibleProgress;
+                        replyArrow.setTranslationX(mine?-iconTravel:iconTravel);
+                        replyProgress.setTranslationX(mine?-iconTravel:iconTravel);
 
-                    float iconScale=.84f+.16f*visibleProgress;
-                    replyArrow.setScaleX(iconScale);
-                    replyArrow.setScaleY(iconScale);
+                        replyArrow.setAlpha(1f);
+                        float iconScale=.88f+.12f*visibleProgress;
+                        replyArrow.setScaleX(iconScale);
+                        replyArrow.setScaleY(iconScale);
 
-                    // Circular outline starts only after the icon has room.
-                    replyProgress.setTranslationX(mine?-iconTravel:iconTravel);
-                    replyProgress.setProgress(visibleProgress);
-                    replyProgress.setAlpha(visibleProgress);
+                        replyProgress.setProgress(visibleProgress);
+                        replyProgress.setAlpha(1f);
 
-                    // Instagram reference: arrow changes to gray once the
-                    // circular progress reaches completion.
-                    replyArrow.setColorFilter(
-                        visibleProgress>=.999f
-                            ?Color.rgb(155,158,164)
-                            :Color.WHITE
-                    );
+                        replyArrow.setColorFilter(
+                            visibleProgress>=.995f
+                                ?Color.rgb(150,153,159)
+                                :Color.WHITE
+                        );
+                    }
                     return true;
 
                 case MotionEvent.ACTION_UP:
@@ -1714,7 +1719,7 @@ public class MainActivity extends Activity {
                     boolean trigger=
                         e.getActionMasked()==MotionEvent.ACTION_UP &&
                         replying[0] &&
-                        Math.abs(offset[0])>=dp(48);
+                        Math.abs(offset[0])>=dp(46);
 
                     ViewParent parent=v.getParent();
                     if(parent!=null)parent.requestDisallowInterceptTouchEvent(false);
@@ -1783,7 +1788,7 @@ public class MainActivity extends Activity {
         list.smoothScrollToPositionFromTop(
             position,
             Math.max(dp(70),list.getHeight()/2-dp(55)),
-            360
+            300
         );
 
         final Runnable pulse=new Runnable(){
@@ -1802,34 +1807,34 @@ public class MainActivity extends Activity {
                     else stable=0;
                     last=y;
 
-                    if(stable>=3||tries>45){
+                    if(stable>=2||tries>38){
                         target.animate().cancel();
                         target.setScaleX(1f);
                         target.setScaleY(1f);
 
                         target.animate()
-                            .scaleX(1.06f)
-                            .scaleY(1.06f)
-                            .setDuration(90)
+                            .scaleX(1.045f)
+                            .scaleY(1.045f)
+                            .setDuration(55)
                             .setInterpolator(new DecelerateInterpolator())
                             .withEndAction(()->main.postDelayed(
                                 ()->target.animate()
                                     .scaleX(1f)
                                     .scaleY(1f)
-                                    .setDuration(130)
+                                    .setDuration(80)
                                     .setInterpolator(new DecelerateInterpolator())
                                     .start(),
-                                220
+                                90
                             ))
                             .start();
                         return;
                     }
                 }
 
-                if(tries<55)main.postDelayed(this,24);
+                if(tries<45)main.postDelayed(this,20);
             }
         };
-        main.postDelayed(pulse,100);
+        main.postDelayed(pulse,80);
     }
 
     private boolean isActuallyEdited(JSONObject m){String ea=m.optString("editedAt");if(ea.isEmpty())return false;Date e=parseDate(ea),c=parseDate(m.optString("createdAt"));return e!=null&&(c==null||e.getTime()-c.getTime()>1200);}
