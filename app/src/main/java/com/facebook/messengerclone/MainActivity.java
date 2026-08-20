@@ -719,43 +719,27 @@ public class MainActivity extends Activity {
     }
     private void animateMessageActionEmojiMenu(final View reactionsCard){
         if(reactionsCard==null)return;
-
         reactionsCard.animate().cancel();
         reactionsCard.setAlpha(0f);
-        reactionsCard.setScaleX(.80f);
-        reactionsCard.setScaleY(.80f);
-        reactionsCard.setTranslationX(dp(24));
-        reactionsCard.setTranslationY(dp(4));
-
+        reactionsCard.setScaleX(.82f);
+        reactionsCard.setScaleY(.82f);
+        reactionsCard.setTranslationX(dp(22));
+        reactionsCard.setTranslationY(dp(3));
         final long started=android.os.SystemClock.uptimeMillis();
-        final long duration=255L;
+        final long duration=215L;
         final Runnable[] frame=new Runnable[1];
-
         frame[0]=()->{
             long elapsed=android.os.SystemClock.uptimeMillis()-started;
             float t=Math.min(1f,elapsed/(float)duration);
             float ease=1f-(float)Math.pow(1f-t,3);
-
-            float scale;
-            if(t<.74f){
-                float u=t/.74f;
-                float e=1f-(float)Math.pow(1f-u,3);
-                scale=.80f+(.235f*e);
-            }else{
-                float u=(t-.74f)/.26f;
-                float settle=1f-(float)Math.pow(1f-u,2);
-                scale=1.035f-(.035f*settle);
-            }
-
-            reactionsCard.setAlpha(Math.min(1f,t*1.9f));
+            float scale=.82f+(.18f*ease);
+            reactionsCard.setAlpha(Math.min(1f,t*1.85f));
             reactionsCard.setScaleX(scale);
             reactionsCard.setScaleY(scale);
-            reactionsCard.setTranslationX(dp(24)*(1f-ease));
-            reactionsCard.setTranslationY(dp(4)*(1f-ease));
-
-            if(t<1f){
-                reactionsCard.postOnAnimation(frame[0]);
-            }else{
+            reactionsCard.setTranslationX(dp(22)*(1f-ease));
+            reactionsCard.setTranslationY(dp(3)*(1f-ease));
+            if(t<1f)reactionsCard.postOnAnimation(frame[0]);
+            else{
                 reactionsCard.setAlpha(1f);
                 reactionsCard.setScaleX(1f);
                 reactionsCard.setScaleY(1f);
@@ -763,7 +747,6 @@ public class MainActivity extends Activity {
                 reactionsCard.setTranslationY(0f);
             }
         };
-
         reactionsCard.postOnAnimation(frame[0]);
     }
 
@@ -1027,11 +1010,11 @@ reactionsCard.animate().cancel();
             dp(500),
             (int)(getResources().getDisplayMetrics().heightPixels*.58f)
         );
-        FrameLayout host=new FrameLayout(this);host.setTag("messenger-native-sticker-sheet");host.setClickable(true);host.setBackgroundColor(Color.TRANSPARENT);
+        FrameLayout host=new FrameLayout(this);host.setTag("messenger-native-sticker-sheet");host.setClickable(true);host.setBackgroundColor(Color.rgb(38,38,38));
         FrameLayout.LayoutParams hostLp=new FrameLayout.LayoutParams(-1,sheetH,Gravity.BOTTOM);root.addView(host,hostLp);
         View stickerBridge=new View(this);stickerBridge.setTag("messenger-sticker-bridge");stickerBridge.setBackgroundColor(Color.TRANSPARENT);FrameLayout.LayoutParams bridgeLp=new FrameLayout.LayoutParams(-1,dp(4),Gravity.BOTTOM);bridgeLp.bottomMargin=sheetH-dp(1);root.addView(stickerBridge,bridgeLp);
 
-        LinearLayout sheet=new LinearLayout(this);sheet.setOrientation(LinearLayout.VERTICAL);sheet.setPadding(dp(10),dp(6),dp(10),dp(8));sheet.setBackground(topBg(Color.WHITE,22));host.addView(sheet,new FrameLayout.LayoutParams(-1,-1));
+        LinearLayout sheet=new LinearLayout(this);sheet.setBackground(topBg(Color.rgb(38,38,38),22));sheet.setOrientation(LinearLayout.VERTICAL);sheet.setPadding(dp(10),dp(6),dp(10),dp(8));sheet.setBackground(topBg(Color.WHITE,22));host.addView(sheet,new FrameLayout.LayoutParams(-1,-1));
 
         LinearLayout dragHeader=new LinearLayout(this);dragHeader.setOrientation(LinearLayout.VERTICAL);dragHeader.setGravity(Gravity.CENTER_HORIZONTAL);dragHeader.setPadding(0,dp(1),0,dp(6));sheet.addView(dragHeader,new LinearLayout.LayoutParams(-1,dp(64)));
         View puller=new View(this);puller.setBackground(bg(Color.rgb(190,193,199),3));LinearLayout.LayoutParams php=new LinearLayout.LayoutParams(dp(42),dp(5));php.gravity=Gravity.CENTER_HORIZONTAL;php.bottomMargin=dp(8);dragHeader.addView(puller,php);
@@ -1201,7 +1184,7 @@ reactionsCard.animate().cancel();
         dragHeader.addView(titleRow,new LinearLayout.LayoutParams(-1,dp(44)));
 
         LinearLayout categoryButton=new LinearLayout(this);
-        categoryButton.setGravity(Gravity.CENTER_VERTICAL);
+        categoryButton.setGravity(Gravity.CENTER);
         categoryButton.setClickable(true);
 
         TextView title=text("Recents",18,Color.WHITE,Typeface.BOLD);
@@ -1211,14 +1194,27 @@ reactionsCard.animate().cancel();
         categoryArrow.setImageResource(R.drawable.ic_media_chevron_down);
         categoryArrow.setColorFilter(Color.rgb(210,210,214));
         categoryArrow.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        LinearLayout.LayoutParams arrowLp=new LinearLayout.LayoutParams(dp(18),dp(18));
-        arrowLp.leftMargin=dp(5);
+        LinearLayout.LayoutParams arrowLp=new LinearLayout.LayoutParams(dp(16),dp(16));
+        arrowLp.leftMargin=dp(7);
+        categoryArrow.setTranslationY(dp(1));
         categoryButton.addView(categoryArrow,arrowLp);
 
         titleRow.addView(categoryButton,new LinearLayout.LayoutParams(-2,dp(44)));
 
         FrameLayout mediaHost=new FrameLayout(this);
         sheet.addView(mediaHost,new LinearLayout.LayoutParams(-1,0,1));
+
+        TextView mediaDateBubble=text("",16,Color.BLACK,Typeface.BOLD);
+        mediaDateBubble.setGravity(Gravity.CENTER);
+        mediaDateBubble.setPadding(dp(20),0,dp(20),0);
+        mediaDateBubble.setBackground(bg(Color.WHITE,26));
+        mediaDateBubble.setVisibility(View.GONE);
+        mediaDateBubble.setElevation(dp(8));
+        mediaHost.addView(
+            mediaDateBubble,
+            new FrameLayout.LayoutParams(-2,dp(52),Gravity.CENTER)
+        );
+        final Runnable[] hideMediaDate={null};
 
         ScrollView scroll=new ScrollView(this);
         scroll.setFillViewport(false);
@@ -1255,10 +1251,12 @@ reactionsCard.animate().cancel();
             new LinearLayout.LayoutParams(0,dp(58),1)
         );
 
-        ImageButton sendSelected=icon(R.drawable.ic_msg_send,54,Color.BLACK);
+        ImageButton sendSelected=icon(R.drawable.msg_send_enabled,54,Color.BLACK);
+        sendSelected.setImageResource(R.drawable.msg_send_enabled);
         sendSelected.setColorFilter(Color.BLACK);
         sendSelected.setBackground(bg(Color.WHITE,27));
-        sendSelected.setPadding(dp(14),dp(14),dp(14),dp(14));
+        sendSelected.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        sendSelected.setPadding(dp(10),dp(10),dp(10),dp(10));
 
         LinearLayout.LayoutParams sendLp=
             new LinearLayout.LayoutParams(dp(54),dp(54));
@@ -1281,7 +1279,7 @@ reactionsCard.animate().cancel();
 
                 FrameLayout chip=new FrameLayout(MainActivity.this);
                 LinearLayout.LayoutParams chipLp=
-                    new LinearLayout.LayoutParams(dp(52),dp(52));
+                    new LinearLayout.LayoutParams(dp(44),dp(52));
                 chipLp.rightMargin=dp(6);
                 selectedRow.addView(chip,chipLp);
 
@@ -1546,6 +1544,7 @@ reactionsCard.animate().cancel();
             final List<Uri> uris=new ArrayList<>();
             final List<Boolean> videos=new ArrayList<>();
             final List<Boolean> favorites=new ArrayList<>();
+            final List<Long> mediaDates=new ArrayList<>();
 
             Uri collection=android.provider.MediaStore.Files.getContentUri("external");
             String favoriteProjection=
@@ -1556,7 +1555,8 @@ reactionsCard.animate().cancel();
             String[] projection={
                 android.provider.MediaStore.Files.FileColumns._ID,
                 android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE,
-                favoriteProjection
+                favoriteProjection,
+                android.provider.MediaStore.Files.FileColumns.DATE_ADDED
             };
             String selection=
                 android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE+"=? OR "+
@@ -1581,6 +1581,9 @@ reactionsCard.animate().cancel();
                         Build.VERSION.SDK_INT>=30
                             ?c.getColumnIndex(android.provider.MediaStore.MediaColumns.IS_FAVORITE)
                             :-1;
+                    int dateCol=c.getColumnIndex(
+                        android.provider.MediaStore.Files.FileColumns.DATE_ADDED
+                    );
                     int count=0;
 
                     while(c.moveToNext()&&count<240){
@@ -1594,6 +1597,7 @@ reactionsCard.animate().cancel();
                         favorites.add(
                             favoriteCol>=0 && c.getInt(favoriteCol)==1
                         );
+                        mediaDates.add(dateCol>=0?c.getLong(dateCol):0L);
                         count++;
                     }
                 }
@@ -1605,6 +1609,37 @@ reactionsCard.animate().cancel();
                 loading.setVisibility(View.GONE);
                 grid.removeAllViews();
                 int cell=getResources().getDisplayMetrics().widthPixels/3;
+
+                if(Build.VERSION.SDK_INT>=23){
+                    scroll.setOnScrollChangeListener(
+                        (View v,int sx,int sy,int ox,int oy)->{
+                            if(mediaDates.isEmpty())return;
+
+                            int idx=Math.min(
+                                mediaDates.size()-1,
+                                Math.max(0,(sy/Math.max(1,cell))*3)
+                            );
+                            long sec=mediaDates.get(idx);
+                            if(sec<=0)return;
+
+                            mediaDateBubble.setText(
+                                new SimpleDateFormat(
+                                    "MMM d yyyy",
+                                    Locale.US
+                                ).format(new Date(sec*1000L))
+                            );
+                            mediaDateBubble.setVisibility(View.VISIBLE);
+                            mediaDateBubble.bringToFront();
+
+                            if(hideMediaDate[0]!=null){
+                                main.removeCallbacks(hideMediaDate[0]);
+                            }
+                            hideMediaDate[0]=()->
+                                mediaDateBubble.setVisibility(View.GONE);
+                            main.postDelayed(hideMediaDate[0],650);
+                        }
+                    );
+                }
 
                 for(int i=0;i<uris.size();i++){
                     final Uri uri=uris.get(i);
@@ -1683,6 +1718,117 @@ reactionsCard.animate().cancel();
                         }
                     };
                     refreshBadge.run();
+
+                    final float[] tileDownY={Float.NaN};
+                    final boolean[] tilePulling={false};
+
+                    tile.setOnTouchListener((v,e)->{
+                        switch(e.getActionMasked()){
+                            case MotionEvent.ACTION_DOWN:
+                                tileDownY[0]=e.getRawY();
+                                tilePulling[0]=false;
+                                return false;
+
+                            case MotionEvent.ACTION_MOVE:
+                                if(Float.isNaN(tileDownY[0]))return false;
+                                float pull=e.getRawY()-tileDownY[0];
+
+                                if(
+                                    !tilePulling[0] &&
+                                    scroll.getScrollY()<=dp(3) &&
+                                    pull>dp(3)
+                                ){
+                                    tilePulling[0]=true;
+                                    startY[0]=tileDownY[0]-host.getTranslationY();
+
+                                    host.animate().cancel();
+                                    bridge.animate().cancel();
+                                    composer.animate().cancel();
+                                    if(replyBar!=null)replyBar.animate().cancel();
+
+                                    ViewParent parent=v.getParent();
+                                    if(parent!=null){
+                                        parent.requestDisallowInterceptTouchEvent(true);
+                                    }
+                                }
+
+                                if(tilePulling[0]){
+                                    float dy=Math.max(
+                                        0,
+                                        e.getRawY()-startY[0]
+                                    );
+
+                                    host.setTranslationY(dy);
+                                    bridge.setTranslationY(dy);
+                                    composer.setTranslationY(-sheetH+dy);
+                                    applyConversationPickerInset(
+                                        Math.max(0,sheetH-(int)dy)
+                                    );
+
+                                    if(
+                                        replyBar!=null &&
+                                        replyBar.getVisibility()==View.VISIBLE
+                                    ){
+                                        replyBar.setTranslationY(-sheetH+dy);
+                                    }
+                                    return true;
+                                }
+                                return false;
+
+                            case MotionEvent.ACTION_UP:
+                            case MotionEvent.ACTION_CANCEL:
+                                if(tilePulling[0]){
+                                    float y=host.getTranslationY();
+                                    tilePulling[0]=false;
+                                    tileDownY[0]=Float.NaN;
+
+                                    ViewParent parent=v.getParent();
+                                    if(parent!=null){
+                                        parent.requestDisallowInterceptTouchEvent(false);
+                                    }
+
+                                    if(y>dp(40)){
+                                        dismissInstagramMediaPicker(host);
+                                    }else{
+                                        host.animate()
+                                            .translationY(0)
+                                            .setDuration(170)
+                                            .setInterpolator(new DecelerateInterpolator())
+                                            .start();
+
+                                        bridge.animate()
+                                            .translationY(0)
+                                            .setDuration(170)
+                                            .setInterpolator(new DecelerateInterpolator())
+                                            .start();
+
+                                        applyConversationPickerInset(sheetH);
+
+                                        composer.animate()
+                                            .translationY(-sheetH)
+                                            .setDuration(170)
+                                            .setInterpolator(new DecelerateInterpolator())
+                                            .start();
+
+                                        if(
+                                            replyBar!=null &&
+                                            replyBar.getVisibility()==View.VISIBLE
+                                        ){
+                                            replyBar.animate()
+                                                .translationY(-sheetH)
+                                                .setDuration(170)
+                                                .setInterpolator(new DecelerateInterpolator())
+                                                .start();
+                                        }
+                                    }
+                                    return true;
+                                }
+
+                                tileDownY[0]=Float.NaN;
+                                return false;
+                        }
+                        return false;
+                    });
 
                     tile.setOnClickListener(v->{
                         int existing=selectedUris.indexOf(uri);
