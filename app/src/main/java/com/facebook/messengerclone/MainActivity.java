@@ -717,81 +717,54 @@ public class MainActivity extends Activity {
         row.addView(text,tp);
         return row;
     }
-    private void animateMessageActionEmojiRow(final LinearLayout reactions){
-        if(reactions==null)return;
+    private void animateMessageActionEmojiMenu(final View reactionsCard){
+        if(reactionsCard==null)return;
 
-        reactions.animate().cancel();
-        reactions.setAlpha(0f);
-        reactions.setScaleX(.66f);
-        reactions.setScaleY(.66f);
-        reactions.setTranslationY(dp(8));
+        reactionsCard.animate().cancel();
+        reactionsCard.setAlpha(0f);
+        reactionsCard.setScaleX(.76f);
+        reactionsCard.setScaleY(.76f);
+        reactionsCard.setTranslationY(dp(7));
 
-        for(int i=0;i<reactions.getChildCount();i++){
-            View child=reactions.getChildAt(i);
-            child.animate().cancel();
-            child.setAlpha(0f);
-            child.setScaleX(.48f);
-            child.setScaleY(.48f);
-        }
-
-        final long start=android.os.SystemClock.uptimeMillis();
-        final long duration=380L;
+        final long started=android.os.SystemClock.uptimeMillis();
+        final long duration=330L;
         final Runnable[] frame=new Runnable[1];
 
         frame[0]=()->{
-            long elapsed=android.os.SystemClock.uptimeMillis()-start;
+            long elapsed=android.os.SystemClock.uptimeMillis()-started;
             float t=Math.min(1f,elapsed/(float)duration);
 
+            // Smooth cubic fade/position.
             float ease=1f-(float)Math.pow(1f-t,3);
-            float rowScale;
-            if(t<.76f){
-                float u=t/.76f;
+
+            // Physical scale: compressed -> slight overshoot -> 100%.
+            float scale;
+            if(t<.78f){
+                float u=t/.78f;
                 float e=1f-(float)Math.pow(1f-u,3);
-                rowScale=.66f+(.395f*e);
+                scale=.76f + (.285f*e);   // reaches ~1.045
             }else{
-                float u=(t-.76f)/.24f;
-                rowScale=1.055f-(.055f*u);
+                float u=(t-.78f)/.22f;
+                float settle=1f-(float)Math.pow(1f-u,2);
+                scale=1.045f-(.045f*settle);
             }
 
-            reactions.setAlpha(Math.min(1f,t*1.7f));
-            reactions.setScaleX(rowScale);
-            reactions.setScaleY(rowScale);
-            reactions.setTranslationY(dp(8)*(1f-ease));
-
-            for(int i=0;i<reactions.getChildCount();i++){
-                View child=reactions.getChildAt(i);
-                float ct=Math.max(0f,Math.min(1f,(elapsed-i*18L)/255f));
-                float cs;
-                if(ct<.72f){
-                    float u=ct/.72f;
-                    float e=1f-(float)Math.pow(1f-u,3);
-                    cs=.48f+(.62f*e);
-                }else{
-                    float u=(ct-.72f)/.28f;
-                    cs=1.10f-(.10f*u);
-                }
-                child.setAlpha(Math.min(1f,ct*1.85f));
-                child.setScaleX(cs);
-                child.setScaleY(cs);
-            }
+            reactionsCard.setAlpha(Math.min(1f,t*1.65f));
+            reactionsCard.setScaleX(scale);
+            reactionsCard.setScaleY(scale);
+            reactionsCard.setTranslationY(dp(7)*(1f-ease));
 
             if(t<1f){
-                reactions.postOnAnimation(frame[0]);
+                reactionsCard.postOnAnimation(frame[0]);
             }else{
-                reactions.setAlpha(1f);
-                reactions.setScaleX(1f);
-                reactions.setScaleY(1f);
-                reactions.setTranslationY(0f);
-                for(int i=0;i<reactions.getChildCount();i++){
-                    View child=reactions.getChildAt(i);
-                    child.setAlpha(1f);
-                    child.setScaleX(1f);
-                    child.setScaleY(1f);
-                }
+                reactionsCard.setAlpha(1f);
+                reactionsCard.setScaleX(1f);
+                reactionsCard.setScaleY(1f);
+                reactionsCard.setTranslationY(0f);
             }
         };
 
-        reactions.postOnAnimation(frame[0]);
+        reactionsCard.postOnAnimation(frame[0]);
     }
 
     private void showMessageActions(JSONObject m,View anchor){boolean mine=isMine(m),editable=mine&&"text".equals(m.optString("type"))&&!m.optString("body").trim().isEmpty();Dialog d=new Dialog(this);d.requestWindowFeature(Window.FEATURE_NO_TITLE);Window actionWindow=d.getWindow();if(actionWindow!=null)actionWindow.addFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);FrameLayout overlay=new FrameLayout(this);overlay.setBackgroundColor(Color.argb(136,0,0,0));int screenW=getResources().getDisplayMetrics().widthPixels,screenH=getResources().getDisplayMetrics().heightPixels;int wide=Math.min(screenW-dp(24),dp(360)),actionW=Math.min((int)(screenW*.58f),dp(218));int[] loc=new int[2];if(anchor!=null)anchor.getLocationOnScreen(loc);int top=Math.max(dp(72),Math.min(screenH-dp(390),loc[1]-dp(68)));LinearLayout bundle=new LinearLayout(this);bundle.setOrientation(LinearLayout.VERTICAL);FrameLayout.LayoutParams bundleLp=new FrameLayout.LayoutParams(wide,-2);bundleLp.leftMargin=(screenW-wide)/2;bundleLp.topMargin=top;overlay.addView(bundle,bundleLp);
@@ -822,16 +795,18 @@ public class MainActivity extends Activity {
         bundle.setOnClickListener(v->dismissAnimated.run());
         reactionsCard.setOnClickListener(v->{});
         actionCard.setOnClickListener(v->{});
-
-        reactions.animate().cancel();
-        reactions.setAlpha(0f);
-        reactions.setScaleX(.68f);
-        reactions.setScaleY(.68f);
-        reactions.setTranslationY(dp(7));
+reactionsCard.animate().cancel();
+        reactionsCard.setAlpha(0f);
+        reactionsCard.setScaleX(.76f);
+        reactionsCard.setScaleY(.76f);
+        reactionsCard.setTranslationY(dp(7));
         d.setContentView(overlay);
         Window w=d.getWindow();
         d.show();
-        reactions.postDelayed(()->animateMessageActionEmojiRow(reactions),55);
+        reactionsCard.postDelayed(
+            ()->animateMessageActionEmojiMenu(reactionsCard),
+            45
+        );
         
         if(w!=null){
             w.setBackgroundDrawableResource(android.R.color.transparent);
@@ -1075,7 +1050,7 @@ public class MainActivity extends Activity {
         View.OnTouchListener drag=(v,e)->{switch(e.getActionMasked()){
             case MotionEvent.ACTION_DOWN:startY[0]=e.getRawY()-host.getTranslationY();dragged[0]=false;host.animate().cancel();composer.animate().cancel();if(replyBar!=null)replyBar.animate().cancel();v.getParent().requestDisallowInterceptTouchEvent(true);return true;
             case MotionEvent.ACTION_MOVE:if(Float.isNaN(startY[0]))return true;float dy=Math.max(0,e.getRawY()-startY[0]);if(dy>dp(3))dragged[0]=true;host.setTranslationY(dy);stickerBridge.setTranslationY(dy);composer.setTranslationY(-sheetH+dy);applyConversationPickerInset(Math.max(0,sheetH-(int)dy));if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.setTranslationY(-sheetH+dy);return true;
-            case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:float y=host.getTranslationY();startY[0]=Float.NaN;v.getParent().requestDisallowInterceptTouchEvent(false);if(y>dp(76)){dismissMessengerStickerPicker(host);}else{host.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();applyConversationPickerInset(sheetH);composer.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();}return true;
+            case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:float y=host.getTranslationY();startY[0]=Float.NaN;v.getParent().requestDisallowInterceptTouchEvent(false);if(y>dp(48)){dismissMessengerStickerPicker(host);}else{host.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();applyConversationPickerInset(sheetH);applyConversationPickerInset(sheetH);composer.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();}return true;
         }return true;};
         // The whole puller/search header is the drag target, including the search-bar area.
         dragHeader.setOnTouchListener(drag);
@@ -1087,10 +1062,10 @@ public class MainActivity extends Activity {
         View.OnTouchListener contentDrag=(v,e)->{switch(e.getActionMasked()){
             case MotionEvent.ACTION_DOWN:contentDownY[0]=e.getRawY();contentSheetDrag[0]=false;return false;
             case MotionEvent.ACTION_MOVE:float delta=e.getRawY()-contentDownY[0];if(!contentSheetDrag[0]&&scroll.getScrollY()==0&&delta>dp(5)){contentSheetDrag[0]=true;startY[0]=contentDownY[0]-host.getTranslationY();dragged[0]=true;host.animate().cancel();stickerBridge.animate().cancel();composer.animate().cancel();if(replyBar!=null)replyBar.animate().cancel();ViewParent parent=v.getParent();if(parent!=null)parent.requestDisallowInterceptTouchEvent(true);}if(contentSheetDrag[0]){float dy=Math.max(0,e.getRawY()-startY[0]);host.setTranslationY(dy);stickerBridge.setTranslationY(dy);composer.setTranslationY(-sheetH+dy);applyConversationPickerInset(Math.max(0,sheetH-(int)dy));if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.setTranslationY(-sheetH+dy);return true;}return false;
-            case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:if(contentSheetDrag[0]){float y=host.getTranslationY();contentSheetDrag[0]=false;contentDownY[0]=Float.NaN;ViewParent parent=v.getParent();if(parent!=null)parent.requestDisallowInterceptTouchEvent(false);if(y>dp(64))dismissMessengerStickerPicker(host);else{host.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();applyConversationPickerInset(sheetH);composer.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();}return true;}contentDownY[0]=Float.NaN;return false;}return false;};
+            case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:if(contentSheetDrag[0]){float y=host.getTranslationY();contentSheetDrag[0]=false;contentDownY[0]=Float.NaN;ViewParent parent=v.getParent();if(parent!=null)parent.requestDisallowInterceptTouchEvent(false);if(y>dp(64))dismissMessengerStickerPicker(host);else{host.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();applyConversationPickerInset(sheetH);applyConversationPickerInset(sheetH);composer.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();}return true;}contentDownY[0]=Float.NaN;return false;}return false;};
         stickerContentDrag[0]=contentDrag;scroll.setOnTouchListener(contentDrag);grid.setOnTouchListener(contentDrag);
 
-        host.setTranslationY(sheetH);stickerBridge.setTranslationY(sheetH);composer.setTranslationY(0);if(replyBar!=null)replyBar.setTranslationY(0);if(list!=null){applyConversationPickerInset(sheetH);list.post(()->list.setSelection(Math.max(0,list.getCount()-1)));}host.animate().translationY(0).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();applyConversationPickerInset(sheetH);composer.animate().translationY(-sheetH).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();
+        host.setTranslationY(sheetH);stickerBridge.setTranslationY(sheetH);composer.setTranslationY(0);if(replyBar!=null)replyBar.setTranslationY(0);if(list!=null){applyConversationPickerInset(sheetH);list.post(()->list.setSelection(Math.max(0,list.getCount()-1)));}host.animate().translationY(0).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();applyConversationPickerInset(sheetH);applyConversationPickerInset(sheetH);composer.animate().translationY(-sheetH).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();
         loader.load("");
     }
     private void dismissMessengerStickerPicker(View host){if(host==null||root==null)return;View bridge=root.findViewWithTag("messenger-sticker-bridge");int h=Math.max(host.getHeight(),dp(360));host.animate().translationY(h).setDuration(220).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(()->{if(host.getParent()==root)root.removeView(host);}).start();if(bridge!=null)bridge.animate().translationY(h).setDuration(220).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(()->{if(bridge.getParent()==root)root.removeView(bridge);}).start();if(composer!=null)composer.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null)replyBar.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.setPadding(dp(10),dp(12),dp(10),dp(26));}
@@ -1130,24 +1105,26 @@ public class MainActivity extends Activity {
 
     private void applyConversationPickerInset(int inset){
         if(list==null)return;
+
         int safe=Math.max(0,inset);
 
-        list.setTranslationY(0f);
-        list.setClipToPadding(true);
-        list.setPadding(dp(10),dp(12),dp(10),dp(26));
-
+        // Undo the v57 layout-margin approach.
         ViewGroup.LayoutParams raw=list.getLayoutParams();
         if(raw instanceof LinearLayout.LayoutParams){
             LinearLayout.LayoutParams lp=(LinearLayout.LayoutParams)raw;
-            if(lp.bottomMargin!=safe){
-                lp.bottomMargin=safe;
+            if(lp.bottomMargin!=0){
+                lp.bottomMargin=0;
                 list.setLayoutParams(lp);
             }
         }
 
-        if(messageAdapter!=null&&messageAdapter.getCount()>0){
-            list.setSelection(messageAdapter.getCount()-1);
-        }
+        // Keep normal conversation padding only.
+        list.setPadding(dp(10),dp(12),dp(10),dp(26));
+        list.setClipToPadding(true);
+
+        // Move the entire conversation by exactly the same distance
+        // as the composer. This preserves their normal spacing.
+        list.setTranslationY(-safe);
     }
 
     private void showInstagramMediaPicker(){
@@ -1219,8 +1196,8 @@ public class MainActivity extends Activity {
         dragHeader.addView(puller,pullLp);
 
         LinearLayout titleRow=new LinearLayout(this);
-        titleRow.setGravity(Gravity.CENTER_VERTICAL);
-        titleRow.setPadding(dp(14),0,dp(12),0);
+        titleRow.setGravity(Gravity.CENTER);
+        titleRow.setPadding(0,0,0,0);
         dragHeader.addView(titleRow,new LinearLayout.LayoutParams(-1,dp(44)));
 
         LinearLayout categoryButton=new LinearLayout(this);
@@ -1234,11 +1211,11 @@ public class MainActivity extends Activity {
         categoryArrow.setImageResource(R.drawable.ic_media_chevron_down);
         categoryArrow.setColorFilter(Color.rgb(210,210,214));
         categoryArrow.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        LinearLayout.LayoutParams arrowLp=new LinearLayout.LayoutParams(dp(24),dp(24));
-        arrowLp.leftMargin=dp(4);
+        LinearLayout.LayoutParams arrowLp=new LinearLayout.LayoutParams(dp(18),dp(18));
+        arrowLp.leftMargin=dp(5);
         categoryButton.addView(categoryArrow,arrowLp);
 
-        titleRow.addView(categoryButton,new LinearLayout.LayoutParams(0,dp(44),1));
+        titleRow.addView(categoryButton,new LinearLayout.LayoutParams(-2,dp(44)));
 
         FrameLayout mediaHost=new FrameLayout(this);
         sheet.addView(mediaHost,new LinearLayout.LayoutParams(-1,0,1));
@@ -1300,6 +1277,7 @@ public class MainActivity extends Activity {
                             .setInterpolator(new DecelerateInterpolator()).start();
                         bridge.animate().translationY(0).setDuration(190)
                             .setInterpolator(new DecelerateInterpolator()).start();
+                        applyConversationPickerInset(sheetH);
                         composer.animate().translationY(-sheetH).setDuration(190)
                             .setInterpolator(new DecelerateInterpolator()).start();
                         if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE){
@@ -1542,6 +1520,14 @@ public class MainActivity extends Activity {
                             case MotionEvent.ACTION_DOWN:
                                 tileDownY[0]=e.getRawY();
                                 tileDragging[0]=false;
+
+                                // Keep the whole gesture on the tile until we know
+                                // whether this is a pull-to-close or a normal tap.
+                                ViewParent tileParent=v.getParent();
+                                while(tileParent!=null){
+                                    tileParent.requestDisallowInterceptTouchEvent(true);
+                                    tileParent=tileParent.getParent();
+                                }
                                 return true;
 
                             case MotionEvent.ACTION_MOVE:
@@ -1550,8 +1536,8 @@ public class MainActivity extends Activity {
 
                                 if(
                                     !tileDragging[0] &&
-                                    scroll.getScrollY()<=dp(2) &&
-                                    delta>dp(2)
+                                    scroll.getScrollY()<=dp(3) &&
+                                    delta>dp(1)
                                 ){
                                     tileDragging[0]=true;
                                     startY[0]=tileDownY[0]-host.getTranslationY();
@@ -1580,12 +1566,18 @@ public class MainActivity extends Activity {
 
                             case MotionEvent.ACTION_UP:
                             case MotionEvent.ACTION_CANCEL:
+                                ViewParent releaseParent=v.getParent();
+                                while(releaseParent!=null){
+                                    releaseParent.requestDisallowInterceptTouchEvent(false);
+                                    releaseParent=releaseParent.getParent();
+                                }
+
                                 if(tileDragging[0]){
                                     float y=host.getTranslationY();
                                     tileDragging[0]=false;
                                     tileDownY[0]=Float.NaN;
 
-                                    if(y>dp(42)){
+                                    if(y>dp(36)){
                                         dismissInstagramMediaPicker(host);
                                     }else{
                                         host.animate().translationY(0)
