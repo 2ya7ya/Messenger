@@ -717,6 +717,83 @@ public class MainActivity extends Activity {
         row.addView(text,tp);
         return row;
     }
+    private void animateMessageActionEmojiRow(final LinearLayout reactions){
+        if(reactions==null)return;
+
+        reactions.animate().cancel();
+        reactions.setAlpha(0f);
+        reactions.setScaleX(.66f);
+        reactions.setScaleY(.66f);
+        reactions.setTranslationY(dp(8));
+
+        for(int i=0;i<reactions.getChildCount();i++){
+            View child=reactions.getChildAt(i);
+            child.animate().cancel();
+            child.setAlpha(0f);
+            child.setScaleX(.48f);
+            child.setScaleY(.48f);
+        }
+
+        final long start=android.os.SystemClock.uptimeMillis();
+        final long duration=380L;
+        final Runnable[] frame=new Runnable[1];
+
+        frame[0]=()->{
+            long elapsed=android.os.SystemClock.uptimeMillis()-start;
+            float t=Math.min(1f,elapsed/(float)duration);
+
+            float ease=1f-(float)Math.pow(1f-t,3);
+            float rowScale;
+            if(t<.76f){
+                float u=t/.76f;
+                float e=1f-(float)Math.pow(1f-u,3);
+                rowScale=.66f+(.395f*e);
+            }else{
+                float u=(t-.76f)/.24f;
+                rowScale=1.055f-(.055f*u);
+            }
+
+            reactions.setAlpha(Math.min(1f,t*1.7f));
+            reactions.setScaleX(rowScale);
+            reactions.setScaleY(rowScale);
+            reactions.setTranslationY(dp(8)*(1f-ease));
+
+            for(int i=0;i<reactions.getChildCount();i++){
+                View child=reactions.getChildAt(i);
+                float ct=Math.max(0f,Math.min(1f,(elapsed-i*18L)/255f));
+                float cs;
+                if(ct<.72f){
+                    float u=ct/.72f;
+                    float e=1f-(float)Math.pow(1f-u,3);
+                    cs=.48f+(.62f*e);
+                }else{
+                    float u=(ct-.72f)/.28f;
+                    cs=1.10f-(.10f*u);
+                }
+                child.setAlpha(Math.min(1f,ct*1.85f));
+                child.setScaleX(cs);
+                child.setScaleY(cs);
+            }
+
+            if(t<1f){
+                reactions.postOnAnimation(frame[0]);
+            }else{
+                reactions.setAlpha(1f);
+                reactions.setScaleX(1f);
+                reactions.setScaleY(1f);
+                reactions.setTranslationY(0f);
+                for(int i=0;i<reactions.getChildCount();i++){
+                    View child=reactions.getChildAt(i);
+                    child.setAlpha(1f);
+                    child.setScaleX(1f);
+                    child.setScaleY(1f);
+                }
+            }
+        };
+
+        reactions.postOnAnimation(frame[0]);
+    }
+
     private void showMessageActions(JSONObject m,View anchor){boolean mine=isMine(m),editable=mine&&"text".equals(m.optString("type"))&&!m.optString("body").trim().isEmpty();Dialog d=new Dialog(this);d.requestWindowFeature(Window.FEATURE_NO_TITLE);Window actionWindow=d.getWindow();if(actionWindow!=null)actionWindow.addFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM);FrameLayout overlay=new FrameLayout(this);overlay.setBackgroundColor(Color.argb(136,0,0,0));int screenW=getResources().getDisplayMetrics().widthPixels,screenH=getResources().getDisplayMetrics().heightPixels;int wide=Math.min(screenW-dp(24),dp(360)),actionW=Math.min((int)(screenW*.58f),dp(218));int[] loc=new int[2];if(anchor!=null)anchor.getLocationOnScreen(loc);int top=Math.max(dp(72),Math.min(screenH-dp(390),loc[1]-dp(68)));LinearLayout bundle=new LinearLayout(this);bundle.setOrientation(LinearLayout.VERTICAL);FrameLayout.LayoutParams bundleLp=new FrameLayout.LayoutParams(wide,-2);bundleLp.leftMargin=(screenW-wide)/2;bundleLp.topMargin=top;overlay.addView(bundle,bundleLp);
         FrameLayout reactionsCard=new FrameLayout(this);reactionsCard.setBackground(bg(Color.rgb(36,39,43),34));LinearLayout.LayoutParams rcLp=new LinearLayout.LayoutParams(-1,dp(78));bundle.addView(reactionsCard,rcLp);TextView label=text("Tap + to customize reactions",12,Color.rgb(174,179,187),Typeface.NORMAL);label.setGravity(Gravity.CENTER);FrameLayout.LayoutParams labelLp=new FrameLayout.LayoutParams(-1,dp(25),Gravity.TOP);labelLp.topMargin=dp(3);reactionsCard.addView(label,labelLp);LinearLayout reactions=new LinearLayout(this);reactions.setGravity(Gravity.CENTER);FrameLayout.LayoutParams reactionsLp=new FrameLayout.LayoutParams(-1,dp(48),Gravity.BOTTOM);reactionsLp.setMargins(dp(10),0,dp(10),dp(7));reactionsCard.addView(reactions,reactionsLp);String[] reacts={"❤️","👍","😂","😮","😢","😡","🎉","＋"};for(String e:reacts){TextView rb=text(e,e.equals("＋")?20:20,Color.WHITE,Typeface.NORMAL);rb.setGravity(Gravity.CENTER);rb.setBackgroundColor(Color.TRANSPARENT);reactions.addView(rb,new LinearLayout.LayoutParams(0,-1,1));rb.setOnClickListener(v->{d.dismiss();if(e.equals("＋"))showEmojiPickerForReaction(m);else react(m,e);});}
         LinearLayout actionCard=new LinearLayout(this);actionCard.setOrientation(LinearLayout.VERTICAL);actionCard.setPadding(0,dp(5),0,dp(5));actionCard.setBackground(bg(Color.argb(239,36,39,43),17));LinearLayout.LayoutParams acLp=new LinearLayout.LayoutParams(actionW,-2);acLp.topMargin=dp(8);acLp.gravity=mine?Gravity.END:Gravity.START;bundle.addView(actionCard,acLp);
@@ -754,45 +831,7 @@ public class MainActivity extends Activity {
         d.setContentView(overlay);
         Window w=d.getWindow();
         d.show();
-
-        reactions.postDelayed(()->{
-            reactions.animate().cancel();
-            reactions.setPivotX(reactions.getWidth()/2f);
-            reactions.setPivotY(reactions.getHeight()/2f);
-            reactions.setAlpha(0f);
-            reactions.setScaleX(.68f);
-            reactions.setScaleY(.68f);
-            reactions.setTranslationY(dp(7));
-
-            reactions.animate()
-                .alpha(1f)
-                .scaleX(1f)
-                .scaleY(1f)
-                .translationY(0f)
-                .setDuration(260)
-                .setInterpolator(
-                    new android.view.animation.OvershootInterpolator(1.18f)
-                )
-                .start();
-
-            for(int i=0;i<reactions.getChildCount();i++){
-                View emojiView=reactions.getChildAt(i);
-                emojiView.animate().cancel();
-                emojiView.setAlpha(0f);
-                emojiView.setScaleX(.55f);
-                emojiView.setScaleY(.55f);
-                emojiView.animate()
-                    .alpha(1f)
-                    .scaleX(1f)
-                    .scaleY(1f)
-                    .setStartDelay(i*16L)
-                    .setDuration(225)
-                    .setInterpolator(
-                        new android.view.animation.OvershootInterpolator(1.28f)
-                    )
-                    .start();
-            }
-        },35);
+        reactions.postDelayed(()->animateMessageActionEmojiRow(reactions),55);
         
         if(w!=null){
             w.setBackgroundDrawableResource(android.R.color.transparent);
@@ -1092,10 +1131,22 @@ public class MainActivity extends Activity {
     private void applyConversationPickerInset(int inset){
         if(list==null)return;
         int safe=Math.max(0,inset);
+
         list.setTranslationY(0f);
-        list.setPadding(dp(10),dp(12),dp(10),dp(26)+safe);
-        if(list.getCount()>0){
-            list.setSelection(Math.max(0,list.getCount()-1));
+        list.setClipToPadding(true);
+        list.setPadding(dp(10),dp(12),dp(10),dp(26));
+
+        ViewGroup.LayoutParams raw=list.getLayoutParams();
+        if(raw instanceof LinearLayout.LayoutParams){
+            LinearLayout.LayoutParams lp=(LinearLayout.LayoutParams)raw;
+            if(lp.bottomMargin!=safe){
+                lp.bottomMargin=safe;
+                list.setLayoutParams(lp);
+            }
+        }
+
+        if(messageAdapter!=null&&messageAdapter.getCount()>0){
+            list.setSelection(messageAdapter.getCount()-1);
         }
     }
 
@@ -1172,13 +1223,22 @@ public class MainActivity extends Activity {
         titleRow.setPadding(dp(14),0,dp(12),0);
         dragHeader.addView(titleRow,new LinearLayout.LayoutParams(-1,dp(44)));
 
-        TextView title=text("Recents ⌄",18,Color.WHITE,Typeface.BOLD);
-        title.setClickable(true);
-        titleRow.addView(title,new LinearLayout.LayoutParams(0,dp(44),1));
+        LinearLayout categoryButton=new LinearLayout(this);
+        categoryButton.setGravity(Gravity.CENTER_VERTICAL);
+        categoryButton.setClickable(true);
 
-        TextView hd=text("HD",12,Color.WHITE,Typeface.BOLD);
-        hd.setGravity(Gravity.CENTER);
-        titleRow.addView(hd,new LinearLayout.LayoutParams(dp(38),dp(30)));
+        TextView title=text("Recents",18,Color.WHITE,Typeface.BOLD);
+        categoryButton.addView(title,new LinearLayout.LayoutParams(-2,dp(44)));
+
+        ImageView categoryArrow=new ImageView(this);
+        categoryArrow.setImageResource(R.drawable.ic_media_chevron_down);
+        categoryArrow.setColorFilter(Color.rgb(210,210,214));
+        categoryArrow.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        LinearLayout.LayoutParams arrowLp=new LinearLayout.LayoutParams(dp(24),dp(24));
+        arrowLp.leftMargin=dp(4);
+        categoryButton.addView(categoryArrow,arrowLp);
+
+        titleRow.addView(categoryButton,new LinearLayout.LayoutParams(0,dp(44),1));
 
         FrameLayout mediaHost=new FrameLayout(this);
         sheet.addView(mediaHost,new LinearLayout.LayoutParams(-1,0,1));
@@ -1192,7 +1252,7 @@ public class MainActivity extends Activity {
         scroll.addView(grid,new ScrollView.LayoutParams(-1,-2));
         mediaHost.addView(scroll,new FrameLayout.LayoutParams(-1,-1));
 
-        title.setOnClickListener(v->showMediaCategoryMenu(title,grid));
+        categoryButton.setOnClickListener(v->showMediaCategoryMenu(title,categoryButton,grid));
 
         ProgressBar loading=new ProgressBar(this);
         mediaHost.addView(
@@ -1361,11 +1421,18 @@ public class MainActivity extends Activity {
         new Thread(()->{
             final List<Uri> uris=new ArrayList<>();
             final List<Boolean> videos=new ArrayList<>();
+            final List<Boolean> favorites=new ArrayList<>();
 
             Uri collection=android.provider.MediaStore.Files.getContentUri("external");
+            String favoriteProjection=
+                Build.VERSION.SDK_INT>=30
+                    ?android.provider.MediaStore.MediaColumns.IS_FAVORITE
+                    :android.provider.MediaStore.Files.FileColumns._ID;
+
             String[] projection={
                 android.provider.MediaStore.Files.FileColumns._ID,
-                android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE
+                android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE,
+                favoriteProjection
             };
             String selection=
                 android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE+"=? OR "+
@@ -1386,6 +1453,10 @@ public class MainActivity extends Activity {
                     int typeCol=c.getColumnIndexOrThrow(
                         android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE
                     );
+                    int favoriteCol=
+                        Build.VERSION.SDK_INT>=30
+                            ?c.getColumnIndex(android.provider.MediaStore.MediaColumns.IS_FAVORITE)
+                            :-1;
                     int count=0;
 
                     while(c.moveToNext()&&count<240){
@@ -1395,6 +1466,9 @@ public class MainActivity extends Activity {
                         uris.add(item);
                         videos.add(
                             mt==android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
+                        );
+                        favorites.add(
+                            favoriteCol>=0 && c.getInt(favoriteCol)==1
                         );
                         count++;
                     }
@@ -1411,9 +1485,10 @@ public class MainActivity extends Activity {
                 for(int i=0;i<uris.size();i++){
                     final Uri uri=uris.get(i);
                     final boolean video=videos.get(i);
+                    final boolean favorite=favorites.size()>i&&favorites.get(i);
 
                     FrameLayout tile=new FrameLayout(MainActivity.this);
-                    tile.setTag(video?"video":"photo");
+                    tile.setTag((video?"video":"photo")+"|"+(favorite?"favorite":"normal"));
                     GridLayout.LayoutParams gp=new GridLayout.LayoutParams();
                     gp.width=cell;
                     gp.height=cell;
@@ -1459,8 +1534,94 @@ public class MainActivity extends Activity {
                         }catch(Exception ignored){}
                     }).start();
 
-                    tile.setOnTouchListener((v,e)->contentDrag.onTouch(v,e));
-                    thumb.setOnTouchListener((v,e)->contentDrag.onTouch(v,e));
+                    final float[] tileDownY={Float.NaN};
+                    final boolean[] tileDragging={false};
+
+                    tile.setOnTouchListener((v,e)->{
+                        switch(e.getActionMasked()){
+                            case MotionEvent.ACTION_DOWN:
+                                tileDownY[0]=e.getRawY();
+                                tileDragging[0]=false;
+                                return true;
+
+                            case MotionEvent.ACTION_MOVE:
+                                if(Float.isNaN(tileDownY[0]))return true;
+                                float delta=e.getRawY()-tileDownY[0];
+
+                                if(
+                                    !tileDragging[0] &&
+                                    scroll.getScrollY()<=dp(2) &&
+                                    delta>dp(2)
+                                ){
+                                    tileDragging[0]=true;
+                                    startY[0]=tileDownY[0]-host.getTranslationY();
+                                    host.animate().cancel();
+                                    bridge.animate().cancel();
+                                    composer.animate().cancel();
+                                    if(replyBar!=null)replyBar.animate().cancel();
+                                }
+
+                                if(tileDragging[0]){
+                                    float dy=Math.max(0,e.getRawY()-startY[0]);
+                                    host.setTranslationY(dy);
+                                    bridge.setTranslationY(dy);
+                                    composer.setTranslationY(-sheetH+dy);
+                                    applyConversationPickerInset(
+                                        Math.max(0,sheetH-(int)dy)
+                                    );
+                                    if(
+                                        replyBar!=null &&
+                                        replyBar.getVisibility()==View.VISIBLE
+                                    ){
+                                        replyBar.setTranslationY(-sheetH+dy);
+                                    }
+                                }
+                                return true;
+
+                            case MotionEvent.ACTION_UP:
+                            case MotionEvent.ACTION_CANCEL:
+                                if(tileDragging[0]){
+                                    float y=host.getTranslationY();
+                                    tileDragging[0]=false;
+                                    tileDownY[0]=Float.NaN;
+
+                                    if(y>dp(42)){
+                                        dismissInstagramMediaPicker(host);
+                                    }else{
+                                        host.animate().translationY(0)
+                                            .setDuration(170)
+                                            .setInterpolator(new DecelerateInterpolator())
+                                            .start();
+                                        bridge.animate().translationY(0)
+                                            .setDuration(170)
+                                            .setInterpolator(new DecelerateInterpolator())
+                                            .start();
+                                        applyConversationPickerInset(sheetH);
+                                        composer.animate().translationY(-sheetH)
+                                            .setDuration(170)
+                                            .setInterpolator(new DecelerateInterpolator())
+                                            .start();
+                                        if(
+                                            replyBar!=null &&
+                                            replyBar.getVisibility()==View.VISIBLE
+                                        ){
+                                            replyBar.animate().translationY(-sheetH)
+                                                .setDuration(170)
+                                                .setInterpolator(new DecelerateInterpolator())
+                                                .start();
+                                        }
+                                    }
+                                    return true;
+                                }
+
+                                tileDownY[0]=Float.NaN;
+                                if(e.getActionMasked()==MotionEvent.ACTION_UP){
+                                    v.performClick();
+                                }
+                                return true;
+                        }
+                        return true;
+                    });
 
                     tile.setOnClickListener(v->{
                         dismissInstagramMediaPicker(host);
@@ -1493,67 +1654,92 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void showMediaCategoryMenu(TextView title,GridLayout grid){
-        final android.widget.PopupWindow popup=new android.widget.PopupWindow(this);
+    private void showMediaCategoryMenu(
+        TextView title,
+        View anchor,
+        GridLayout grid
+    ){
+        final android.widget.PopupWindow popup=
+            new android.widget.PopupWindow(this);
+
         LinearLayout card=new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(10),dp(8),dp(10),dp(8));
-        card.setBackground(bg(Color.argb(248,36,39,43),20));
+        card.setPadding(dp(8),dp(7),dp(8),dp(7));
+        card.setBackground(bg(Color.argb(250,36,39,43),20));
 
-        String[][] items={
-            {"▣","Recents","all"},
-            {"♡","Favorites","all"},
-            {"▧","Photos","photo"},
-            {"▷","Videos","video"},
-            {"G","Google Photos","external"},
-            {"▦","All albums","all"},
-            {"▤","From Meta apps","all"}
+        String[] labels={
+            "Recents",
+            "Favorites",
+            "Photos",
+            "Videos",
+            "All albums"
+        };
+        String[] modes={
+            "all",
+            "favorite",
+            "photo",
+            "video",
+            "all"
+        };
+        int[] icons={
+            R.drawable.ic_media_recents,
+            R.drawable.ic_media_favorite,
+            R.drawable.ic_media_photos,
+            R.drawable.ic_media_videos,
+            R.drawable.ic_media_albums
         };
 
-        for(String[] item:items){
+        for(int index=0;index<labels.length;index++){
+            final String label=labels[index];
+            final String mode=modes[index];
+
             LinearLayout row=new LinearLayout(this);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(12),0,dp(12),0);
+            row.setPadding(dp(10),0,dp(10),0);
 
-            TextView icon=text(item[0],24,Color.WHITE,Typeface.NORMAL);
-            icon.setGravity(Gravity.CENTER);
-            row.addView(icon,new LinearLayout.LayoutParams(dp(42),dp(52)));
+            ImageView icon=new ImageView(this);
+            icon.setImageResource(icons[index]);
+            icon.setColorFilter(Color.WHITE);
+            icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            row.addView(icon,new LinearLayout.LayoutParams(dp(38),dp(50)));
 
-            TextView label=text(item[1],18,Color.WHITE,Typeface.NORMAL);
-            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(52),1);
-            lp.leftMargin=dp(8);
-            row.addView(label,lp);
+            TextView rowText=text(label,18,Color.WHITE,Typeface.NORMAL);
+            LinearLayout.LayoutParams textLp=
+                new LinearLayout.LayoutParams(0,dp(50),1);
+            textLp.leftMargin=dp(8);
+            row.addView(rowText,textLp);
 
-            card.addView(row,new LinearLayout.LayoutParams(dp(270),dp(52)));
+            card.addView(row,new LinearLayout.LayoutParams(dp(252),dp(50)));
 
             row.setOnClickListener(v->{
                 popup.dismiss();
+                title.setText(label);
 
-                String mode=item[2];
-                if("external".equals(mode)){
-                    try{
-                        Intent intent=new Intent(Intent.ACTION_VIEW);
-                        intent.setPackage("com.google.android.apps.photos");
-                        startActivity(intent);
-                    }catch(Exception e){
-                        toast("Google Photos isn't available.");
-                    }
-                    return;
-                }
-
-                title.setText(item[1]+" ⌄");
                 for(int i=0;i<grid.getChildCount();i++){
                     View child=grid.getChildAt(i);
-                    Object tag=child.getTag();
-                    if(tag==null)continue;
-                    boolean show="all".equals(mode)||mode.equals(String.valueOf(tag));
+                    Object rawTag=child.getTag();
+                    if(rawTag==null)continue;
+
+                    String tag=String.valueOf(rawTag);
+                    boolean show;
+
+                    if("favorite".equals(mode)){
+                        show=tag.endsWith("|favorite");
+                    }else if("photo".equals(mode)){
+                        show=tag.startsWith("photo|");
+                    }else if("video".equals(mode)){
+                        show=tag.startsWith("video|");
+                    }else{
+                        show=true;
+                    }
+
                     child.setVisibility(show?View.VISIBLE:View.GONE);
                 }
             });
         }
 
         popup.setContentView(card);
-        popup.setWidth(dp(290));
+        popup.setWidth(dp(268));
         popup.setHeight(-2);
         popup.setFocusable(true);
         popup.setOutsideTouchable(true);
@@ -1561,7 +1747,7 @@ public class MainActivity extends Activity {
             new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
         );
         popup.setElevation(dp(10));
-        popup.showAsDropDown(title,-dp(18),-dp(4));
+        popup.showAsDropDown(anchor,-dp(8),-dp(2));
     }
 
     private void dismissInstagramMediaPicker(View host){
