@@ -1291,12 +1291,21 @@ reactionsCard.animate().cancel();
         page.addView(aa,ap);
         aa.setOnClickListener(v->{d.dismiss();showMessageTextCreate();});
 
-        View shutter=new View(this);
-        GradientDrawable sb=bg(Color.WHITE,39);
-        sb.setStroke(dp(3),Color.WHITE);
-        shutter.setBackground(sb);
+        FrameLayout shutter=new FrameLayout(this);
+        GradientDrawable shutterOuter=new GradientDrawable();
+        shutterOuter.setShape(GradientDrawable.OVAL);
+        shutterOuter.setColor(Color.TRANSPARENT);
+        shutterOuter.setStroke(dp(3),Color.WHITE);
+        shutter.setBackground(shutterOuter);
+
+        View shutterInner=new View(this);
+        shutterInner.setBackground(bg(Color.WHITE,31));
+        FrameLayout.LayoutParams innerLp=
+            new FrameLayout.LayoutParams(dp(62),dp(62),Gravity.CENTER);
+        shutter.addView(shutterInner,innerLp);
+
         FrameLayout.LayoutParams shp=
-            new FrameLayout.LayoutParams(dp(78),dp(78),Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL);
+            new FrameLayout.LayoutParams(dp(76),dp(76),Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL);
         shp.bottomMargin=dp(66);
         page.addView(shutter,shp);
         shutter.setOnClickListener(v->{
@@ -1315,7 +1324,10 @@ reactionsCard.animate().cancel();
 
         ImageButton gallery=icon(R.drawable.ic_camera_gallery_exact_ref,46,Color.WHITE);
         gallery.clearColorFilter();
-        gallery.setBackgroundColor(Color.TRANSPARENT);
+        gallery.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        gallery.setBackground(bg(Color.rgb(38,38,38),11));
+        gallery.setClipToOutline(true);
+        loadLatestGalleryThumbnail(gallery);
         FrameLayout.LayoutParams gp=
             new FrameLayout.LayoutParams(dp(46),dp(46),Gravity.BOTTOM|Gravity.START);
         gp.leftMargin=dp(22);
@@ -1378,20 +1390,24 @@ reactionsCard.animate().cancel();
         backLp.topMargin=dp(58);
         page.addView(back,backLp);
         back.setOnClickListener(v->{
+            if(backDestination!=null)backDestination.run();
             d.dismiss();
-            if(backDestination!=null)main.postDelayed(backDestination,80);
         });
 
         LinearLayout tools=new LinearLayout(this);
         tools.setOrientation(LinearLayout.VERTICAL);
         tools.setGravity(Gravity.CENTER_HORIZONTAL);
 
-        TextView aa=text("Aa",22,Color.WHITE,Typeface.NORMAL);
+        TextView aa=text("Aa",20,Color.WHITE,Typeface.NORMAL);
         aa.setGravity(Gravity.CENTER);
-        aa.setBackground(bg(Color.rgb(36,37,41),23));
-        tools.addView(aa,new LinearLayout.LayoutParams(dp(46),dp(46)));
+        aa.setBackground(bg(Color.rgb(36,37,41),20));
+        tools.addView(aa,new LinearLayout.LayoutParams(dp(40),dp(40)));
+        aa.setOnClickListener(v->{
+            d.dismiss();
+            showMessageTextCreate(bytes);
+        });
 
-        ImageButton sticker=icon(R.drawable.ic_camera_sticker_exact_ref,46,Color.WHITE);
+        ImageButton sticker=icon(R.drawable.ic_camera_sticker_exact_ref,40,Color.WHITE);
         sticker.clearColorFilter();
         sticker.setPadding(dp(9),dp(9),dp(9),dp(9));
         sticker.setBackground(bg(Color.rgb(36,37,41),23));
@@ -1399,7 +1415,7 @@ reactionsCard.animate().cancel();
         tp1.topMargin=dp(7);
         tools.addView(sticker,tp1);
 
-        ImageButton draw=icon(R.drawable.ic_camera_draw_exact_ref,46,Color.WHITE);
+        ImageButton draw=icon(R.drawable.ic_camera_draw_exact_ref,40,Color.WHITE);
         draw.clearColorFilter();
         draw.setPadding(dp(9),dp(9),dp(9),dp(9));
         draw.setBackground(bg(Color.rgb(36,37,41),23));
@@ -1407,7 +1423,7 @@ reactionsCard.animate().cancel();
         tp2.topMargin=dp(7);
         tools.addView(draw,tp2);
 
-        ImageButton download=icon(R.drawable.ic_camera_download_ref,46,Color.WHITE);
+        ImageButton download=icon(R.drawable.ic_camera_download_ref,40,Color.WHITE);
         download.setPadding(dp(10),dp(10),dp(10),dp(10));
         download.setBackground(bg(Color.rgb(36,37,41),23));
         LinearLayout.LayoutParams tp3=new LinearLayout.LayoutParams(dp(46),dp(46));
@@ -1450,7 +1466,7 @@ reactionsCard.animate().cancel();
         );
 
         LinearLayout sendPill=new LinearLayout(this);
-        sendPill.setGravity(Gravity.CENTER_VERTICAL);
+        sendPill.setGravity(Gravity.CENTER);
         sendPill.setPadding(dp(6),0,dp(11),0);
         sendPill.setBackground(bg(Color.WHITE,23));
 
@@ -1527,7 +1543,8 @@ reactionsCard.animate().cancel();
                         ?R.drawable.ic_camera_view_twice_ref
                         :R.drawable.ic_camera_view_unlimited_ref
             );
-            icon.setPadding(dp(7),dp(7),dp(7),dp(7));
+            icon.setPadding(dp(10),dp(10),dp(10),dp(10));
+            icon.setTranslationY(dp(2));
             row.addView(icon,new LinearLayout.LayoutParams(dp(44),dp(62)));
 
             TextView label=text(labels[i],18,Color.WHITE,Typeface.NORMAL);
@@ -1575,8 +1592,14 @@ reactionsCard.animate().cancel();
     }
 
     private void showMessageTextCreate(){
+        showMessageTextCreate(null);
+    }
+
+    private void showMessageTextCreate(final byte[] baseBytes){
         final Dialog d=new Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen);
         final FrameLayout page=new FrameLayout(this);
+        final FrameLayout editCanvas=new FrameLayout(this);
+
         final int[][] palettes={
             {0xffff315f,0xffff7a18,0xffffd138},
             {0xff833ab4,0xfffd1d1d,0xfffcb045},
@@ -1584,30 +1607,52 @@ reactionsCard.animate().cancel();
         };
         final int[] ix={0};
 
-        Runnable paint=()->page.setBackground(
-            new GradientDrawable(GradientDrawable.Orientation.TL_BR,palettes[ix[0]])
-        );
+        Runnable paint=()->{
+            if(baseBytes==null){
+                editCanvas.setBackground(
+                    new GradientDrawable(
+                        GradientDrawable.Orientation.TL_BR,
+                        palettes[ix[0]]
+                    )
+                );
+            }
+        };
         paint.run();
 
-        View shade=new View(this);
-        shade.setBackgroundColor(Color.argb(65,0,0,0));
-        page.addView(shade,new FrameLayout.LayoutParams(-1,dp(44),Gravity.TOP));
+        FrameLayout.LayoutParams editLp=new FrameLayout.LayoutParams(-1,-1);
+        editLp.topMargin=dp(38);
+        editLp.bottomMargin=dp(92);
+        page.addView(editCanvas,editLp);
 
-        LinearLayout textHeader=messageTitle();
-        for(int i=0;i<textHeader.getChildCount();i++){
-            View child=textHeader.getChildAt(i);
-            if(child instanceof TextView)((TextView)child).setTextSize(16);
+        if(baseBytes!=null){
+            ImageView base=new ImageView(this);
+            base.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            base.setImageBitmap(BitmapFactory.decodeByteArray(baseBytes,0,baseBytes.length));
+            editCanvas.addView(base,new FrameLayout.LayoutParams(-1,-1));
         }
-        page.addView(textHeader,new FrameLayout.LayoutParams(-1,dp(44),Gravity.TOP));
 
-        ImageButton close=icon(R.drawable.ic_msg_close,46,Color.WHITE);
+        View shade=new View(this);
+        shade.setBackgroundColor(Color.argb(55,0,0,0));
+        page.addView(shade,new FrameLayout.LayoutParams(-1,dp(38),Gravity.TOP));
+
+        LinearLayout header=messageTitle();
+        for(int i=0;i<header.getChildCount();i++){
+            View child=header.getChildAt(i);
+            if(child instanceof TextView)((TextView)child).setTextSize(15);
+        }
+        page.addView(header,new FrameLayout.LayoutParams(-1,dp(38),Gravity.TOP));
+
+        ImageButton close=icon(R.drawable.ic_msg_close,40,Color.WHITE);
         close.setBackgroundColor(Color.TRANSPARENT);
         FrameLayout.LayoutParams cp=
-            new FrameLayout.LayoutParams(dp(46),dp(46),Gravity.TOP|Gravity.START);
-        cp.leftMargin=dp(12);
-        cp.topMargin=dp(46);
+            new FrameLayout.LayoutParams(dp(40),dp(40),Gravity.TOP|Gravity.START);
+        cp.leftMargin=dp(10);
+        cp.topMargin=dp(44);
         page.addView(close,cp);
-        close.setOnClickListener(v->d.dismiss());
+        close.setOnClickListener(v->{
+            d.dismiss();
+            if(baseBytes!=null)showCapturedMediaPreview(baseBytes,this::showMessageCamera);
+        });
 
         EditText input=new EditText(this);
         input.setHint("Type a message...");
@@ -1617,44 +1662,63 @@ reactionsCard.animate().cancel();
         input.setGravity(Gravity.CENTER);
         input.setBackgroundColor(Color.TRANSPARENT);
         FrameLayout.LayoutParams ip=
-            new FrameLayout.LayoutParams(-1,dp(180),Gravity.CENTER);
+            new FrameLayout.LayoutParams(-1,dp(190),Gravity.CENTER);
         ip.leftMargin=dp(28);
         ip.rightMargin=dp(28);
-        page.addView(input,ip);
+        editCanvas.addView(input,ip);
 
-        TextView create=text("Aa",35,Color.BLACK,Typeface.NORMAL);
-        create.setGravity(Gravity.CENTER);
-        create.setBackground(bg(Color.WHITE,38));
-        FrameLayout.LayoutParams createp=
+        FrameLayout createWrap=new FrameLayout(this);
+        GradientDrawable createOuter=new GradientDrawable();
+        createOuter.setShape(GradientDrawable.OVAL);
+        createOuter.setColor(Color.TRANSPARENT);
+        createOuter.setStroke(dp(3),Color.WHITE);
+        createWrap.setBackground(createOuter);
+
+        FrameLayout.LayoutParams createWrapLp=
             new FrameLayout.LayoutParams(dp(76),dp(76),Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL);
-        createp.bottomMargin=dp(62);
-        page.addView(create,createp);
+        createWrapLp.bottomMargin=dp(56);
+        page.addView(createWrap,createWrapLp);
 
-        create.setOnClickListener(v->{
-            String body=input.getText().toString().trim();
-            if(body.isEmpty()){
-                input.requestFocus();
-                return;
-            }
+        TextView create=text("Aa",33,Color.BLACK,Typeface.NORMAL);
+        create.setGravity(Gravity.CENTER);
+        create.setBackground(bg(Color.WHITE,32));
+        FrameLayout.LayoutParams createLp=
+            new FrameLayout.LayoutParams(dp(64),dp(64),Gravity.CENTER);
+        createWrap.addView(create,createLp);
+
+        createWrap.setOnClickListener(v->{
             try{
-                JSONObject req=new JSONObject()
-                    .put("body",body)
-                    .put("clientId","text-create-"+System.currentTimeMillis());
-                api.post(
-                    "/api/messaging/conversations/"+activeConversation.optString("id")+"/messages",
-                    req,
-                    (json,error)->main.post(()->{
-                        if(error!=null){
-                            toast(error.getMessage());
-                            return;
-                        }
-                        JSONObject message=json.optJSONObject("message");
-                        if(message!=null)upsertMessage(message);
+                input.clearFocus();
+                InputMethodManager imm=
+                    (InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
+                if(imm!=null)imm.hideSoftInputFromWindow(input.getWindowToken(),0);
+
+                editCanvas.post(()->{
+                    try{
+                        if(editCanvas.getWidth()<=0||editCanvas.getHeight()<=0)return;
+                        Bitmap rendered=Bitmap.createBitmap(
+                            editCanvas.getWidth(),
+                            editCanvas.getHeight(),
+                            Bitmap.Config.ARGB_8888
+                        );
+                        Canvas canvas=new Canvas(rendered);
+                        editCanvas.draw(canvas);
+
+                        java.io.ByteArrayOutputStream out=
+                            new java.io.ByteArrayOutputStream();
+                        rendered.compress(Bitmap.CompressFormat.JPEG,95,out);
+
                         d.dismiss();
-                    })
-                );
-            }catch(Exception e){
-                toast(e.getMessage());
+                        showCapturedMediaPreview(
+                            out.toByteArray(),
+                            this::showMessageCamera
+                        );
+                    }catch(Exception ex){
+                        toast(ex.getMessage());
+                    }
+                });
+            }catch(Exception ex){
+                toast(ex.getMessage());
             }
         });
 
@@ -1668,19 +1732,32 @@ reactionsCard.animate().cancel();
         gp.bottomMargin=dp(18);
         page.addView(gallery,gp);
         loadLatestGalleryThumbnail(gallery);
-        gallery.setOnClickListener(v->{d.dismiss();pickInstagramMediaFullScreen(2);});
+        gallery.setOnClickListener(v->{
+            d.dismiss();
+            pickInstagramMediaFullScreen(2);
+        });
+
+        FrameLayout dotWrap=new FrameLayout(this);
+        GradientDrawable dotOuter=new GradientDrawable();
+        dotOuter.setShape(GradientDrawable.OVAL);
+        dotOuter.setColor(Color.TRANSPARENT);
+        dotOuter.setStroke(dp(2),Color.WHITE);
+        dotWrap.setBackground(dotOuter);
+
+        FrameLayout.LayoutParams dotWrapLp=
+            new FrameLayout.LayoutParams(dp(42),dp(42),Gravity.BOTTOM|Gravity.END);
+        dotWrapLp.rightMargin=dp(22);
+        dotWrapLp.bottomMargin=dp(20);
+        page.addView(dotWrap,dotWrapLp);
 
         View dot=new View(this);
-        GradientDrawable initialDot=
+        GradientDrawable firstDot=
             new GradientDrawable(GradientDrawable.Orientation.TL_BR,palettes[0]);
-        initialDot.setShape(GradientDrawable.OVAL);
-        dot.setBackground(initialDot);
-        FrameLayout.LayoutParams dpv=
-            new FrameLayout.LayoutParams(dp(40),dp(40),Gravity.BOTTOM|Gravity.END);
-        dpv.rightMargin=dp(22);
-        dpv.bottomMargin=dp(20);
-        page.addView(dot,dpv);
-        dot.setOnClickListener(v->{
+        firstDot.setShape(GradientDrawable.OVAL);
+        dot.setBackground(firstDot);
+        dotWrap.addView(dot,new FrameLayout.LayoutParams(dp(34),dp(34),Gravity.CENTER));
+
+        dotWrap.setOnClickListener(v->{
             ix[0]=(ix[0]+1)%palettes.length;
             paint.run();
             GradientDrawable nextDot=
@@ -1704,7 +1781,7 @@ reactionsCard.animate().cancel();
             InputMethodManager imm=
                 (InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
             if(imm!=null)imm.showSoftInput(input,InputMethodManager.SHOW_IMPLICIT);
-        },160);
+        },150);
     }
 
     private void pickInstagramMediaFullScreen(){
