@@ -1014,7 +1014,7 @@ reactionsCard.animate().cancel();
         FrameLayout.LayoutParams hostLp=new FrameLayout.LayoutParams(-1,sheetH,Gravity.BOTTOM);root.addView(host,hostLp);
         View stickerBridge=new View(this);stickerBridge.setTag("messenger-sticker-bridge");stickerBridge.setBackgroundColor(Color.TRANSPARENT);FrameLayout.LayoutParams bridgeLp=new FrameLayout.LayoutParams(-1,dp(4),Gravity.BOTTOM);bridgeLp.bottomMargin=sheetH-dp(1);root.addView(stickerBridge,bridgeLp);
 
-        LinearLayout sheet=new LinearLayout(this);sheet.setBackground(topBg(Color.rgb(38,38,38),22));sheet.setOrientation(LinearLayout.VERTICAL);sheet.setPadding(dp(10),dp(6),dp(10),dp(8));sheet.setBackground(topBg(Color.WHITE,22));host.addView(sheet,new FrameLayout.LayoutParams(-1,-1));
+        LinearLayout sheet=new LinearLayout(this);sheet.setBackground(topBg(Color.rgb(38,38,38),14));sheet.setOrientation(LinearLayout.VERTICAL);sheet.setPadding(dp(10),dp(6),dp(10),dp(8));sheet.setBackground(topBg(Color.WHITE,22));host.addView(sheet,new FrameLayout.LayoutParams(-1,-1));
 
         LinearLayout dragHeader=new LinearLayout(this);dragHeader.setOrientation(LinearLayout.VERTICAL);dragHeader.setGravity(Gravity.CENTER_HORIZONTAL);dragHeader.setPadding(0,dp(1),0,dp(6));sheet.addView(dragHeader,new LinearLayout.LayoutParams(-1,dp(64)));
         View puller=new View(this);puller.setBackground(bg(Color.rgb(190,193,199),3));LinearLayout.LayoutParams php=new LinearLayout.LayoutParams(dp(42),dp(5));php.gravity=Gravity.CENTER_HORIZONTAL;php.bottomMargin=dp(8);dragHeader.addView(puller,php);
@@ -1161,21 +1161,21 @@ reactionsCard.animate().cancel();
 
         LinearLayout sheet=new LinearLayout(this);
         sheet.setOrientation(LinearLayout.VERTICAL);
-        sheet.setBackground(topBg(Color.rgb(38,38,38),22));
+        sheet.setBackground(topBg(Color.rgb(38,38,38),14));
         host.addView(sheet,new FrameLayout.LayoutParams(-1,-1));
 
         LinearLayout dragHeader=new LinearLayout(this);
         dragHeader.setOrientation(LinearLayout.VERTICAL);
         dragHeader.setGravity(Gravity.CENTER_HORIZONTAL);
-        dragHeader.setPadding(0,dp(7),0,dp(5));
-        sheet.addView(dragHeader,new LinearLayout.LayoutParams(-1,dp(72)));
+        dragHeader.setPadding(0,dp(5),0,dp(3));
+        sheet.addView(dragHeader,new LinearLayout.LayoutParams(-1,dp(64)));
 
         View puller=new View(this);
         puller.setBackground(bg(Color.rgb(155,158,166),3));
         LinearLayout.LayoutParams pullLp=
             new LinearLayout.LayoutParams(dp(42),dp(5));
         pullLp.gravity=Gravity.CENTER_HORIZONTAL;
-        pullLp.bottomMargin=dp(8);
+        pullLp.bottomMargin=dp(5);
         dragHeader.addView(puller,pullLp);
 
         LinearLayout titleRow=new LinearLayout(this);
@@ -1194,8 +1194,8 @@ reactionsCard.animate().cancel();
         categoryArrow.setImageResource(R.drawable.ic_media_chevron_down);
         categoryArrow.setColorFilter(Color.rgb(210,210,214));
         categoryArrow.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        LinearLayout.LayoutParams arrowLp=new LinearLayout.LayoutParams(dp(16),dp(16));
-        arrowLp.leftMargin=dp(7);
+        LinearLayout.LayoutParams arrowLp=new LinearLayout.LayoutParams(dp(15),dp(15));
+        arrowLp.leftMargin=dp(5);
         categoryArrow.setTranslationY(dp(1));
         categoryButton.addView(categoryArrow,arrowLp);
 
@@ -1204,16 +1204,27 @@ reactionsCard.animate().cancel();
         FrameLayout mediaHost=new FrameLayout(this);
         sheet.addView(mediaHost,new LinearLayout.LayoutParams(-1,0,1));
 
-        TextView mediaDateBubble=text("",16,Color.BLACK,Typeface.BOLD);
+        TextView mediaDateBubble=text("",11.5f,Color.BLACK,Typeface.BOLD);
         mediaDateBubble.setGravity(Gravity.CENTER);
-        mediaDateBubble.setPadding(dp(20),0,dp(20),0);
-        mediaDateBubble.setBackground(bg(Color.WHITE,26));
+        mediaDateBubble.setPadding(dp(10),0,dp(10),0);
+        mediaDateBubble.setBackground(bg(Color.WHITE,17));
         mediaDateBubble.setVisibility(View.GONE);
         mediaDateBubble.setElevation(dp(8));
-        mediaHost.addView(
-            mediaDateBubble,
-            new FrameLayout.LayoutParams(-2,dp(52),Gravity.CENTER)
-        );
+
+        FrameLayout.LayoutParams mediaDateLp=
+            new FrameLayout.LayoutParams(-2,dp(34),Gravity.TOP|Gravity.END);
+        mediaDateLp.rightMargin=dp(22);
+        mediaDateLp.topMargin=dp(8);
+        mediaHost.addView(mediaDateBubble,mediaDateLp);
+
+        View mediaScrollThumb=new View(this);
+        mediaScrollThumb.setBackground(bg(Color.WHITE,4));
+        FrameLayout.LayoutParams thumbLp=
+            new FrameLayout.LayoutParams(dp(8),dp(52),Gravity.TOP|Gravity.END);
+        thumbLp.rightMargin=dp(6);
+        thumbLp.topMargin=dp(8);
+        mediaHost.addView(mediaScrollThumb,thumbLp);
+
         final Runnable[] hideMediaDate={null};
 
         ScrollView scroll=new ScrollView(this);
@@ -1251,12 +1262,21 @@ reactionsCard.animate().cancel();
             new LinearLayout.LayoutParams(0,dp(58),1)
         );
 
-        ImageButton sendSelected=icon(R.drawable.msg_send_enabled,54,Color.BLACK);
-        sendSelected.setImageResource(R.drawable.msg_send_enabled);
+        ImageButton sendSelected=new ImageButton(this);
+        if(sendButton!=null&&sendButton.getDrawable()!=null){
+            android.graphics.drawable.Drawable source=sendButton.getDrawable();
+            android.graphics.drawable.Drawable copy=
+                source.getConstantState()!=null
+                    ?source.getConstantState().newDrawable().mutate()
+                    :source.mutate();
+            sendSelected.setImageDrawable(copy);
+        }else{
+            sendSelected.setImageResource(R.drawable.msg_send_enabled);
+        }
         sendSelected.setColorFilter(Color.BLACK);
         sendSelected.setBackground(bg(Color.WHITE,27));
         sendSelected.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        sendSelected.setPadding(dp(10),dp(10),dp(10),dp(10));
+        sendSelected.setPadding(dp(11),dp(11),dp(11),dp(11));
 
         LinearLayout.LayoutParams sendLp=
             new LinearLayout.LayoutParams(dp(54),dp(54));
@@ -1279,7 +1299,7 @@ reactionsCard.animate().cancel();
 
                 FrameLayout chip=new FrameLayout(MainActivity.this);
                 LinearLayout.LayoutParams chipLp=
-                    new LinearLayout.LayoutParams(dp(44),dp(52));
+                    new LinearLayout.LayoutParams(dp(38),dp(52));
                 chipLp.rightMargin=dp(6);
                 selectedRow.addView(chip,chipLp);
 
@@ -1629,6 +1649,31 @@ reactionsCard.animate().cancel();
                                 ).format(new Date(sec*1000L))
                             );
                             mediaDateBubble.setVisibility(View.VISIBLE);
+
+                            int contentH=Math.max(
+                                scroll.getHeight(),
+                                grid.getHeight()
+                            );
+                            int viewportH=Math.max(1,scroll.getHeight());
+                            int maxScroll=Math.max(1,contentH-viewportH);
+
+                            float progress=Math.max(
+                                0f,
+                                Math.min(1f,sy/(float)maxScroll)
+                            );
+
+                            int track=Math.max(
+                                0,
+                                mediaHost.getHeight()-dp(68)
+                            );
+                            float thumbY=dp(8)+(track*progress);
+
+                            mediaScrollThumb.setTranslationY(thumbY);
+                            mediaDateBubble.setTranslationY(
+                                thumbY+dp(9)
+                            );
+
+                            mediaScrollThumb.bringToFront();
                             mediaDateBubble.bringToFront();
 
                             if(hideMediaDate[0]!=null){
@@ -1636,7 +1681,7 @@ reactionsCard.animate().cancel();
                             }
                             hideMediaDate[0]=()->
                                 mediaDateBubble.setVisibility(View.GONE);
-                            main.postDelayed(hideMediaDate[0],650);
+                            main.postDelayed(hideMediaDate[0],520);
                         }
                     );
                 }
