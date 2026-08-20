@@ -722,37 +722,36 @@ public class MainActivity extends Activity {
 
         reactionsCard.animate().cancel();
         reactionsCard.setAlpha(0f);
-        reactionsCard.setScaleX(.76f);
-        reactionsCard.setScaleY(.76f);
-        reactionsCard.setTranslationY(dp(7));
+        reactionsCard.setScaleX(.80f);
+        reactionsCard.setScaleY(.80f);
+        reactionsCard.setTranslationX(dp(24));
+        reactionsCard.setTranslationY(dp(4));
 
         final long started=android.os.SystemClock.uptimeMillis();
-        final long duration=330L;
+        final long duration=255L;
         final Runnable[] frame=new Runnable[1];
 
         frame[0]=()->{
             long elapsed=android.os.SystemClock.uptimeMillis()-started;
             float t=Math.min(1f,elapsed/(float)duration);
-
-            // Smooth cubic fade/position.
             float ease=1f-(float)Math.pow(1f-t,3);
 
-            // Physical scale: compressed -> slight overshoot -> 100%.
             float scale;
-            if(t<.78f){
-                float u=t/.78f;
+            if(t<.74f){
+                float u=t/.74f;
                 float e=1f-(float)Math.pow(1f-u,3);
-                scale=.76f + (.285f*e);   // reaches ~1.045
+                scale=.80f+(.235f*e);
             }else{
-                float u=(t-.78f)/.22f;
+                float u=(t-.74f)/.26f;
                 float settle=1f-(float)Math.pow(1f-u,2);
-                scale=1.045f-(.045f*settle);
+                scale=1.035f-(.035f*settle);
             }
 
-            reactionsCard.setAlpha(Math.min(1f,t*1.65f));
+            reactionsCard.setAlpha(Math.min(1f,t*1.9f));
             reactionsCard.setScaleX(scale);
             reactionsCard.setScaleY(scale);
-            reactionsCard.setTranslationY(dp(7)*(1f-ease));
+            reactionsCard.setTranslationX(dp(24)*(1f-ease));
+            reactionsCard.setTranslationY(dp(4)*(1f-ease));
 
             if(t<1f){
                 reactionsCard.postOnAnimation(frame[0]);
@@ -760,6 +759,7 @@ public class MainActivity extends Activity {
                 reactionsCard.setAlpha(1f);
                 reactionsCard.setScaleX(1f);
                 reactionsCard.setScaleY(1f);
+                reactionsCard.setTranslationX(0f);
                 reactionsCard.setTranslationY(0f);
             }
         };
@@ -1231,6 +1231,152 @@ reactionsCard.animate().cancel();
 
         categoryButton.setOnClickListener(v->showMediaCategoryMenu(title,categoryButton,grid));
 
+        final List<Uri> selectedUris=new ArrayList<>();
+        final List<Boolean> selectedVideos=new ArrayList<>();
+
+        LinearLayout selectedBar=new LinearLayout(this);
+        selectedBar.setGravity(Gravity.CENTER_VERTICAL);
+        selectedBar.setPadding(dp(8),dp(5),dp(8),dp(5));
+        selectedBar.setBackgroundColor(Color.argb(245,38,38,38));
+        selectedBar.setVisibility(View.GONE);
+
+        HorizontalScrollView selectedScroll=new HorizontalScrollView(this);
+        selectedScroll.setHorizontalScrollBarEnabled(false);
+
+        LinearLayout selectedRow=new LinearLayout(this);
+        selectedRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        selectedScroll.addView(
+            selectedRow,
+            new HorizontalScrollView.LayoutParams(-2,dp(58))
+        );
+        selectedBar.addView(
+            selectedScroll,
+            new LinearLayout.LayoutParams(0,dp(58),1)
+        );
+
+        ImageButton sendSelected=icon(R.drawable.ic_msg_send,54,Color.BLACK);
+        sendSelected.setColorFilter(Color.BLACK);
+        sendSelected.setBackground(bg(Color.WHITE,27));
+        sendSelected.setPadding(dp(14),dp(14),dp(14),dp(14));
+
+        LinearLayout.LayoutParams sendLp=
+            new LinearLayout.LayoutParams(dp(54),dp(54));
+        sendLp.leftMargin=dp(7);
+        selectedBar.addView(sendSelected,sendLp);
+
+        FrameLayout.LayoutParams selectedLp=
+            new FrameLayout.LayoutParams(-1,dp(68),Gravity.BOTTOM);
+        mediaHost.addView(selectedBar,selectedLp);
+
+        final Runnable[] renderSelectedHolder=new Runnable[1];
+
+        renderSelectedHolder[0]=()->{
+            selectedRow.removeAllViews();
+
+            for(int si=0;si<selectedUris.size();si++){
+                final int index=si;
+                final Uri selectedUri=selectedUris.get(si);
+                final boolean selectedVideo=selectedVideos.get(si);
+
+                FrameLayout chip=new FrameLayout(MainActivity.this);
+                LinearLayout.LayoutParams chipLp=
+                    new LinearLayout.LayoutParams(dp(52),dp(52));
+                chipLp.rightMargin=dp(6);
+                selectedRow.addView(chip,chipLp);
+
+                ImageView image=new ImageView(MainActivity.this);
+                image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                image.setBackgroundColor(Color.rgb(18,18,18));
+                chip.addView(image,new FrameLayout.LayoutParams(-1,-1));
+
+                TextView number=text(
+                    String.valueOf(si+1),
+                    11,
+                    Color.WHITE,
+                    Typeface.BOLD
+                );
+                number.setGravity(Gravity.CENTER);
+                number.setBackground(bg(Color.rgb(91,70,246),10));
+
+                FrameLayout.LayoutParams numberLp=
+                    new FrameLayout.LayoutParams(dp(20),dp(20),Gravity.TOP|Gravity.END);
+                numberLp.topMargin=dp(2);
+                numberLp.rightMargin=dp(2);
+                chip.addView(number,numberLp);
+
+                new Thread(()->{
+                    try{
+                        Bitmap bm=getContentResolver().loadThumbnail(
+                            selectedUri,
+                            new android.util.Size(dp(90),dp(90)),
+                            null
+                        );
+                        if(bm!=null)main.post(()->image.setImageBitmap(bm));
+                    }catch(Exception ignored){}
+                }).start();
+
+                chip.setOnClickListener(v->
+                    previewSelectedMedia(selectedUri,selectedVideo)
+                );
+
+                chip.setOnLongClickListener(v->{
+                    if(index<selectedUris.size()){
+                        selectedUris.remove(index);
+                        selectedVideos.remove(index);
+                        renderSelectedHolder[0].run();
+                    }
+                    return true;
+                });
+            }
+
+            boolean has=!selectedUris.isEmpty();
+            selectedBar.setVisibility(has?View.VISIBLE:View.GONE);
+            scroll.setPadding(0,0,0,has?dp(70):0);
+            scroll.setClipToPadding(false);
+        };
+
+        sendSelected.setOnClickListener(v->{
+            if(selectedUris.isEmpty())return;
+
+            final List<Uri> sendUris=new ArrayList<>(selectedUris);
+            final List<Boolean> sendVideos=new ArrayList<>(selectedVideos);
+
+            selectedUris.clear();
+            selectedVideos.clear();
+            renderSelectedHolder[0].run();
+
+            for(int si=0;si<sendUris.size();si++){
+                final Uri sendUri=sendUris.get(si);
+                final boolean sendVideo=sendVideos.get(si);
+
+                new Thread(()->{
+                    try{
+                        String name=queryName(sendUri);
+                        String mime=getContentResolver().getType(sendUri);
+                        byte[] bytes=readAll(
+                            getContentResolver().openInputStream(sendUri)
+                        );
+
+                        if(bytes.length>27*1024*1024){
+                            main.post(()->toast("File is too large."));
+                            return;
+                        }
+
+                        main.post(()->uploadAttachment(
+                            bytes,
+                            name,
+                            mime==null?(sendVideo?"video/mp4":"image/jpeg"):mime
+                        ));
+                    }catch(Exception ex){
+                        main.post(()->toast(ex.getMessage()));
+                    }
+                }).start();
+            }
+
+            dismissInstagramMediaPicker(host);
+        });
+
         ProgressBar loading=new ProgressBar(this);
         mediaHost.addView(
             loading,
@@ -1306,8 +1452,8 @@ reactionsCard.animate().cancel();
 
                     if(
                         !contentSheetDrag[0] &&
-                        scroll.getScrollY()<=dp(2) &&
-                        delta>dp(2)
+                        scroll.getScrollY()<=dp(3) &&
+                        delta>dp(1)
                     ){
                         contentSheetDrag[0]=true;
                         startY[0]=contentDownY[0]-host.getTranslationY();
@@ -1511,139 +1657,103 @@ reactionsCard.animate().cancel();
                             });
                         }catch(Exception ignored){}
                     }).start();
+                    TextView selectBadge=text(
+                        "",
+                        12,
+                        Color.WHITE,
+                        Typeface.BOLD
+                    );
+                    selectBadge.setGravity(Gravity.CENTER);
+                    selectBadge.setBackground(bg(Color.argb(135,55,55,55),13));
 
-                    final float[] tileDownY={Float.NaN};
-                    final boolean[] tileDragging={false};
+                    FrameLayout.LayoutParams badgeLp=
+                        new FrameLayout.LayoutParams(dp(26),dp(26),Gravity.TOP|Gravity.END);
+                    badgeLp.topMargin=dp(7);
+                    badgeLp.rightMargin=dp(7);
+                    tile.addView(selectBadge,badgeLp);
 
-                    tile.setOnTouchListener((v,e)->{
-                        switch(e.getActionMasked()){
-                            case MotionEvent.ACTION_DOWN:
-                                tileDownY[0]=e.getRawY();
-                                tileDragging[0]=false;
-
-                                // Keep the whole gesture on the tile until we know
-                                // whether this is a pull-to-close or a normal tap.
-                                ViewParent tileParent=v.getParent();
-                                while(tileParent!=null){
-                                    tileParent.requestDisallowInterceptTouchEvent(true);
-                                    tileParent=tileParent.getParent();
-                                }
-                                return true;
-
-                            case MotionEvent.ACTION_MOVE:
-                                if(Float.isNaN(tileDownY[0]))return true;
-                                float delta=e.getRawY()-tileDownY[0];
-
-                                if(
-                                    !tileDragging[0] &&
-                                    scroll.getScrollY()<=dp(3) &&
-                                    delta>dp(1)
-                                ){
-                                    tileDragging[0]=true;
-                                    startY[0]=tileDownY[0]-host.getTranslationY();
-                                    host.animate().cancel();
-                                    bridge.animate().cancel();
-                                    composer.animate().cancel();
-                                    if(replyBar!=null)replyBar.animate().cancel();
-                                }
-
-                                if(tileDragging[0]){
-                                    float dy=Math.max(0,e.getRawY()-startY[0]);
-                                    host.setTranslationY(dy);
-                                    bridge.setTranslationY(dy);
-                                    composer.setTranslationY(-sheetH+dy);
-                                    applyConversationPickerInset(
-                                        Math.max(0,sheetH-(int)dy)
-                                    );
-                                    if(
-                                        replyBar!=null &&
-                                        replyBar.getVisibility()==View.VISIBLE
-                                    ){
-                                        replyBar.setTranslationY(-sheetH+dy);
-                                    }
-                                }
-                                return true;
-
-                            case MotionEvent.ACTION_UP:
-                            case MotionEvent.ACTION_CANCEL:
-                                ViewParent releaseParent=v.getParent();
-                                while(releaseParent!=null){
-                                    releaseParent.requestDisallowInterceptTouchEvent(false);
-                                    releaseParent=releaseParent.getParent();
-                                }
-
-                                if(tileDragging[0]){
-                                    float y=host.getTranslationY();
-                                    tileDragging[0]=false;
-                                    tileDownY[0]=Float.NaN;
-
-                                    if(y>dp(36)){
-                                        dismissInstagramMediaPicker(host);
-                                    }else{
-                                        host.animate().translationY(0)
-                                            .setDuration(170)
-                                            .setInterpolator(new DecelerateInterpolator())
-                                            .start();
-                                        bridge.animate().translationY(0)
-                                            .setDuration(170)
-                                            .setInterpolator(new DecelerateInterpolator())
-                                            .start();
-                                        applyConversationPickerInset(sheetH);
-                                        composer.animate().translationY(-sheetH)
-                                            .setDuration(170)
-                                            .setInterpolator(new DecelerateInterpolator())
-                                            .start();
-                                        if(
-                                            replyBar!=null &&
-                                            replyBar.getVisibility()==View.VISIBLE
-                                        ){
-                                            replyBar.animate().translationY(-sheetH)
-                                                .setDuration(170)
-                                                .setInterpolator(new DecelerateInterpolator())
-                                                .start();
-                                        }
-                                    }
-                                    return true;
-                                }
-
-                                tileDownY[0]=Float.NaN;
-                                if(e.getActionMasked()==MotionEvent.ACTION_UP){
-                                    v.performClick();
-                                }
-                                return true;
+                    Runnable refreshBadge=()->{
+                        int selectedIndex=selectedUris.indexOf(uri);
+                        if(selectedIndex>=0){
+                            selectBadge.setText(String.valueOf(selectedIndex+1));
+                            selectBadge.setBackground(bg(Color.rgb(91,70,246),13));
+                        }else{
+                            selectBadge.setText("");
+                            selectBadge.setBackground(bg(Color.argb(135,55,55,55),13));
                         }
-                        return true;
-                    });
+                    };
+                    refreshBadge.run();
 
                     tile.setOnClickListener(v->{
-                        dismissInstagramMediaPicker(host);
+                        int existing=selectedUris.indexOf(uri);
 
-                        new Thread(()->{
-                            try{
-                                String name=queryName(uri);
-                                String mime=getContentResolver().getType(uri);
-                                byte[] bytes=readAll(
-                                    getContentResolver().openInputStream(uri)
-                                );
+                        if(existing>=0){
+                            selectedUris.remove(existing);
+                            selectedVideos.remove(existing);
+                        }else{
+                            selectedUris.add(uri);
+                            selectedVideos.add(video);
+                        }
 
-                                if(bytes.length>27*1024*1024){
-                                    main.post(()->toast("File is too large."));
-                                    return;
-                                }
-
-                                main.post(()->uploadAttachment(
-                                    bytes,
-                                    name,
-                                    mime==null?(video?"video/mp4":"image/jpeg"):mime
-                                ));
-                            }catch(Exception ex){
-                                main.post(()->toast(ex.getMessage()));
-                            }
-                        }).start();
+                        renderSelectedHolder[0].run();
+                        refreshBadge.run();
                     });
                 }
             });
         }).start();
+    }
+
+    private void previewSelectedMedia(Uri uri,boolean video){
+        if(uri==null)return;
+
+        final Dialog d=new Dialog(
+            this,
+            android.R.style.Theme_Black_NoTitleBar_Fullscreen
+        );
+
+        FrameLayout previewRoot=new FrameLayout(this);
+        previewRoot.setBackgroundColor(Color.BLACK);
+
+        if(video){
+            VideoView vv=new VideoView(this);
+            vv.setVideoURI(uri);
+            vv.setOnPreparedListener(mp->{
+                mp.setLooping(true);
+                vv.start();
+            });
+            previewRoot.addView(vv,new FrameLayout.LayoutParams(-1,-1));
+        }else{
+            ImageView iv=new ImageView(this);
+            iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            previewRoot.addView(iv,new FrameLayout.LayoutParams(-1,-1));
+
+            new Thread(()->{
+                try{
+                    Bitmap bm=BitmapFactory.decodeStream(
+                        getContentResolver().openInputStream(uri)
+                    );
+                    if(bm!=null)main.post(()->iv.setImageBitmap(bm));
+                }catch(Exception ignored){}
+            }).start();
+        }
+
+        ImageButton close=icon(R.drawable.ic_msg_close,42,Color.WHITE);
+        FrameLayout.LayoutParams closeLp=
+            new FrameLayout.LayoutParams(dp(42),dp(42),Gravity.TOP|Gravity.START);
+        closeLp.leftMargin=dp(10);
+        closeLp.topMargin=dp(10);
+        previewRoot.addView(close,closeLp);
+        close.setOnClickListener(v->d.dismiss());
+
+        d.setContentView(previewRoot);
+        d.show();
+
+        Window w=d.getWindow();
+        if(w!=null){
+            w.setStatusBarColor(Color.BLACK);
+            w.setNavigationBarColor(Color.BLACK);
+            w.setLayout(-1,-1);
+        }
     }
 
     private void showMediaCategoryMenu(
