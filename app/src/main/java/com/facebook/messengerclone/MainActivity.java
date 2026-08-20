@@ -1440,8 +1440,9 @@ reactionsCard.animate().cancel();
         sendPill.setPadding(dp(7),0,dp(14),0);
         sendPill.setBackground(bg(Color.WHITE,27));
 
-        ImageView avatar=buildUserAvatar(
-            activeConversation==null?new JSONObject():activeConversation,
+        View avatar=buildUserAvatar(
+            activeConversation==null?"":activeConversation.optString("avatar",""),
+            conversationName(),
             36
         );
         sendPill.addView(avatar,new LinearLayout.LayoutParams(dp(36),dp(36)));
