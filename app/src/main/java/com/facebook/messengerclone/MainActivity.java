@@ -746,32 +746,54 @@ public class MainActivity extends Activity {
         reactionsCard.setOnClickListener(v->{});
         actionCard.setOnClickListener(v->{});
 
-        reactionsCard.animate().cancel();
-        reactionsCard.setAlpha(0f);
-        reactionsCard.setScaleX(.72f);
-        reactionsCard.setScaleY(.72f);
-        reactionsCard.setTranslationY(dp(8));
+        reactions.animate().cancel();
+        reactions.setAlpha(0f);
+        reactions.setScaleX(.68f);
+        reactions.setScaleY(.68f);
+        reactions.setTranslationY(dp(7));
         d.setContentView(overlay);
         Window w=d.getWindow();
         d.show();
-        reactionsCard.post(()->{
-            reactionsCard.animate().cancel();
-            reactionsCard.setAlpha(0f);
-            reactionsCard.setScaleX(.72f);
-            reactionsCard.setScaleY(.72f);
-            reactionsCard.setTranslationY(dp(8));
 
-            reactionsCard.animate()
+        reactions.postDelayed(()->{
+            reactions.animate().cancel();
+            reactions.setPivotX(reactions.getWidth()/2f);
+            reactions.setPivotY(reactions.getHeight()/2f);
+            reactions.setAlpha(0f);
+            reactions.setScaleX(.68f);
+            reactions.setScaleY(.68f);
+            reactions.setTranslationY(dp(7));
+
+            reactions.animate()
                 .alpha(1f)
                 .scaleX(1f)
                 .scaleY(1f)
                 .translationY(0f)
-                .setDuration(235)
+                .setDuration(260)
                 .setInterpolator(
-                    new android.view.animation.OvershootInterpolator(1.05f)
+                    new android.view.animation.OvershootInterpolator(1.18f)
                 )
                 .start();
-        });
+
+            for(int i=0;i<reactions.getChildCount();i++){
+                View emojiView=reactions.getChildAt(i);
+                emojiView.animate().cancel();
+                emojiView.setAlpha(0f);
+                emojiView.setScaleX(.55f);
+                emojiView.setScaleY(.55f);
+                emojiView.animate()
+                    .alpha(1f)
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setStartDelay(i*16L)
+                    .setDuration(225)
+                    .setInterpolator(
+                        new android.view.animation.OvershootInterpolator(1.28f)
+                    )
+                    .start();
+            }
+        },35);
+        
         if(w!=null){
             w.setBackgroundDrawableResource(android.R.color.transparent);
             w.setDimAmount(0f);
@@ -987,7 +1009,10 @@ public class MainActivity extends Activity {
         InputMethodManager imm=(InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
         if(imm!=null&&messageInput!=null)imm.hideSoftInputFromWindow(messageInput.getWindowToken(),0);
 
-        final int sheetH=Math.min(dp(390),(int)(getResources().getDisplayMetrics().heightPixels*.47f));
+        final int sheetH=Math.min(
+            dp(500),
+            (int)(getResources().getDisplayMetrics().heightPixels*.58f)
+        );
         FrameLayout host=new FrameLayout(this);host.setTag("messenger-native-sticker-sheet");host.setClickable(true);host.setBackgroundColor(Color.TRANSPARENT);
         FrameLayout.LayoutParams hostLp=new FrameLayout.LayoutParams(-1,sheetH,Gravity.BOTTOM);root.addView(host,hostLp);
         View stickerBridge=new View(this);stickerBridge.setTag("messenger-sticker-bridge");stickerBridge.setBackgroundColor(Color.TRANSPARENT);FrameLayout.LayoutParams bridgeLp=new FrameLayout.LayoutParams(-1,dp(4),Gravity.BOTTOM);bridgeLp.bottomMargin=sheetH-dp(1);root.addView(stickerBridge,bridgeLp);
@@ -1010,8 +1035,8 @@ public class MainActivity extends Activity {
         final float[] startY={Float.NaN}; final boolean[] dragged={false};
         View.OnTouchListener drag=(v,e)->{switch(e.getActionMasked()){
             case MotionEvent.ACTION_DOWN:startY[0]=e.getRawY()-host.getTranslationY();dragged[0]=false;host.animate().cancel();composer.animate().cancel();if(replyBar!=null)replyBar.animate().cancel();v.getParent().requestDisallowInterceptTouchEvent(true);return true;
-            case MotionEvent.ACTION_MOVE:if(Float.isNaN(startY[0]))return true;float dy=Math.max(0,e.getRawY()-startY[0]);if(dy>dp(3))dragged[0]=true;host.setTranslationY(dy);stickerBridge.setTranslationY(dy);composer.setTranslationY(-sheetH+dy);if(list!=null)list.setTranslationY(-sheetH+dy);if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.setTranslationY(-sheetH+dy);return true;
-            case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:float y=host.getTranslationY();startY[0]=Float.NaN;v.getParent().requestDisallowInterceptTouchEvent(false);if(y>dp(76)){dismissMessengerStickerPicker(host);}else{host.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();composer.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();}return true;
+            case MotionEvent.ACTION_MOVE:if(Float.isNaN(startY[0]))return true;float dy=Math.max(0,e.getRawY()-startY[0]);if(dy>dp(3))dragged[0]=true;host.setTranslationY(dy);stickerBridge.setTranslationY(dy);composer.setTranslationY(-sheetH+dy);applyConversationPickerInset(Math.max(0,sheetH-(int)dy));if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.setTranslationY(-sheetH+dy);return true;
+            case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:float y=host.getTranslationY();startY[0]=Float.NaN;v.getParent().requestDisallowInterceptTouchEvent(false);if(y>dp(76)){dismissMessengerStickerPicker(host);}else{host.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();applyConversationPickerInset(sheetH);composer.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();}return true;
         }return true;};
         // The whole puller/search header is the drag target, including the search-bar area.
         dragHeader.setOnTouchListener(drag);
@@ -1022,11 +1047,11 @@ public class MainActivity extends Activity {
         final float[] contentDownY={Float.NaN};final boolean[] contentSheetDrag={false};
         View.OnTouchListener contentDrag=(v,e)->{switch(e.getActionMasked()){
             case MotionEvent.ACTION_DOWN:contentDownY[0]=e.getRawY();contentSheetDrag[0]=false;return false;
-            case MotionEvent.ACTION_MOVE:float delta=e.getRawY()-contentDownY[0];if(!contentSheetDrag[0]&&scroll.getScrollY()==0&&delta>dp(5)){contentSheetDrag[0]=true;startY[0]=contentDownY[0]-host.getTranslationY();dragged[0]=true;host.animate().cancel();stickerBridge.animate().cancel();composer.animate().cancel();if(replyBar!=null)replyBar.animate().cancel();ViewParent parent=v.getParent();if(parent!=null)parent.requestDisallowInterceptTouchEvent(true);}if(contentSheetDrag[0]){float dy=Math.max(0,e.getRawY()-startY[0]);host.setTranslationY(dy);stickerBridge.setTranslationY(dy);composer.setTranslationY(-sheetH+dy);if(list!=null)list.setTranslationY(-sheetH+dy);if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.setTranslationY(-sheetH+dy);return true;}return false;
-            case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:if(contentSheetDrag[0]){float y=host.getTranslationY();contentSheetDrag[0]=false;contentDownY[0]=Float.NaN;ViewParent parent=v.getParent();if(parent!=null)parent.requestDisallowInterceptTouchEvent(false);if(y>dp(64))dismissMessengerStickerPicker(host);else{host.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();composer.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();}return true;}contentDownY[0]=Float.NaN;return false;}return false;};
+            case MotionEvent.ACTION_MOVE:float delta=e.getRawY()-contentDownY[0];if(!contentSheetDrag[0]&&scroll.getScrollY()==0&&delta>dp(5)){contentSheetDrag[0]=true;startY[0]=contentDownY[0]-host.getTranslationY();dragged[0]=true;host.animate().cancel();stickerBridge.animate().cancel();composer.animate().cancel();if(replyBar!=null)replyBar.animate().cancel();ViewParent parent=v.getParent();if(parent!=null)parent.requestDisallowInterceptTouchEvent(true);}if(contentSheetDrag[0]){float dy=Math.max(0,e.getRawY()-startY[0]);host.setTranslationY(dy);stickerBridge.setTranslationY(dy);composer.setTranslationY(-sheetH+dy);applyConversationPickerInset(Math.max(0,sheetH-(int)dy));if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.setTranslationY(-sheetH+dy);return true;}return false;
+            case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:if(contentSheetDrag[0]){float y=host.getTranslationY();contentSheetDrag[0]=false;contentDownY[0]=Float.NaN;ViewParent parent=v.getParent();if(parent!=null)parent.requestDisallowInterceptTouchEvent(false);if(y>dp(64))dismissMessengerStickerPicker(host);else{host.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();applyConversationPickerInset(sheetH);composer.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();}return true;}contentDownY[0]=Float.NaN;return false;}return false;};
         stickerContentDrag[0]=contentDrag;scroll.setOnTouchListener(contentDrag);grid.setOnTouchListener(contentDrag);
 
-        host.setTranslationY(sheetH);stickerBridge.setTranslationY(sheetH);composer.setTranslationY(0);if(replyBar!=null)replyBar.setTranslationY(0);if(list!=null){list.setPadding(dp(10),dp(12),dp(10),sheetH+dp(30));list.post(()->list.setSelection(Math.max(0,list.getCount()-1)));}host.animate().translationY(0).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();composer.animate().translationY(-sheetH).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.animate().translationY(-sheetH).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();
+        host.setTranslationY(sheetH);stickerBridge.setTranslationY(sheetH);composer.setTranslationY(0);if(replyBar!=null)replyBar.setTranslationY(0);if(list!=null){applyConversationPickerInset(sheetH);list.post(()->list.setSelection(Math.max(0,list.getCount()-1)));}host.animate().translationY(0).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();applyConversationPickerInset(sheetH);composer.animate().translationY(-sheetH).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();
         loader.load("");
     }
     private void dismissMessengerStickerPicker(View host){if(host==null||root==null)return;View bridge=root.findViewWithTag("messenger-sticker-bridge");int h=Math.max(host.getHeight(),dp(360));host.animate().translationY(h).setDuration(220).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(()->{if(host.getParent()==root)root.removeView(host);}).start();if(bridge!=null)bridge.animate().translationY(h).setDuration(220).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(()->{if(bridge.getParent()==root)root.removeView(bridge);}).start();if(composer!=null)composer.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null)replyBar.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.setPadding(dp(10),dp(12),dp(10),dp(26));}
@@ -1062,6 +1087,16 @@ public class MainActivity extends Activity {
             return;
         }
         showInstagramMediaPicker();
+    }
+
+    private void applyConversationPickerInset(int inset){
+        if(list==null)return;
+        int safe=Math.max(0,inset);
+        list.setTranslationY(0f);
+        list.setPadding(dp(10),dp(12),dp(10),dp(26)+safe);
+        if(list.getCount()>0){
+            list.setSelection(Math.max(0,list.getCount()-1));
+        }
     }
 
     private void showInstagramMediaPicker(){
@@ -1137,7 +1172,8 @@ public class MainActivity extends Activity {
         titleRow.setPadding(dp(14),0,dp(12),0);
         dragHeader.addView(titleRow,new LinearLayout.LayoutParams(-1,dp(44)));
 
-        TextView title=text("Recents",18,Color.WHITE,Typeface.BOLD);
+        TextView title=text("Recents ⌄",18,Color.WHITE,Typeface.BOLD);
+        title.setClickable(true);
         titleRow.addView(title,new LinearLayout.LayoutParams(0,dp(44),1));
 
         TextView hd=text("HD",12,Color.WHITE,Typeface.BOLD);
@@ -1155,6 +1191,8 @@ public class MainActivity extends Activity {
         grid.setUseDefaultMargins(false);
         scroll.addView(grid,new ScrollView.LayoutParams(-1,-2));
         mediaHost.addView(scroll,new FrameLayout.LayoutParams(-1,-1));
+
+        title.setOnClickListener(v->showMediaCategoryMenu(title,grid));
 
         ProgressBar loading=new ProgressBar(this);
         mediaHost.addView(
@@ -1182,7 +1220,7 @@ public class MainActivity extends Activity {
                     host.setTranslationY(dy);
                     bridge.setTranslationY(dy);
                     composer.setTranslationY(-sheetH+dy);
-                    if(list!=null)list.setTranslationY(-sheetH+dy);
+                    applyConversationPickerInset(Math.max(0,sheetH-(int)dy));
                     if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE){
                         replyBar.setTranslationY(-sheetH+dy);
                     }
@@ -1204,10 +1242,6 @@ public class MainActivity extends Activity {
                             .setInterpolator(new DecelerateInterpolator()).start();
                         composer.animate().translationY(-sheetH).setDuration(190)
                             .setInterpolator(new DecelerateInterpolator()).start();
-                        if(list!=null){
-                            list.animate().translationY(-sheetH).setDuration(190)
-                                .setInterpolator(new DecelerateInterpolator()).start();
-                        }
                         if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE){
                             replyBar.animate().translationY(-sheetH).setDuration(190)
                                 .setInterpolator(new DecelerateInterpolator()).start();
@@ -1234,8 +1268,8 @@ public class MainActivity extends Activity {
 
                     if(
                         !contentSheetDrag[0] &&
-                        scroll.getScrollY()==0 &&
-                        delta>dp(5)
+                        scroll.getScrollY()<=dp(2) &&
+                        delta>dp(2)
                     ){
                         contentSheetDrag[0]=true;
                         startY[0]=contentDownY[0]-host.getTranslationY();
@@ -1252,6 +1286,7 @@ public class MainActivity extends Activity {
                         host.setTranslationY(dy);
                         bridge.setTranslationY(dy);
                         composer.setTranslationY(-sheetH+dy);
+                    applyConversationPickerInset(Math.max(0,sheetH-(int)dy));
                         if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE){
                             replyBar.setTranslationY(-sheetH+dy);
                         }
@@ -1269,13 +1304,14 @@ public class MainActivity extends Activity {
                         ViewParent parent=v.getParent();
                         if(parent!=null)parent.requestDisallowInterceptTouchEvent(false);
 
-                        if(y>dp(64)){
+                        if(y>dp(48)){
                             dismissInstagramMediaPicker(host);
                         }else{
                             host.animate().translationY(0).setDuration(190)
                                 .setInterpolator(new DecelerateInterpolator()).start();
                             bridge.animate().translationY(0).setDuration(190)
                                 .setInterpolator(new DecelerateInterpolator()).start();
+                            applyConversationPickerInset(sheetH);
                             composer.animate().translationY(-sheetH).setDuration(190)
                                 .setInterpolator(new DecelerateInterpolator()).start();
                             if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE){
@@ -1305,24 +1341,17 @@ public class MainActivity extends Activity {
         host.setTranslationY(sheetH);
         bridge.setTranslationY(sheetH);
         composer.setTranslationY(0);
-        if(list!=null)list.setTranslationY(0);
         if(replyBar!=null)replyBar.setTranslationY(0);
 
-        if(list!=null){
-            list.setPadding(dp(10),dp(12),dp(10),sheetH+dp(30));
-            list.post(()->list.setSelection(Math.max(0,list.getCount()-1)));
-        }
+        applyConversationPickerInset(sheetH);
 
         host.animate().translationY(0).setDuration(330)
             .setInterpolator(new DecelerateInterpolator()).start();
         bridge.animate().translationY(0).setDuration(330)
             .setInterpolator(new DecelerateInterpolator()).start();
+        applyConversationPickerInset(sheetH);
         composer.animate().translationY(-sheetH).setDuration(330)
             .setInterpolator(new DecelerateInterpolator()).start();
-        if(list!=null){
-            list.animate().translationY(-sheetH).setDuration(330)
-                .setInterpolator(new DecelerateInterpolator()).start();
-        }
 
         if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE){
             replyBar.animate().translationY(-sheetH).setDuration(330)
@@ -1384,6 +1413,7 @@ public class MainActivity extends Activity {
                     final boolean video=videos.get(i);
 
                     FrameLayout tile=new FrameLayout(MainActivity.this);
+                    tile.setTag(video?"video":"photo");
                     GridLayout.LayoutParams gp=new GridLayout.LayoutParams();
                     gp.width=cell;
                     gp.height=cell;
@@ -1429,6 +1459,9 @@ public class MainActivity extends Activity {
                         }catch(Exception ignored){}
                     }).start();
 
+                    tile.setOnTouchListener((v,e)->contentDrag.onTouch(v,e));
+                    thumb.setOnTouchListener((v,e)->contentDrag.onTouch(v,e));
+
                     tile.setOnClickListener(v->{
                         dismissInstagramMediaPicker(host);
 
@@ -1460,8 +1493,80 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    private void showMediaCategoryMenu(TextView title,GridLayout grid){
+        final android.widget.PopupWindow popup=new android.widget.PopupWindow(this);
+        LinearLayout card=new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(10),dp(8),dp(10),dp(8));
+        card.setBackground(bg(Color.argb(248,36,39,43),20));
+
+        String[][] items={
+            {"▣","Recents","all"},
+            {"♡","Favorites","all"},
+            {"▧","Photos","photo"},
+            {"▷","Videos","video"},
+            {"G","Google Photos","external"},
+            {"▦","All albums","all"},
+            {"▤","From Meta apps","all"}
+        };
+
+        for(String[] item:items){
+            LinearLayout row=new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(12),0,dp(12),0);
+
+            TextView icon=text(item[0],24,Color.WHITE,Typeface.NORMAL);
+            icon.setGravity(Gravity.CENTER);
+            row.addView(icon,new LinearLayout.LayoutParams(dp(42),dp(52)));
+
+            TextView label=text(item[1],18,Color.WHITE,Typeface.NORMAL);
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(52),1);
+            lp.leftMargin=dp(8);
+            row.addView(label,lp);
+
+            card.addView(row,new LinearLayout.LayoutParams(dp(270),dp(52)));
+
+            row.setOnClickListener(v->{
+                popup.dismiss();
+
+                String mode=item[2];
+                if("external".equals(mode)){
+                    try{
+                        Intent intent=new Intent(Intent.ACTION_VIEW);
+                        intent.setPackage("com.google.android.apps.photos");
+                        startActivity(intent);
+                    }catch(Exception e){
+                        toast("Google Photos isn't available.");
+                    }
+                    return;
+                }
+
+                title.setText(item[1]+" ⌄");
+                for(int i=0;i<grid.getChildCount();i++){
+                    View child=grid.getChildAt(i);
+                    Object tag=child.getTag();
+                    if(tag==null)continue;
+                    boolean show="all".equals(mode)||mode.equals(String.valueOf(tag));
+                    child.setVisibility(show?View.VISIBLE:View.GONE);
+                }
+            });
+        }
+
+        popup.setContentView(card);
+        popup.setWidth(dp(290));
+        popup.setHeight(-2);
+        popup.setFocusable(true);
+        popup.setOutsideTouchable(true);
+        popup.setBackgroundDrawable(
+            new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
+        );
+        popup.setElevation(dp(10));
+        popup.showAsDropDown(title,-dp(18),-dp(4));
+    }
+
     private void dismissInstagramMediaPicker(View host){
         if(host==null||root==null)return;
+        applyConversationPickerInset(0);
 
         View bridge=root.findViewWithTag("messenger-media-bridge");
         int h=Math.max(host.getHeight(),dp(360));
@@ -1490,18 +1595,10 @@ public class MainActivity extends Activity {
             composer.animate().translationY(0).setDuration(220)
                 .setInterpolator(new DecelerateInterpolator()).start();
         }
-        if(list!=null){
-            list.animate().translationY(0).setDuration(220)
-                .setInterpolator(new DecelerateInterpolator()).start();
-        }
 
         if(replyBar!=null){
             replyBar.animate().translationY(0).setDuration(220)
                 .setInterpolator(new DecelerateInterpolator()).start();
-        }
-
-        if(list!=null){
-            list.setPadding(dp(10),dp(12),dp(10),dp(26));
         }
     }
 
