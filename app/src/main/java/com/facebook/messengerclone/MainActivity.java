@@ -484,6 +484,9 @@ public class MainActivity extends Activity {
         }
 
         sendButton=icon(R.drawable.msg_send_enabled,34,Color.WHITE);
+        sendButton.clearColorFilter();
+        sendButton.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        sendButton.setPadding(dp(4),dp(4),dp(4),dp(4));
         sendButton.setVisibility(View.GONE);
         pill.addView(sendButton,new LinearLayout.LayoutParams(dp(34),dp(34)));
         micButton=mic;
@@ -516,7 +519,7 @@ public class MainActivity extends Activity {
         composerHasText=false;
     }
 
-    private void syncComposerAction(){boolean has=messageInput!=null&&composerHasText;if(sendButton!=null){sendButton.setVisibility(has?View.VISIBLE:View.GONE);sendButton.setImageResource(has?R.drawable.msg_send_enabled:R.drawable.msg_send_disabled);sendButton.setColorFilter(has?themeAccent():themeDisabled());}if(micButton!=null){micButton.setColorFilter(themeAccent());micButton.setVisibility(has?View.GONE:View.VISIBLE);}}
+    private void syncComposerAction(){boolean has=messageInput!=null&&composerHasText;if(sendButton!=null){sendButton.setVisibility(has?View.VISIBLE:View.GONE);sendButton.setImageResource(has?R.drawable.msg_send_enabled:R.drawable.msg_send_disabled);if(has)sendButton.clearColorFilter();else sendButton.setColorFilter(themeDisabled());}if(micButton!=null){micButton.setColorFilter(themeAccent());micButton.setVisibility(has?View.GONE:View.VISIBLE);}}
 
     private void loadCachedMessages(String cid){String raw=cache.get("messages:"+cid);if(raw==null)return;try{applyMessages(new JSONObject(raw).optJSONArray("messages"),false);}catch(Exception ignored){}}
     private void refreshMessages(String cid){if(refreshingMessages)return;refreshingMessages=true;api.get("/api/messaging/conversations/"+cid+"/messages?limit=80",(json,error)->main.post(()->{refreshingMessages=false;if(error!=null)return;beforeCursor=json.optString("nextBefore","");cache.put("messages:"+cid,json.toString());applyMessages(json.optJSONArray("messages"),true);if(activeConversation!=null&&activeConversation.optString("id").equals(cid))markRead();}));}
@@ -1014,7 +1017,7 @@ reactionsCard.animate().cancel();
         FrameLayout.LayoutParams hostLp=new FrameLayout.LayoutParams(-1,sheetH,Gravity.BOTTOM);root.addView(host,hostLp);
         View stickerBridge=new View(this);stickerBridge.setTag("messenger-sticker-bridge");stickerBridge.setBackgroundColor(Color.TRANSPARENT);FrameLayout.LayoutParams bridgeLp=new FrameLayout.LayoutParams(-1,dp(4),Gravity.BOTTOM);bridgeLp.bottomMargin=sheetH-dp(1);root.addView(stickerBridge,bridgeLp);
 
-        LinearLayout sheet=new LinearLayout(this);sheet.setBackground(topBg(Color.rgb(38,38,38),14));sheet.setOrientation(LinearLayout.VERTICAL);sheet.setPadding(dp(10),dp(6),dp(10),dp(8));sheet.setBackground(topBg(Color.WHITE,22));host.addView(sheet,new FrameLayout.LayoutParams(-1,-1));
+        LinearLayout sheet=new LinearLayout(this);sheet.setBackground(topBg(Color.rgb(38,38,38),14));sheet.setOrientation(LinearLayout.VERTICAL);sheet.setPadding(dp(10),dp(6),dp(10),dp(8));host.addView(sheet,new FrameLayout.LayoutParams(-1,-1));
 
         LinearLayout dragHeader=new LinearLayout(this);dragHeader.setOrientation(LinearLayout.VERTICAL);dragHeader.setGravity(Gravity.CENTER_HORIZONTAL);dragHeader.setPadding(0,dp(1),0,dp(6));sheet.addView(dragHeader,new LinearLayout.LayoutParams(-1,dp(64)));
         View puller=new View(this);puller.setBackground(bg(Color.rgb(190,193,199),3));LinearLayout.LayoutParams php=new LinearLayout.LayoutParams(dp(42),dp(5));php.gravity=Gravity.CENTER_HORIZONTAL;php.bottomMargin=dp(8);dragHeader.addView(puller,php);
@@ -1220,7 +1223,7 @@ reactionsCard.animate().cancel();
         View mediaScrollThumb=new View(this);
         mediaScrollThumb.setBackground(bg(Color.WHITE,4));
         FrameLayout.LayoutParams thumbLp=
-            new FrameLayout.LayoutParams(dp(8),dp(52),Gravity.TOP|Gravity.END);
+            new FrameLayout.LayoutParams(dp(8),dp(42),Gravity.TOP|Gravity.END);
         thumbLp.rightMargin=dp(6);
         thumbLp.topMargin=dp(8);
         mediaHost.addView(mediaScrollThumb,thumbLp);
@@ -1263,20 +1266,11 @@ reactionsCard.animate().cancel();
         );
 
         ImageButton sendSelected=new ImageButton(this);
-        if(sendButton!=null&&sendButton.getDrawable()!=null){
-            android.graphics.drawable.Drawable source=sendButton.getDrawable();
-            android.graphics.drawable.Drawable copy=
-                source.getConstantState()!=null
-                    ?source.getConstantState().newDrawable().mutate()
-                    :source.mutate();
-            sendSelected.setImageDrawable(copy);
-        }else{
-            sendSelected.setImageResource(R.drawable.msg_send_enabled);
-        }
-        sendSelected.setColorFilter(Color.BLACK);
-        sendSelected.setBackground(bg(Color.WHITE,27));
+        sendSelected.setImageResource(R.drawable.msg_send_enabled);
+        sendSelected.clearColorFilter();
+        sendSelected.setBackgroundColor(Color.TRANSPARENT);
         sendSelected.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        sendSelected.setPadding(dp(11),dp(11),dp(11),dp(11));
+        sendSelected.setPadding(dp(5),dp(5),dp(5),dp(5));
 
         LinearLayout.LayoutParams sendLp=
             new LinearLayout.LayoutParams(dp(54),dp(54));
@@ -1299,29 +1293,18 @@ reactionsCard.animate().cancel();
 
                 FrameLayout chip=new FrameLayout(MainActivity.this);
                 LinearLayout.LayoutParams chipLp=
-                    new LinearLayout.LayoutParams(dp(38),dp(52));
+                    new LinearLayout.LayoutParams(dp(32),dp(52));
                 chipLp.rightMargin=dp(6);
                 selectedRow.addView(chip,chipLp);
 
+                chip.setBackground(bg(Color.rgb(18,18,18),9));
+                chip.setClipToOutline(true);
+
                 ImageView image=new ImageView(MainActivity.this);
                 image.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                image.setBackgroundColor(Color.rgb(18,18,18));
+                image.setBackground(bg(Color.rgb(18,18,18),9));
+                image.setClipToOutline(true);
                 chip.addView(image,new FrameLayout.LayoutParams(-1,-1));
-
-                TextView number=text(
-                    String.valueOf(si+1),
-                    11,
-                    Color.WHITE,
-                    Typeface.BOLD
-                );
-                number.setGravity(Gravity.CENTER);
-                number.setBackground(bg(Color.rgb(91,70,246),10));
-
-                FrameLayout.LayoutParams numberLp=
-                    new FrameLayout.LayoutParams(dp(20),dp(20),Gravity.TOP|Gravity.END);
-                numberLp.topMargin=dp(2);
-                numberLp.rightMargin=dp(2);
-                chip.addView(number,numberLp);
 
                 new Thread(()->{
                     try{
@@ -1664,7 +1647,7 @@ reactionsCard.animate().cancel();
 
                             int track=Math.max(
                                 0,
-                                mediaHost.getHeight()-dp(68)
+                                mediaHost.getHeight()-dp(58)
                             );
                             float thumbY=dp(8)+(track*progress);
 
