@@ -1491,55 +1491,220 @@ reactionsCard.animate().cancel();
         Window w=d.getWindow();if(w!=null){w.setLayout(-1,-1);w.setStatusBarColor(Color.BLACK);w.setNavigationBarColor(Color.BLACK);}
     }
 
-    private void showCapturedDrawingEditor(final FrameLayout composition,final Runnable backDestination){
+    private void showCapturedDrawingEditor(
+        final FrameLayout composition,
+        final Runnable backDestination
+    ){
         final Dialog d=new Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen);
-        FrameLayout page=new FrameLayout(this);page.setBackgroundColor(Color.BLACK);
-        Bitmap baseBmp=Bitmap.createBitmap(composition.getWidth(),composition.getHeight(),Bitmap.Config.ARGB_8888);
+        FrameLayout page=new FrameLayout(this);
+        page.setBackgroundColor(Color.BLACK);
+
+        Bitmap baseBmp=Bitmap.createBitmap(
+            composition.getWidth(),
+            composition.getHeight(),
+            Bitmap.Config.ARGB_8888
+        );
         composition.draw(new Canvas(baseBmp));
 
-        ImageView base=new ImageView(this);base.setScaleType(ImageView.ScaleType.FIT_CENTER);base.setImageBitmap(baseBmp);
-        FrameLayout.LayoutParams blp=new FrameLayout.LayoutParams(-1,-1);blp.topMargin=dp(82);blp.bottomMargin=dp(150);page.addView(base,blp);
-        DrawOverlay drawView=new DrawOverlay(this);FrameLayout.LayoutParams dlp=new FrameLayout.LayoutParams(-1,-1);
-        dlp.topMargin=dp(82);dlp.bottomMargin=dp(150);page.addView(drawView,dlp);
+        final int headerH=dp(58);
+        final int bottomToolsH=dp(112);
 
-        LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);header.setPadding(dp(18),0,dp(18),0);
-        header.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,new int[]{Color.rgb(135,0,190),Color.rgb(199,0,213)}));
-        TextView undo=text("Undo",18,Color.WHITE,Typeface.BOLD);TextView tool=text("●",30,Color.WHITE,Typeface.NORMAL);
-        TextView done=text("Done",18,Color.WHITE,Typeface.BOLD);tool.setGravity(Gravity.CENTER);done.setGravity(Gravity.CENTER);
-        header.addView(undo,new LinearLayout.LayoutParams(dp(90),-1));header.addView(tool,new LinearLayout.LayoutParams(0,-1,1));
-        header.addView(done,new LinearLayout.LayoutParams(dp(90),-1));page.addView(header,new FrameLayout.LayoutParams(-1,dp(82),Gravity.TOP));
+        ImageView base=new ImageView(this);
+        base.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        base.setImageBitmap(baseBmp);
+        FrameLayout.LayoutParams blp=new FrameLayout.LayoutParams(-1,-1);
+        blp.topMargin=headerH;
+        blp.bottomMargin=bottomToolsH;
+        page.addView(base,blp);
+
+        DrawOverlay drawView=new DrawOverlay(this);
+        FrameLayout.LayoutParams dlp=new FrameLayout.LayoutParams(-1,-1);
+        dlp.topMargin=headerH;
+        dlp.bottomMargin=bottomToolsH;
+        page.addView(drawView,dlp);
+
+        LinearLayout header=new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(14),0,dp(14),0);
+        header.setBackground(
+            new GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{Color.rgb(135,0,190),Color.rgb(199,0,213)}
+            )
+        );
+
+        TextView undo=text("Undo",17,Color.WHITE,Typeface.BOLD);
+        undo.setGravity(Gravity.CENTER_VERTICAL);
+        header.addView(undo,new LinearLayout.LayoutParams(dp(76),-1));
+
+        LinearLayout pens=new LinearLayout(this);
+        pens.setGravity(Gravity.CENTER);
+
+        TextView penRound=text("●",24,Color.WHITE,Typeface.NORMAL);
+        penRound.setGravity(Gravity.CENTER);
+        GradientDrawable penRoundBg=new GradientDrawable();
+        penRoundBg.setShape(GradientDrawable.OVAL);
+        penRoundBg.setColor(Color.argb(65,255,255,255));
+        penRound.setBackground(penRoundBg);
+        pens.addView(penRound,new LinearLayout.LayoutParams(dp(38),dp(38)));
+
+        TextView penMarker=text("▮",22,Color.WHITE,Typeface.NORMAL);
+        penMarker.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams p2=new LinearLayout.LayoutParams(dp(38),dp(38));
+        p2.leftMargin=dp(10);
+        pens.addView(penMarker,p2);
+
+        TextView penGlow=text("✦",22,Color.WHITE,Typeface.NORMAL);
+        penGlow.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams p3=new LinearLayout.LayoutParams(dp(38),dp(38));
+        p3.leftMargin=dp(10);
+        pens.addView(penGlow,p3);
+
+        header.addView(pens,new LinearLayout.LayoutParams(0,-1,1));
+
+        TextView done=text("Done",17,Color.WHITE,Typeface.BOLD);
+        done.setGravity(Gravity.CENTER);
+        header.addView(done,new LinearLayout.LayoutParams(dp(76),-1));
+
+        page.addView(header,new FrameLayout.LayoutParams(-1,headerH,Gravity.TOP));
+
+        Runnable selectRound=()->{
+            drawView.setBrushStyle(0);
+            penRound.setAlpha(1f);
+            penMarker.setAlpha(.45f);
+            penGlow.setAlpha(.45f);
+        };
+        Runnable selectMarker=()->{
+            drawView.setBrushStyle(1);
+            penRound.setAlpha(.45f);
+            penMarker.setAlpha(1f);
+            penGlow.setAlpha(.45f);
+        };
+        Runnable selectGlow=()->{
+            drawView.setBrushStyle(2);
+            penRound.setAlpha(.45f);
+            penMarker.setAlpha(.45f);
+            penGlow.setAlpha(1f);
+        };
+
+        penRound.setOnClickListener(v->selectRound.run());
+        penMarker.setOnClickListener(v->selectMarker.run());
+        penGlow.setOnClickListener(v->selectGlow.run());
+        selectRound.run();
+
         undo.setOnClickListener(v->drawView.undo());
+
         done.setOnClickListener(v->{
-            Bitmap out=Bitmap.createBitmap(baseBmp.getWidth(),baseBmp.getHeight(),Bitmap.Config.ARGB_8888);
-            Canvas c=new Canvas(out);c.drawBitmap(baseBmp,0,0,null);
-            Bitmap strokes=Bitmap.createBitmap(drawView.getWidth(),drawView.getHeight(),Bitmap.Config.ARGB_8888);drawView.draw(new Canvas(strokes));
+            Bitmap out=Bitmap.createBitmap(
+                baseBmp.getWidth(),
+                baseBmp.getHeight(),
+                Bitmap.Config.ARGB_8888
+            );
+            Canvas c=new Canvas(out);
+            c.drawBitmap(baseBmp,0,0,null);
+
+            Bitmap strokes=Bitmap.createBitmap(
+                drawView.getWidth(),
+                drawView.getHeight(),
+                Bitmap.Config.ARGB_8888
+            );
+            drawView.draw(new Canvas(strokes));
             c.drawBitmap(strokes,null,new Rect(0,0,out.getWidth(),out.getHeight()),null);
-            ByteArrayOutputStream bos=new ByteArrayOutputStream();out.compress(Bitmap.CompressFormat.JPEG,95,bos);
-            d.dismiss();showCapturedMediaPreview(bos.toByteArray(),backDestination);
+
+            ByteArrayOutputStream bos=new ByteArrayOutputStream();
+            out.compress(Bitmap.CompressFormat.JPEG,95,bos);
+            d.dismiss();
+            showCapturedMediaPreview(bos.toByteArray(),backDestination);
         });
 
-        LinearLayout colors=new LinearLayout(this);colors.setGravity(Gravity.CENTER);
-        int[] palette={Color.WHITE,Color.BLACK,Color.rgb(190,0,205),Color.rgb(117,66,238),Color.rgb(100,69,239),
-            Color.rgb(25,196,29),Color.rgb(166,231,45),Color.rgb(255,49,89),Color.rgb(255,139,30),Color.rgb(255,221,44)};
+        HorizontalScrollView colorsScroll=new HorizontalScrollView(this);
+        colorsScroll.setHorizontalScrollBarEnabled(false);
+        colorsScroll.setFillViewport(false);
+
+        LinearLayout colors=new LinearLayout(this);
+        colors.setGravity(Gravity.CENTER_VERTICAL);
+        colors.setPadding(dp(12),dp(10),dp(12),dp(10));
+        colorsScroll.addView(colors,new HorizontalScrollView.LayoutParams(-2,-1));
+
+        int[] palette={
+            Color.WHITE,Color.BLACK,
+            Color.rgb(190,0,205),Color.rgb(117,66,238),Color.rgb(100,69,239),
+            Color.rgb(25,196,29),Color.rgb(166,231,45),Color.rgb(255,49,89),
+            Color.rgb(255,139,30),Color.rgb(255,221,44),Color.rgb(0,189,255)
+        };
+
         for(int color:palette){
-            View dot=new View(this);GradientDrawable g=new GradientDrawable();g.setShape(GradientDrawable.OVAL);g.setColor(color);g.setStroke(dp(1),Color.WHITE);
-            dot.setBackground(g);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(34),dp(34));lp.leftMargin=dp(5);lp.rightMargin=dp(5);
-            colors.addView(dot,lp);dot.setOnClickListener(v->drawView.setDrawColor(color));
-        }
-        FrameLayout.LayoutParams clp=new FrameLayout.LayoutParams(-1,dp(72),Gravity.BOTTOM);clp.bottomMargin=dp(28);page.addView(colors,clp);
+            View dot=new View(this);
+            GradientDrawable g=new GradientDrawable();
+            g.setShape(GradientDrawable.OVAL);
+            g.setColor(color);
+            g.setStroke(dp(1),Color.WHITE);
+            dot.setBackground(g);
 
-        View track=new View(this);track.setBackgroundColor(Color.LTGRAY);FrameLayout.LayoutParams tlp=
-            new FrameLayout.LayoutParams(dp(2),dp(300),Gravity.START|Gravity.CENTER_VERTICAL);tlp.leftMargin=dp(26);page.addView(track,tlp);
-        View knob=new View(this);knob.setBackground(bg(Color.WHITE,12));FrameLayout.LayoutParams klp=
-            new FrameLayout.LayoutParams(dp(24),dp(24),Gravity.START|Gravity.CENTER_VERTICAL);klp.leftMargin=dp(15);page.addView(knob,klp);
+            LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(34),dp(34));
+            lp.leftMargin=dp(6);
+            lp.rightMargin=dp(6);
+            colors.addView(dot,lp);
+            dot.setOnClickListener(v->drawView.setDrawColor(color));
+        }
+
+        FrameLayout.LayoutParams colorsLp=
+            new FrameLayout.LayoutParams(-1,dp(58),Gravity.BOTTOM);
+        colorsLp.bottomMargin=dp(22);
+        colorsLp.leftMargin=dp(70);
+        colorsLp.rightMargin=dp(8);
+        page.addView(colorsScroll,colorsLp);
+
+        View track=new View(this);
+        GradientDrawable trackBg=new GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            new int[]{Color.WHITE,Color.WHITE,Color.rgb(180,180,180),Color.rgb(105,105,105)}
+        );
+        trackBg.setCornerRadius(dp(8));
+        track.setBackground(trackBg);
+
+        FrameLayout.LayoutParams trackLp=
+            new FrameLayout.LayoutParams(dp(14),dp(300),Gravity.START|Gravity.CENTER_VERTICAL);
+        trackLp.leftMargin=dp(25);
+        page.addView(track,trackLp);
+
+        View knob=new View(this);
+        GradientDrawable knobBg=new GradientDrawable();
+        knobBg.setShape(GradientDrawable.OVAL);
+        knobBg.setColor(Color.WHITE);
+        knob.setBackground(knobBg);
+
+        FrameLayout.LayoutParams knobLp=
+            new FrameLayout.LayoutParams(dp(24),dp(24),Gravity.START|Gravity.CENTER_VERTICAL);
+        knobLp.leftMargin=dp(20);
+        page.addView(knob,knobLp);
+
         knob.setOnTouchListener((v,e)->{
-            if(e.getActionMasked()==MotionEvent.ACTION_DOWN||e.getActionMasked()==MotionEvent.ACTION_MOVE){
-                float center=page.getHeight()/2f,min=center-dp(150),max=center+dp(150),yy=Math.max(min,Math.min(max,e.getRawY()));
-                v.setTranslationY(yy-center);float pr=(yy-min)/Math.max(1f,max-min);drawView.setStrokeWidth(dp(2)+pr*dp(18));return true;
-            }return true;
+            if(e.getActionMasked()==MotionEvent.ACTION_DOWN||
+               e.getActionMasked()==MotionEvent.ACTION_MOVE){
+
+                float center=page.getHeight()/2f;
+                float min=center-dp(150);
+                float max=center+dp(150);
+                float yy=Math.max(min,Math.min(max,e.getRawY()));
+                v.setTranslationY(yy-center);
+
+                float progress=(yy-min)/Math.max(1f,max-min);
+                float width=dp(20)-(progress*dp(18));
+                drawView.setStrokeWidth(Math.max(dp(2),width));
+                return true;
+            }
+            return true;
         });
 
-        d.setContentView(page);d.show();Window w=d.getWindow();if(w!=null){w.setLayout(-1,-1);w.setStatusBarColor(Color.BLACK);w.setNavigationBarColor(Color.BLACK);}
+        d.setContentView(page);
+        d.show();
+        Window w=d.getWindow();
+        if(w!=null){
+            w.setLayout(-1,-1);
+            w.setStatusBarColor(Color.BLACK);
+            w.setNavigationBarColor(Color.BLACK);
+        }
     }
 
     private void showCapturedMediaPreview(final byte[] bytes,final Runnable backDestination){
@@ -1669,9 +1834,9 @@ reactionsCard.animate().cancel();
                 ?R.drawable.ic_camera_view_twice_ref
                 :R.drawable.ic_camera_view_unlimited_ref;
         android.graphics.drawable.Drawable icon=getDrawable(drawable);
-        if(icon!=null)icon.setBounds(0,0,dp(21),dp(21));
+        if(icon!=null)icon.setBounds(0,0,dp(19),dp(19));
         button.setCompoundDrawables(icon,null,null,null);
-        button.setCompoundDrawablePadding(dp(2));
+        button.setCompoundDrawablePadding(0);
         button.setText(value==1?"View once":value==2?"View twice":"Unlimited");
     }
 
@@ -4619,7 +4784,29 @@ reactionsCard.animate().cancel();
         private Path current;
         DrawOverlay(Context c){super(c);paint.setStyle(Paint.Style.STROKE);paint.setStrokeCap(Paint.Cap.ROUND);
             paint.setStrokeJoin(Paint.Join.ROUND);paint.setColor(Color.WHITE);paint.setStrokeWidth(8f);setBackgroundColor(Color.TRANSPARENT);}
-        void setDrawColor(int c){paint.setColor(c);} void setStrokeWidth(float w){paint.setStrokeWidth(Math.max(2f,w));}
+        private int brushStyle=0;
+        void setDrawColor(int c){paint.setColor(c);if(brushStyle==2)paint.setShadowLayer(12f,0f,0f,c);}
+        void setStrokeWidth(float w){paint.setStrokeWidth(Math.max(2f,w));}
+        void setBrushStyle(int style){
+            brushStyle=style;
+            switch(style){
+                case 1:
+                    paint.setStrokeCap(Paint.Cap.SQUARE);
+                    paint.setAlpha(210);
+                    paint.clearShadowLayer();
+                    break;
+                case 2:
+                    paint.setStrokeCap(Paint.Cap.ROUND);
+                    paint.setAlpha(255);
+                    paint.setShadowLayer(12f,0f,0f,paint.getColor());
+                    break;
+                default:
+                    paint.setStrokeCap(Paint.Cap.ROUND);
+                    paint.setAlpha(255);
+                    paint.clearShadowLayer();
+                    break;
+            }
+        }
         void undo(){int n=paths.size();if(n>0){paths.remove(n-1);colors.remove(n-1);widths.remove(n-1);invalidate();}}
         @Override protected void onDraw(Canvas c){super.onDraw(c);for(int i=0;i<paths.size();i++){paint.setColor(colors.get(i));paint.setStrokeWidth(widths.get(i));c.drawPath(paths.get(i),paint);}}
         @Override public boolean onTouchEvent(MotionEvent e){switch(e.getActionMasked()){
