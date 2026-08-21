@@ -1432,7 +1432,7 @@ reactionsCard.animate().cancel();
 
     private void applyPreviewTextStyle(EditText input,int styleIndex,int textColor,boolean boxed,int align){
         input.setTypeface(previewTextTypeface(styleIndex));
-        input.setTextSize(TypedValue.COMPLEX_UNIT_SP,previewTextSize(styleIndex));
+        input.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP,previewTextSize(styleIndex));
         input.setTextColor(textColor);
         if(boxed){
             GradientDrawable bg=new GradientDrawable();
@@ -1503,7 +1503,7 @@ reactionsCard.animate().cancel();
         input.setTextColor(Color.WHITE);
         input.setBackgroundColor(Color.TRANSPARENT);
         input.setGravity(Gravity.CENTER);
-        input.setTextSize(TypedValue.COMPLEX_UNIT_SP,36);
+        input.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP,36);
         input.setMaxLines(6);
         input.setMinLines(1);
         input.setImeOptions(EditorInfo.IME_ACTION_DONE);
@@ -1659,7 +1659,7 @@ reactionsCard.animate().cancel();
                 v.setTranslationY(yy-center);
                 float progress=(yy-min)/Math.max(1f,max-min);
                 textSize[0]=52f-(progress*34f);
-                input.setTextSize(TypedValue.COMPLEX_UNIT_SP,textSize[0]);
+                input.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP,textSize[0]);
                 return true;
             }
             return true;
@@ -1671,13 +1671,13 @@ reactionsCard.animate().cancel();
             c.drawBitmap(baseBmp,0,0,null);
             String value=input.getText().toString();
             if(value!=null && !value.trim().isEmpty()){
-                TextPaint tp=input.getPaint();
+                android.text.TextPaint tp=input.getPaint();
                 tp.setColor(textColor[0]);
                 tp.setTextSize(input.getTextSize());
                 tp.setTypeface(previewTextTypeface(styleIndex[0]));
                 tp.setAntiAlias(true);
                 tp.setTextAlign(align[0]==2?Paint.Align.RIGHT:(align[0]==1?Paint.Align.LEFT:Paint.Align.CENTER));
-                StaticLayout layout=new StaticLayout(value,tp,out.getWidth()-dp(80),Layout.Alignment.ALIGN_CENTER,1.0f,0f,false);
+                android.text.StaticLayout layout=new android.text.StaticLayout(value,tp,out.getWidth()-dp(80),android.text.Layout.Alignment.ALIGN_CENTER,1.0f,0f,false);
                 float tx=out.getWidth()/2f;
                 float ty=(out.getHeight()-layout.getHeight())/2f;
                 c.save();
@@ -1687,7 +1687,7 @@ reactionsCard.animate().cancel();
                 if(boxed[0]){
                     Paint boxPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
                     boxPaint.setColor(Color.argb(175,0,0,0));
-                    RectF rf=new RectF(-dp(14),-dp(10),layout.getWidth()+dp(14),layout.getHeight()+dp(10));
+                    android.graphics.RectF rf=new android.graphics.RectF(-dp(14),-dp(10),layout.getWidth()+dp(14),layout.getHeight()+dp(10));
                     if(align[0]==0) rf.offset(-layout.getWidth()/2f,0);
                     else if(align[0]==2) rf.offset(-layout.getWidth(),0);
                     c.drawRoundRect(rf,dp(18),dp(18),boxPaint);
@@ -5052,7 +5052,7 @@ reactionsCard.animate().cancel();
                     paint.setStrokeJoin(Paint.Join.ROUND);
                     paint.setAlpha(255);
                     paint.clearShadowLayer();
-                    paint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
+                    paint.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR));
                     break;
                 default:
                     paint.setStrokeCap(Paint.Cap.ROUND);
