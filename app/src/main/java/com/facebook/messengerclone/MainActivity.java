@@ -103,6 +103,7 @@ public class MainActivity extends Activity {
     private boolean forceFullScreenMediaPicker=false;
     // 0 = normal composer picker, 1 = camera, 2 = Aa creator.
     private int mediaPickerPreviewOrigin=0;
+    private String previewTextPrefill="";
     private long lastTypingWireAt=0L;
     private float timeRevealOffset=0f,timeRevealDownX=Float.NaN,timeRevealDownY=Float.NaN;
     private boolean timeRevealDragging=false;
@@ -1365,15 +1366,19 @@ reactionsCard.animate().cancel();
     }
 
     private void makePreviewTransformable(final View target){
-        final float[] x={0},y={0},dist={0}; final boolean[] scale={false};
+        final float[] x={0},y={0},dist={0},downX={0},downY={0};
+        final boolean[] scale={false},moved={false};
+        target.setClickable(true);
         target.setOnTouchListener((v,e)->{
             switch(e.getActionMasked()){
                 case MotionEvent.ACTION_DOWN:
-                    x[0]=e.getRawX();y[0]=e.getRawY();scale[0]=false;v.bringToFront();return true;
+                    x[0]=downX[0]=e.getRawX();
+                    y[0]=downY[0]=e.getRawY();
+                    scale[0]=false;moved[0]=false;v.bringToFront();return true;
                 case MotionEvent.ACTION_POINTER_DOWN:
                     if(e.getPointerCount()>=2){
                         float dx=e.getX(0)-e.getX(1),dy=e.getY(0)-e.getY(1);
-                        dist[0]=(float)Math.sqrt(dx*dx+dy*dy);scale[0]=true;
+                        dist[0]=(float)Math.sqrt(dx*dx+dy*dy);scale[0]=true;moved[0]=true;
                     }return true;
                 case MotionEvent.ACTION_MOVE:
                     if(e.getPointerCount()>=2){
@@ -1383,17 +1388,24 @@ reactionsCard.animate().cancel();
                             float f=d/dist[0],n=Math.max(.35f,Math.min(4f,v.getScaleX()*f));
                             v.setScaleX(n);v.setScaleY(n);
                         }
-                        dist[0]=d;scale[0]=true;
+                        dist[0]=d;scale[0]=true;moved[0]=true;
                     }else if(!scale[0]){
                         float nx=e.getRawX(),ny=e.getRawY();
-                        v.setTranslationX(v.getTranslationX()+nx-x[0]);
-                        v.setTranslationY(v.getTranslationY()+ny-y[0]);
+                        float dx=nx-x[0],dy=ny-y[0];
+                        if(Math.abs(nx-downX[0])>dp(4)||Math.abs(ny-downY[0])>dp(4))moved[0]=true;
+                        v.setTranslationX(v.getTranslationX()+dx);
+                        v.setTranslationY(v.getTranslationY()+dy);
                         x[0]=nx;y[0]=ny;
                     }return true;
                 case MotionEvent.ACTION_POINTER_UP:scale[0]=false;return true;
                 case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:scale[0]=false;dist[0]=0;return true;
-            }return true;
+                    scale[0]=false;dist[0]=0;
+                    if(!moved[0])v.performClick();
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    scale[0]=false;dist[0]=0;return true;
+            }
+            return true;
         });
     }
 
@@ -1409,24 +1421,21 @@ reactionsCard.animate().cancel();
 
     private Typeface previewTextTypeface(int styleIndex){
         switch(styleIndex){
-            case 1: return Typeface.SERIF;
-            case 2: return Typeface.create(Typeface.SANS_SERIF,Typeface.ITALIC);
-            case 3: return Typeface.MONOSPACE;
-            case 4: return Typeface.create(Typeface.SANS_SERIF,Typeface.BOLD);
-            case 5: return Typeface.DEFAULT_BOLD;
-            case 6: return Typeface.create("sans-serif-condensed",Typeface.NORMAL);
-            case 7: return Typeface.create("sans-serif-black",Typeface.NORMAL);
+            case 1: return Typeface.create(Typeface.SERIF,Typeface.NORMAL);
+            case 2: return Typeface.create("cursive",Typeface.ITALIC);
+            case 3: return Typeface.create(Typeface.MONOSPACE,Typeface.NORMAL);
+            case 4: return Typeface.create("sans-serif-black",Typeface.BOLD);
+            case 5: return Typeface.create("sans-serif-condensed",Typeface.NORMAL);
             default: return Typeface.create(Typeface.SANS_SERIF,Typeface.BOLD);
         }
     }
 
     private float previewTextSize(int styleIndex){
         switch(styleIndex){
-            case 2: return 34f;
-            case 4: return 38f;
-            case 5: return 32f;
-            case 7: return 30f;
-            default: return 36f;
+            case 2:return 38f;
+            case 4:return 38f;
+            case 5:return 34f;
+            default:return 36f;
         }
     }
 
@@ -1508,6 +1517,11 @@ reactionsCard.animate().cancel();
         input.setMinLines(1);
         input.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
         input.setSingleLine(false);
+        if(previewTextPrefill!=null&&!previewTextPrefill.isEmpty()){
+            input.setText(previewTextPrefill);
+            input.setSelection(input.length());
+            previewTextPrefill="";
+        }
         FrameLayout.LayoutParams ilp=new FrameLayout.LayoutParams(-1,-2,Gravity.CENTER);
         ilp.leftMargin=dp(46);
         ilp.rightMargin=dp(46);
@@ -1581,11 +1595,11 @@ reactionsCard.animate().cancel();
         styleLp.topMargin=dp(6);
         bottom.addView(stylesScroll,styleLp);
 
-        final String[] styles={"Modern","Classic","Signature","Editor","Poster","Bubble","Deco","Squeeze"};
+        final String[] styles={"Modern","Classic","Signature","Editor","Poster","Deco"};
         final java.util.ArrayList<TextView> chips=new java.util.ArrayList<>();
         for(int i=0;i<styles.length;i++){
             TextView chip=buildTextStyleChip(styles[i]);
-            if(i==0) chip.setTypeface(Typeface.DEFAULT_BOLD);
+            chip.setTypeface(previewTextTypeface(i));
             LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-2,dp(42));
             cp.leftMargin=dp(4);cp.rightMargin=dp(4);
             styleRow.addView(chip,cp);
@@ -1618,11 +1632,11 @@ reactionsCard.animate().cancel();
         ctrlAa.setBackground(bg(Color.rgb(98,92,106),12));
         controls.addView(ctrlAa,new LinearLayout.LayoutParams(dp(72),dp(42)));
 
-        TextView ctrlColor=text("◉",24,Color.WHITE,Typeface.NORMAL);ctrlColor.setGravity(Gravity.CENTER);
+        TextView ctrlColor=text("",18,Color.WHITE,Typeface.NORMAL);ctrlColor.setGravity(Gravity.CENTER);
         GradientDrawable colorBg=new GradientDrawable(GradientDrawable.Orientation.BL_TR,new int[]{Color.RED,Color.YELLOW,Color.GREEN,Color.CYAN,Color.BLUE,Color.MAGENTA});
-        colorBg.setCornerRadius(dp(21));
+        colorBg.setCornerRadius(dp(15));
         ctrlColor.setBackground(colorBg);
-        LinearLayout.LayoutParams c1=new LinearLayout.LayoutParams(dp(42),dp(42));c1.leftMargin=dp(8);
+        LinearLayout.LayoutParams c1=new LinearLayout.LayoutParams(dp(30),dp(30));c1.leftMargin=dp(10);c1.rightMargin=dp(6);
         controls.addView(ctrlColor,c1);
 
         TextView ctrlAlign=text("☰",22,Color.WHITE,Typeface.NORMAL);ctrlAlign.setGravity(Gravity.CENTER);
@@ -1666,41 +1680,43 @@ reactionsCard.animate().cancel();
         });
 
         done.setOnClickListener(v->{
-            Bitmap out=Bitmap.createBitmap(baseBmp.getWidth(),baseBmp.getHeight(),Bitmap.Config.ARGB_8888);
-            Canvas c=new Canvas(out);
-            c.drawBitmap(baseBmp,0,0,null);
-            String value=input.getText().toString();
-            if(value!=null && !value.trim().isEmpty()){
-                android.text.TextPaint tp=input.getPaint();
-                tp.setColor(textColor[0]);
-                tp.setTextSize(input.getTextSize());
-                tp.setTypeface(previewTextTypeface(styleIndex[0]));
-                tp.setAntiAlias(true);
-                tp.setTextAlign(align[0]==2?Paint.Align.RIGHT:(align[0]==1?Paint.Align.LEFT:Paint.Align.CENTER));
-                android.text.StaticLayout layout=new android.text.StaticLayout(value,tp,out.getWidth()-dp(80),android.text.Layout.Alignment.ALIGN_CENTER,1.0f,0f,false);
-                float tx=out.getWidth()/2f;
-                float ty=(out.getHeight()-layout.getHeight())/2f;
-                c.save();
-                if(align[0]==1) tx=dp(40);
-                if(align[0]==2) tx=out.getWidth()-dp(40);
-                c.translate(tx,ty);
-                if(boxed[0]){
-                    Paint boxPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
-                    boxPaint.setColor(Color.argb(175,0,0,0));
-                    android.graphics.RectF rf=new android.graphics.RectF(-dp(14),-dp(10),layout.getWidth()+dp(14),layout.getHeight()+dp(10));
-                    if(align[0]==0) rf.offset(-layout.getWidth()/2f,0);
-                    else if(align[0]==2) rf.offset(-layout.getWidth(),0);
-                    c.drawRoundRect(rf,dp(18),dp(18),boxPaint);
-                }
-                if(align[0]==0) c.translate(-layout.getWidth()/2f,0);
-                else if(align[0]==2) c.translate(-layout.getWidth(),0);
-                layout.draw(c);
-                c.restore();
+            String value=input.getText().toString().trim();
+            if(value.isEmpty()){
+                d.dismiss();
+                return;
             }
-            ByteArrayOutputStream bos=new ByteArrayOutputStream();
-            out.compress(Bitmap.CompressFormat.JPEG,95,bos);
+
+            final TextView placed=text(
+                value,
+                input.getTextSize()/getResources().getDisplayMetrics().scaledDensity,
+                textColor[0],
+                Typeface.BOLD
+            );
+            placed.setTextColor(textColor[0]);
+            placed.setTypeface(previewTextTypeface(styleIndex[0]));
+            placed.setGravity(input.getGravity());
+            placed.setPadding(dp(8),dp(4),dp(8),dp(4));
+            placed.setShadowLayer(dp(3),0,dp(1),Color.argb(170,0,0,0));
+
+            if(boxed[0]){
+                placed.setBackground(bg(Color.argb(175,0,0,0),18));
+            }else{
+                placed.setBackgroundColor(Color.TRANSPARENT);
+            }
+
+            composition.addView(
+                placed,
+                new FrameLayout.LayoutParams(-2,-2,Gravity.CENTER)
+            );
+
+            placed.setOnClickListener(v->{
+                previewTextPrefill=placed.getText().toString();
+                composition.removeView(placed);
+                showCapturedTextEditor(composition,backDestination);
+            });
+            makePreviewTransformable(placed);
+
             d.dismiss();
-            showCapturedMediaPreview(bos.toByteArray(),backDestination);
         });
 
         d.setContentView(page);
@@ -1832,10 +1848,10 @@ reactionsCard.animate().cancel();
         LinearLayout tools=new LinearLayout(this);
         tools.setGravity(Gravity.CENTER);
 
-        ImageButton penBrush=icon(R.drawable.ic_draw_tool_brush,34,Color.WHITE);penBrush.setBackground(bg(Color.argb(70,255,255,255),19));
-        ImageButton penHi=icon(R.drawable.ic_draw_tool_highlighter,34,Color.WHITE);penHi.setBackgroundColor(Color.TRANSPARENT);
-        ImageButton penMarker=icon(R.drawable.ic_draw_tool_marker,34,Color.WHITE);penMarker.setBackgroundColor(Color.TRANSPARENT);
-        ImageButton penErase=icon(R.drawable.ic_draw_tool_eraser,34,Color.WHITE);penErase.setBackgroundColor(Color.TRANSPARENT);
+        ImageButton penBrush=icon(R.drawable.ic_draw_pen_brush_ref,36,Color.WHITE);penBrush.clearColorFilter();penBrush.setBackgroundColor(Color.TRANSPARENT);
+        ImageButton penHi=icon(R.drawable.ic_draw_pen_spray_ref,36,Color.WHITE);penHi.clearColorFilter();penHi.setBackgroundColor(Color.TRANSPARENT);
+        ImageButton penMarker=icon(R.drawable.ic_draw_pen_marker_ref,36,Color.WHITE);penMarker.clearColorFilter();penMarker.setBackgroundColor(Color.TRANSPARENT);
+        ImageButton penErase=icon(R.drawable.ic_draw_pen_eraser_ref,36,Color.WHITE);penErase.clearColorFilter();penErase.setBackgroundColor(Color.TRANSPARENT);
 
         LinearLayout.LayoutParams ib=new LinearLayout.LayoutParams(dp(38),dp(38));
         tools.addView(penBrush,ib);
@@ -1864,16 +1880,14 @@ reactionsCard.animate().cancel();
         undo.setOnClickListener(v->drawView.undo());
 
         done.setOnClickListener(v->{
-            Bitmap out=Bitmap.createBitmap(baseBmp.getWidth(),baseBmp.getHeight(),Bitmap.Config.ARGB_8888);
-            Canvas c=new Canvas(out);
-            c.drawBitmap(baseBmp,0,0,null);
-            Bitmap strokes=Bitmap.createBitmap(drawView.getWidth(),drawView.getHeight(),Bitmap.Config.ARGB_8888);
-            drawView.draw(new Canvas(strokes));
-            c.drawBitmap(strokes,null,new Rect(0,0,out.getWidth(),out.getHeight()),null);
-            ByteArrayOutputStream bos=new ByteArrayOutputStream();
-            out.compress(Bitmap.CompressFormat.JPEG,95,bos);
+            Bitmap strokes=drawView.exportBitmap();
+            if(strokes!=null){
+                ImageView layer=new ImageView(this);
+                layer.setScaleType(ImageView.ScaleType.FIT_XY);
+                layer.setImageBitmap(strokes);
+                composition.addView(layer,new FrameLayout.LayoutParams(-1,-1));
+            }
             d.dismiss();
-            showCapturedMediaPreview(bos.toByteArray(),backDestination);
         });
 
         HorizontalScrollView colorsScroll=new HorizontalScrollView(this);
@@ -1884,10 +1898,11 @@ reactionsCard.animate().cancel();
         colorsScroll.addView(colors,new HorizontalScrollView.LayoutParams(-2,-1));
 
         int[] palette={
-            Color.WHITE,Color.BLACK,Color.rgb(190,0,205),Color.rgb(135,88,255),Color.rgb(110,74,242),Color.rgb(194,225,255),
-            Color.rgb(25,196,29),Color.rgb(72,219,33),Color.rgb(166,231,45),Color.rgb(198,233,70),
-            Color.rgb(255,49,89),Color.rgb(255,95,95),Color.rgb(255,139,30),Color.rgb(255,184,43),Color.rgb(255,221,44),
-            Color.rgb(0,189,255),Color.rgb(52,235,183),Color.rgb(0,115,255)
+            Color.WHITE,Color.BLACK,0xff8e8e93,0xffaeaeb2,
+            0xffbf5af2,0xffaf52de,0xffff2d55,0xffff375f,0xffff453a,
+            0xffff6961,0xffff7a00,0xffff9f0a,0xffffd60a,0xffffe66d,
+            0xffaeea00,0xff32d74b,0xff30d158,0xff00c7be,0xff64d2ff,
+            0xff0a84ff,0xff007aff,0xff5e5ce6,0xff5856d6,0xffc7d8ff
         };
         for(int color:palette){
             View dot=new View(this);
@@ -1906,36 +1921,50 @@ reactionsCard.animate().cancel();
         colorsLp.leftMargin=dp(52);colorsLp.rightMargin=dp(8);colorsLp.bottomMargin=dp(24);
         page.addView(colorsScroll,colorsLp);
 
+        FrameLayout sliderTouch=new FrameLayout(this);
+        sliderTouch.setBackgroundColor(Color.TRANSPARENT);
+        FrameLayout.LayoutParams sliderLp=
+            new FrameLayout.LayoutParams(dp(56),dp(306),Gravity.START|Gravity.CENTER_VERTICAL);
+        page.addView(sliderTouch,sliderLp);
+
         View track=new View(this);
-        GradientDrawable trackBg=new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,new int[]{Color.WHITE,Color.WHITE,Color.rgb(180,180,180),Color.rgb(105,105,105)});
-        trackBg.setCornerRadius(dp(8));
+        GradientDrawable trackBg=new GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            new int[]{Color.WHITE,Color.WHITE,Color.rgb(180,180,180),Color.rgb(105,105,105)}
+        );
+        trackBg.setCornerRadius(dp(4));
         track.setBackground(trackBg);
-        FrameLayout.LayoutParams trackLp=new FrameLayout.LayoutParams(dp(8),dp(286),Gravity.START|Gravity.CENTER_VERTICAL);
-        trackLp.leftMargin=dp(24);
-        page.addView(track,trackLp);
+        sliderTouch.addView(
+            track,
+            new FrameLayout.LayoutParams(dp(5),dp(286),Gravity.CENTER)
+        );
 
         View knob=new View(this);
         GradientDrawable knobBg=new GradientDrawable();
         knobBg.setShape(GradientDrawable.OVAL);
         knobBg.setColor(Color.WHITE);
         knob.setBackground(knobBg);
-        FrameLayout.LayoutParams knobLp=new FrameLayout.LayoutParams(dp(22),dp(22),Gravity.START|Gravity.CENTER_VERTICAL);
-        knobLp.leftMargin=dp(17);
-        page.addView(knob,knobLp);
+        sliderTouch.addView(
+            knob,
+            new FrameLayout.LayoutParams(dp(22),dp(22),Gravity.CENTER)
+        );
 
-        knob.setOnTouchListener((v,e)->{
-            if(e.getActionMasked()==MotionEvent.ACTION_DOWN||e.getActionMasked()==MotionEvent.ACTION_MOVE){
-                float center=page.getHeight()/2f;
+        View.OnTouchListener sliderListener=(v,e)->{
+            if(e.getActionMasked()==MotionEvent.ACTION_DOWN||
+               e.getActionMasked()==MotionEvent.ACTION_MOVE){
+                float center=sliderTouch.getHeight()/2f;
                 float min=center-dp(143),max=center+dp(143);
-                float yy=Math.max(min,Math.min(max,e.getRawY()));
-                v.setTranslationY(yy-center);
+                float yy=Math.max(min,Math.min(max,e.getY()));
+                knob.setTranslationY(yy-center);
                 float progress=(yy-min)/Math.max(1f,max-min);
                 float width=dp(20)-(progress*dp(17));
                 drawView.setStrokeWidth(Math.max(dp(2),width));
                 return true;
             }
             return true;
-        });
+        };
+        sliderTouch.setOnTouchListener(sliderListener);
+        knob.setOnTouchListener(sliderListener);
 
         d.setContentView(page);
         d.show();
@@ -1979,7 +2008,7 @@ reactionsCard.animate().cancel();
         }catch(Exception e){toast("Couldn't save photo.");}});
 
         int[] mode={2};TextView view=text("View twice",14,Color.WHITE,Typeface.BOLD);view.setGravity(Gravity.CENTER_VERTICAL);setCapturedViewModeButton(view,2);
-        view.setPadding(dp(22),0,dp(18),0);view.setCompoundDrawablePadding(dp(10));
+        view.setPadding(dp(34),0,dp(12),0);view.setCompoundDrawablePadding(dp(2));
         view.setBackground(bg(Color.rgb(34,35,39),22));FrameLayout.LayoutParams vp=new FrameLayout.LayoutParams(dp(166),dp(46),Gravity.BOTTOM|Gravity.START);
         vp.leftMargin=dp(14);vp.bottomMargin=dp(18);page.addView(view,vp);view.setOnClickListener(v->showCapturedViewModeMenu(view,mode));
 
@@ -1988,8 +2017,20 @@ reactionsCard.animate().cancel();
         send.addView(avatar,new LinearLayout.LayoutParams(dp(30),dp(30)));TextView st=text("Send",15,Color.rgb(35,35,35),Typeface.BOLD);st.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams stp=new LinearLayout.LayoutParams(-2,dp(40));stp.leftMargin=dp(6);send.addView(st,stp);
         FrameLayout.LayoutParams sendp=new FrameLayout.LayoutParams(dp(112),dp(46),Gravity.BOTTOM|Gravity.END);sendp.rightMargin=dp(14);sendp.bottomMargin=dp(18);page.addView(send,sendp);
-        send.setOnClickListener(v->{byte[] rendered=renderCapturedComposition(composition);if(rendered==null)return;d.dismiss();
-            uploadAttachment(rendered,"camera-"+System.currentTimeMillis()+".jpg","image/jpeg");});
+        final boolean[] captureSending={false};
+        send.setOnClickListener(v->{
+            if(captureSending[0])return;
+            byte[] rendered=renderCapturedComposition(composition);
+            if(rendered==null)return;
+            captureSending[0]=true;
+            send.setEnabled(false);
+            d.dismiss();
+            uploadAttachment(
+                rendered,
+                "camera-"+System.currentTimeMillis()+".jpg",
+                "image/jpeg"
+            );
+        });
 
         d.setContentView(page);d.show();Window w=d.getWindow();if(w!=null){w.setLayout(-1,-1);w.setStatusBarColor(Color.BLACK);w.setNavigationBarColor(Color.BLACK);}
     }
@@ -5018,56 +5059,131 @@ reactionsCard.animate().cancel();
         private final List<Path> paths=new ArrayList<>();
         private final List<Integer> colors=new ArrayList<>();
         private final List<Float> widths=new ArrayList<>();
+        private final List<Integer> styles=new ArrayList<>();
         private Path current;
-        DrawOverlay(Context c){super(c);paint.setStyle(Paint.Style.STROKE);paint.setStrokeCap(Paint.Cap.ROUND);
-            paint.setStrokeJoin(Paint.Join.ROUND);paint.setColor(Color.WHITE);paint.setStrokeWidth(8f);setBackgroundColor(Color.TRANSPARENT);}
-        private int brushStyle=0;
-        int getBrushStyle(){return brushStyle;}
-        void setDrawColor(int c){
-            paint.setXfermode(null);
-            paint.setColor(c);
-            if(brushStyle==2) paint.setShadowLayer(10f,0f,0f,c);
-            else paint.clearShadowLayer();
+        private int brushStyle=0,currentColor=Color.WHITE;
+        private float currentWidth=8f;
+
+        DrawOverlay(Context c){
+            super(c);
+            setLayerType(View.LAYER_TYPE_SOFTWARE,null);
+            setBackgroundColor(Color.TRANSPARENT);
         }
-        void setStrokeWidth(float w){paint.setStrokeWidth(Math.max(2f,w));}
-        void setBrushStyle(int style){
-            brushStyle=style;
-            paint.setPathEffect(null);
-            paint.setXfermode(null);
+
+        int getBrushStyle(){return brushStyle;}
+        void setDrawColor(int c){currentColor=c;invalidate();}
+        void setStrokeWidth(float w){currentWidth=Math.max(2f,w);}
+        void setBrushStyle(int style){brushStyle=style;}
+
+        void undo(){
+            int n=paths.size();
+            if(n>0){
+                paths.remove(n-1);
+                colors.remove(n-1);
+                widths.remove(n-1);
+                styles.remove(n-1);
+                invalidate();
+            }
+        }
+
+        private void configure(Paint p,int style,int color,float width){
+            p.reset();
+            p.setAntiAlias(true);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeJoin(Paint.Join.ROUND);
+            p.setStrokeWidth(width);
+            p.setColor(color);
+            p.setAlpha(255);
+            p.setXfermode(null);
+            p.clearShadowLayer();
+
             switch(style){
                 case 1:
-                    paint.setStrokeCap(Paint.Cap.SQUARE);
-                    paint.setStrokeJoin(Paint.Join.ROUND);
-                    paint.setAlpha(110);
-                    paint.clearShadowLayer();
+                    // Soft translucent spray/highlighter.
+                    p.setStrokeCap(Paint.Cap.ROUND);
+                    p.setAlpha(95);
+                    p.setStrokeWidth(width*1.35f);
                     break;
+
                 case 2:
-                    paint.setStrokeCap(Paint.Cap.ROUND);
-                    paint.setStrokeJoin(Paint.Join.ROUND);
-                    paint.setAlpha(255);
-                    paint.setShadowLayer(10f,0f,0f,paint.getColor());
+                    // Hard marker/glow.
+                    p.setStrokeCap(Paint.Cap.SQUARE);
+                    p.setShadowLayer(Math.max(5f,width*.8f),0,0,color);
                     break;
+
                 case 3:
-                    paint.setStrokeCap(Paint.Cap.ROUND);
-                    paint.setStrokeJoin(Paint.Join.ROUND);
-                    paint.setAlpha(255);
-                    paint.clearShadowLayer();
-                    paint.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR));
+                    // Real eraser: CLEAR is replayed with this stroke forever.
+                    p.setStrokeCap(Paint.Cap.ROUND);
+                    p.setStrokeWidth(width*1.55f);
+                    p.setXfermode(
+                        new android.graphics.PorterDuffXfermode(
+                            android.graphics.PorterDuff.Mode.CLEAR
+                        )
+                    );
                     break;
+
                 default:
-                    paint.setStrokeCap(Paint.Cap.ROUND);
-                    paint.setStrokeJoin(Paint.Join.ROUND);
-                    paint.setAlpha(255);
-                    paint.clearShadowLayer();
+                    // Standard round brush.
+                    p.setStrokeCap(Paint.Cap.ROUND);
                     break;
             }
         }
-        void undo(){int n=paths.size();if(n>0){paths.remove(n-1);colors.remove(n-1);widths.remove(n-1);invalidate();}}
-        @Override protected void onDraw(Canvas c){super.onDraw(c);for(int i=0;i<paths.size();i++){paint.setColor(colors.get(i));paint.setStrokeWidth(widths.get(i));c.drawPath(paths.get(i),paint);}}
-        @Override public boolean onTouchEvent(MotionEvent e){switch(e.getActionMasked()){
-            case MotionEvent.ACTION_DOWN:current=new Path();current.moveTo(e.getX(),e.getY());paths.add(current);colors.add(paint.getColor());widths.add(paint.getStrokeWidth());invalidate();return true;
-            case MotionEvent.ACTION_MOVE:if(current!=null){current.lineTo(e.getX(),e.getY());invalidate();}return true;
-            case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:current=null;invalidate();return true;}return true;}
+
+        @Override protected void onDraw(Canvas c){
+            super.onDraw(c);
+            for(int i=0;i<paths.size();i++){
+                configure(
+                    paint,
+                    styles.get(i),
+                    colors.get(i),
+                    widths.get(i)
+                );
+                c.drawPath(paths.get(i),paint);
+            }
+            paint.setXfermode(null);
+        }
+
+        Bitmap exportBitmap(){
+            try{
+                Bitmap b=Bitmap.createBitmap(
+                    Math.max(1,getWidth()),
+                    Math.max(1,getHeight()),
+                    Bitmap.Config.ARGB_8888
+                );
+                draw(new Canvas(b));
+                return b;
+            }catch(Exception e){
+                return null;
+            }
+        }
+
+        @Override public boolean onTouchEvent(MotionEvent e){
+            switch(e.getActionMasked()){
+                case MotionEvent.ACTION_DOWN:
+                    current=new Path();
+                    current.moveTo(e.getX(),e.getY());
+                    paths.add(current);
+                    colors.add(currentColor);
+                    widths.add(currentWidth);
+                    styles.add(brushStyle);
+                    invalidate();
+                    return true;
+
+                case MotionEvent.ACTION_MOVE:
+                    if(current!=null){
+                        current.lineTo(e.getX(),e.getY());
+                        invalidate();
+                    }
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    current=null;
+                    invalidate();
+                    return true;
+            }
+            return true;
+        }
     }
 
 }
