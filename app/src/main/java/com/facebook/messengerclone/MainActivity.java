@@ -1709,7 +1709,7 @@ reactionsCard.animate().cancel();
                 new FrameLayout.LayoutParams(-2,-2,Gravity.CENTER)
             );
 
-            placed.setOnClickListener(v->{
+            placed.setOnClickListener(clickedView->{
                 previewTextPrefill=placed.getText().toString();
                 composition.removeView(placed);
                 showCapturedTextEditor(composition,backDestination);
