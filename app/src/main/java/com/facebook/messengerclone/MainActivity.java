@@ -1364,148 +1364,232 @@ reactionsCard.animate().cancel();
         }
     }
 
+    private void makePreviewTransformable(final View target){
+        final float[] x={0},y={0},dist={0}; final boolean[] scale={false};
+        target.setOnTouchListener((v,e)->{
+            switch(e.getActionMasked()){
+                case MotionEvent.ACTION_DOWN:
+                    x[0]=e.getRawX();y[0]=e.getRawY();scale[0]=false;v.bringToFront();return true;
+                case MotionEvent.ACTION_POINTER_DOWN:
+                    if(e.getPointerCount()>=2){
+                        float dx=e.getX(0)-e.getX(1),dy=e.getY(0)-e.getY(1);
+                        dist[0]=(float)Math.sqrt(dx*dx+dy*dy);scale[0]=true;
+                    }return true;
+                case MotionEvent.ACTION_MOVE:
+                    if(e.getPointerCount()>=2){
+                        float dx=e.getX(0)-e.getX(1),dy=e.getY(0)-e.getY(1);
+                        float d=(float)Math.sqrt(dx*dx+dy*dy);
+                        if(dist[0]>0){
+                            float f=d/dist[0],n=Math.max(.35f,Math.min(4f,v.getScaleX()*f));
+                            v.setScaleX(n);v.setScaleY(n);
+                        }
+                        dist[0]=d;scale[0]=true;
+                    }else if(!scale[0]){
+                        float nx=e.getRawX(),ny=e.getRawY();
+                        v.setTranslationX(v.getTranslationX()+nx-x[0]);
+                        v.setTranslationY(v.getTranslationY()+ny-y[0]);
+                        x[0]=nx;y[0]=ny;
+                    }return true;
+                case MotionEvent.ACTION_POINTER_UP:scale[0]=false;return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:scale[0]=false;dist[0]=0;return true;
+            }return true;
+        });
+    }
+
+    private byte[] renderCapturedComposition(View v){
+        try{
+            Bitmap b=Bitmap.createBitmap(v.getWidth(),v.getHeight(),Bitmap.Config.ARGB_8888);
+            v.draw(new Canvas(b));
+            ByteArrayOutputStream o=new ByteArrayOutputStream();
+            b.compress(Bitmap.CompressFormat.JPEG,95,o);
+            return o.toByteArray();
+        }catch(Exception e){return null;}
+    }
+
+    private void addPreviewText(final FrameLayout composition){
+        EditText input=new EditText(this);input.setHint("Type text");
+        new AlertDialog.Builder(this).setTitle("Add text").setView(input)
+            .setNegativeButton("Cancel",null)
+            .setPositiveButton("Add",(d,w)->{
+                String value=input.getText().toString().trim();if(value.isEmpty())return;
+                TextView t=text(value,28,Color.WHITE,Typeface.BOLD);t.setGravity(Gravity.CENTER);
+                t.setShadowLayer(dp(3),0,dp(1),Color.argb(180,0,0,0));
+                composition.addView(t,new FrameLayout.LayoutParams(-2,-2,Gravity.CENTER));
+                makePreviewTransformable(t);
+            }).show();
+    }
+
+    private void showPreviewStickerPicker(final FrameLayout composition){
+        final Dialog d=new Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);
+        page.setBackgroundColor(Color.rgb(38,38,38));
+
+        LinearLayout top=new LinearLayout(this);top.setGravity(Gravity.CENTER_VERTICAL);
+        ImageButton close=icon(R.drawable.ic_msg_close,42,Color.WHITE);close.setBackgroundColor(Color.TRANSPARENT);
+        TextView title=text("Stickers",18,Color.WHITE,Typeface.BOLD);title.setGravity(Gravity.CENTER);
+        top.addView(close,new LinearLayout.LayoutParams(dp(48),dp(48)));
+        top.addView(title,new LinearLayout.LayoutParams(0,dp(48),1));
+        top.addView(new Space(this),new LinearLayout.LayoutParams(dp(48),dp(48)));
+        page.addView(top,new LinearLayout.LayoutParams(-1,dp(58)));
+
+        LinearLayout searchWrap=new LinearLayout(this);searchWrap.setGravity(Gravity.CENTER_VERTICAL);
+        searchWrap.setPadding(dp(11),0,dp(10),0);searchWrap.setBackground(bg(Color.rgb(54,54,54),18));
+        ImageView si=new ImageView(this);si.setImageResource(R.drawable.ic_sticker_search);si.setColorFilter(Color.rgb(159,167,178));
+        searchWrap.addView(si,new LinearLayout.LayoutParams(dp(23),dp(23)));
+        EditText search=new EditText(this);search.setSingleLine(true);search.setHint("Search stickers");
+        search.setHintTextColor(Color.rgb(159,167,178));search.setTextColor(Color.WHITE);
+        search.setBackgroundColor(Color.TRANSPARENT);search.setPadding(dp(7),0,0,0);
+        searchWrap.addView(search,new LinearLayout.LayoutParams(0,dp(42),1));
+        LinearLayout.LayoutParams slp=new LinearLayout.LayoutParams(-1,dp(42));
+        slp.leftMargin=dp(12);slp.rightMargin=dp(12);slp.bottomMargin=dp(8);page.addView(searchWrap,slp);
+
+        FrameLayout body=new FrameLayout(this);ScrollView scroll=new ScrollView(this);
+        GridLayout grid=new GridLayout(this);grid.setColumnCount(3);scroll.addView(grid,new ScrollView.LayoutParams(-1,-2));
+        body.addView(scroll,new FrameLayout.LayoutParams(-1,-1));ProgressBar loading=new ProgressBar(this);
+        body.addView(loading,new FrameLayout.LayoutParams(dp(30),dp(30),Gravity.CENTER));
+        page.addView(body,new LinearLayout.LayoutParams(-1,0,1));
+
+        final int[] rid={0};
+        class Loader{void load(String query){
+            int mine=++rid[0];loading.setVisibility(View.VISIBLE);grid.removeAllViews();
+            String q=query==null?"":query.trim();
+            String url=q.isEmpty()
+                ?"https://api.giphy.com/v1/stickers/trending?api_key="+Uri.encode(COMMENT_STICKER_API_KEY)+"&limit=50&rating=g"
+                :"https://api.giphy.com/v1/stickers/search?api_key="+Uri.encode(COMMENT_STICKER_API_KEY)+"&q="+Uri.encode(q)+"&limit=50&offset=0&rating=g&lang=en";
+            api.get(url,(json,error)->main.post(()->{
+                if(mine!=rid[0])return;loading.setVisibility(View.GONE);
+                JSONArray ar=json.optJSONArray("data");if(error!=null||ar==null)return;
+                int cell=getResources().getDisplayMetrics().widthPixels/3;
+                for(int i=0;i<ar.length();i++){
+                    JSONObject item=ar.optJSONObject(i);if(item==null)continue;
+                    JSONObject imgs=item.optJSONObject("images");if(imgs==null)continue;
+                    JSONObject fixed=imgs.optJSONObject("fixed_width");if(fixed==null)fixed=imgs.optJSONObject("original");
+                    if(fixed==null)continue;String u=fixed.optString("url","");if(u.isEmpty())continue;
+                    ImageView iv=new ImageView(MainActivity.this);iv.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+                    GridLayout.LayoutParams lp=new GridLayout.LayoutParams();lp.width=cell;lp.height=cell;grid.addView(iv,lp);
+                    stickers.load(u,iv);final String su=u;
+                    iv.setOnClickListener(v->{
+                        ImageView placed=new ImageView(MainActivity.this);placed.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+                        composition.addView(placed,new FrameLayout.LayoutParams(dp(120),dp(120),Gravity.CENTER));
+                        stickers.load(su,placed);makePreviewTransformable(placed);d.dismiss();
+                    });
+                }
+            }));
+        }}
+        Loader loader=new Loader();loader.load("");
+        final Runnable[] pending={null};
+        search.addTextChangedListener(new TextWatcher(){
+            public void beforeTextChanged(CharSequence s,int st,int c,int a){}
+            public void onTextChanged(CharSequence cs,int st,int b,int c){
+                if(pending[0]!=null)main.removeCallbacks(pending[0]);String q=cs==null?"":cs.toString();
+                pending[0]=()->loader.load(q);main.postDelayed(pending[0],280);
+            }
+            public void afterTextChanged(Editable e){}
+        });
+        close.setOnClickListener(v->d.dismiss());d.setContentView(page);d.show();
+        Window w=d.getWindow();if(w!=null){w.setLayout(-1,-1);w.setStatusBarColor(Color.BLACK);w.setNavigationBarColor(Color.BLACK);}
+    }
+
+    private void showCapturedDrawingEditor(final FrameLayout composition,final Runnable backDestination){
+        final Dialog d=new Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        FrameLayout page=new FrameLayout(this);page.setBackgroundColor(Color.BLACK);
+        Bitmap baseBmp=Bitmap.createBitmap(composition.getWidth(),composition.getHeight(),Bitmap.Config.ARGB_8888);
+        composition.draw(new Canvas(baseBmp));
+
+        ImageView base=new ImageView(this);base.setScaleType(ImageView.ScaleType.FIT_CENTER);base.setImageBitmap(baseBmp);
+        FrameLayout.LayoutParams blp=new FrameLayout.LayoutParams(-1,-1);blp.topMargin=dp(82);blp.bottomMargin=dp(150);page.addView(base,blp);
+        DrawOverlay drawView=new DrawOverlay(this);FrameLayout.LayoutParams dlp=new FrameLayout.LayoutParams(-1,-1);
+        dlp.topMargin=dp(82);dlp.bottomMargin=dp(150);page.addView(drawView,dlp);
+
+        LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);header.setPadding(dp(18),0,dp(18),0);
+        header.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,new int[]{Color.rgb(135,0,190),Color.rgb(199,0,213)}));
+        TextView undo=text("Undo",18,Color.WHITE,Typeface.BOLD);TextView tool=text("●",30,Color.WHITE,Typeface.NORMAL);
+        TextView done=text("Done",18,Color.WHITE,Typeface.BOLD);tool.setGravity(Gravity.CENTER);done.setGravity(Gravity.CENTER);
+        header.addView(undo,new LinearLayout.LayoutParams(dp(90),-1));header.addView(tool,new LinearLayout.LayoutParams(0,-1,1));
+        header.addView(done,new LinearLayout.LayoutParams(dp(90),-1));page.addView(header,new FrameLayout.LayoutParams(-1,dp(82),Gravity.TOP));
+        undo.setOnClickListener(v->drawView.undo());
+        done.setOnClickListener(v->{
+            Bitmap out=Bitmap.createBitmap(baseBmp.getWidth(),baseBmp.getHeight(),Bitmap.Config.ARGB_8888);
+            Canvas c=new Canvas(out);c.drawBitmap(baseBmp,0,0,null);
+            Bitmap strokes=Bitmap.createBitmap(drawView.getWidth(),drawView.getHeight(),Bitmap.Config.ARGB_8888);drawView.draw(new Canvas(strokes));
+            c.drawBitmap(strokes,null,new Rect(0,0,out.getWidth(),out.getHeight()),null);
+            ByteArrayOutputStream bos=new ByteArrayOutputStream();out.compress(Bitmap.CompressFormat.JPEG,95,bos);
+            d.dismiss();showCapturedMediaPreview(bos.toByteArray(),backDestination);
+        });
+
+        LinearLayout colors=new LinearLayout(this);colors.setGravity(Gravity.CENTER);
+        int[] palette={Color.WHITE,Color.BLACK,Color.rgb(190,0,205),Color.rgb(117,66,238),Color.rgb(100,69,239),
+            Color.rgb(25,196,29),Color.rgb(166,231,45),Color.rgb(255,49,89),Color.rgb(255,139,30),Color.rgb(255,221,44)};
+        for(int color:palette){
+            View dot=new View(this);GradientDrawable g=new GradientDrawable();g.setShape(GradientDrawable.OVAL);g.setColor(color);g.setStroke(dp(1),Color.WHITE);
+            dot.setBackground(g);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(34),dp(34));lp.leftMargin=dp(5);lp.rightMargin=dp(5);
+            colors.addView(dot,lp);dot.setOnClickListener(v->drawView.setDrawColor(color));
+        }
+        FrameLayout.LayoutParams clp=new FrameLayout.LayoutParams(-1,dp(72),Gravity.BOTTOM);clp.bottomMargin=dp(28);page.addView(colors,clp);
+
+        View track=new View(this);track.setBackgroundColor(Color.LTGRAY);FrameLayout.LayoutParams tlp=
+            new FrameLayout.LayoutParams(dp(2),dp(300),Gravity.START|Gravity.CENTER_VERTICAL);tlp.leftMargin=dp(26);page.addView(track,tlp);
+        View knob=new View(this);knob.setBackground(bg(Color.WHITE,12));FrameLayout.LayoutParams klp=
+            new FrameLayout.LayoutParams(dp(24),dp(24),Gravity.START|Gravity.CENTER_VERTICAL);klp.leftMargin=dp(15);page.addView(knob,klp);
+        knob.setOnTouchListener((v,e)->{
+            if(e.getActionMasked()==MotionEvent.ACTION_DOWN||e.getActionMasked()==MotionEvent.ACTION_MOVE){
+                float center=page.getHeight()/2f,min=center-dp(150),max=center+dp(150),yy=Math.max(min,Math.min(max,e.getRawY()));
+                v.setTranslationY(yy-center);float pr=(yy-min)/Math.max(1f,max-min);drawView.setStrokeWidth(dp(2)+pr*dp(18));return true;
+            }return true;
+        });
+
+        d.setContentView(page);d.show();Window w=d.getWindow();if(w!=null){w.setLayout(-1,-1);w.setStatusBarColor(Color.BLACK);w.setNavigationBarColor(Color.BLACK);}
+    }
+
     private void showCapturedMediaPreview(final byte[] bytes,final Runnable backDestination){
         if(bytes==null||bytes.length==0)return;
-
         final Dialog d=new Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen);
-        FrameLayout page=new FrameLayout(this);
-        page.setBackgroundColor(Color.BLACK);
+        FrameLayout page=new FrameLayout(this);page.setBackgroundColor(Color.BLACK);
+        FrameLayout composition=new FrameLayout(this);composition.setBackgroundColor(Color.BLACK);composition.setClipChildren(false);
+        ImageView photo=new ImageView(this);photo.setScaleType(ImageView.ScaleType.CENTER_CROP);photo.setImageBitmap(BitmapFactory.decodeByteArray(bytes,0,bytes.length));
+        composition.addView(photo,new FrameLayout.LayoutParams(-1,-1));
+        FrameLayout.LayoutParams cp0=new FrameLayout.LayoutParams(-1,-1);cp0.topMargin=dp(46);cp0.bottomMargin=dp(110);page.addView(composition,cp0);
 
-        ImageView photo=new ImageView(this);
-        photo.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        photo.setImageBitmap(BitmapFactory.decodeByteArray(bytes,0,bytes.length));
-        photo.setBackground(bg(Color.BLACK,22));
-        photo.setClipToOutline(true);
+        ImageButton back=icon(R.drawable.ic_camera_back_ref,46,Color.WHITE);back.setBackgroundColor(Color.TRANSPARENT);
+        FrameLayout.LayoutParams bp=new FrameLayout.LayoutParams(dp(46),dp(46),Gravity.TOP|Gravity.START);bp.leftMargin=dp(10);bp.topMargin=dp(58);page.addView(back,bp);
+        back.setOnClickListener(v->{if(backDestination!=null)backDestination.run();main.postDelayed(d::dismiss,140);});
 
-        FrameLayout.LayoutParams photoLp=new FrameLayout.LayoutParams(-1,-1);
-        photoLp.topMargin=dp(46);
-        photoLp.bottomMargin=dp(110);
-        page.addView(photo,photoLp);
+        LinearLayout tools=new LinearLayout(this);tools.setOrientation(LinearLayout.VERTICAL);tools.setGravity(Gravity.CENTER_HORIZONTAL);
+        TextView aa=text("Aa",20,Color.WHITE,Typeface.NORMAL);aa.setGravity(Gravity.CENTER);aa.setBackground(bg(Color.rgb(36,37,41),20));
+        tools.addView(aa,new LinearLayout.LayoutParams(dp(40),dp(40)));aa.setOnClickListener(v->addPreviewText(composition));
 
-        ImageButton back=icon(R.drawable.ic_camera_back_ref,46,Color.WHITE);
-        back.setBackgroundColor(Color.TRANSPARENT);
-        FrameLayout.LayoutParams backLp=
-            new FrameLayout.LayoutParams(dp(46),dp(46),Gravity.TOP|Gravity.START);
-        backLp.leftMargin=dp(10);
-        backLp.topMargin=dp(58);
-        page.addView(back,backLp);
-        back.setOnClickListener(v->{
-            if(backDestination!=null)backDestination.run();
-            d.dismiss();
-        });
+        ImageButton sticker=icon(R.drawable.ic_camera_sticker_exact_ref,40,Color.WHITE);sticker.clearColorFilter();sticker.setPadding(dp(8),dp(8),dp(8),dp(8));
+        sticker.setBackground(bg(Color.rgb(36,37,41),20));LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(dp(40),dp(40));sp.topMargin=dp(6);tools.addView(sticker,sp);
+        sticker.setOnClickListener(v->showPreviewStickerPicker(composition));
 
-        LinearLayout tools=new LinearLayout(this);
-        tools.setOrientation(LinearLayout.VERTICAL);
-        tools.setGravity(Gravity.CENTER_HORIZONTAL);
+        ImageButton draw=icon(R.drawable.ic_camera_draw_exact_ref,40,Color.WHITE);draw.clearColorFilter();draw.setPadding(dp(8),dp(8),dp(8),dp(8));
+        draw.setBackground(bg(Color.rgb(36,37,41),20));LinearLayout.LayoutParams dp0=new LinearLayout.LayoutParams(dp(40),dp(40));dp0.topMargin=dp(6);tools.addView(draw,dp0);
+        draw.setOnClickListener(v->showCapturedDrawingEditor(composition,backDestination));
 
-        TextView aa=text("Aa",20,Color.WHITE,Typeface.NORMAL);
-        aa.setGravity(Gravity.CENTER);
-        aa.setBackground(bg(Color.rgb(36,37,41),20));
-        tools.addView(aa,new LinearLayout.LayoutParams(dp(40),dp(40)));
-        aa.setOnClickListener(v->{
-            d.dismiss();
-            showMessageTextCreate(bytes);
-        });
+        ImageButton download=icon(R.drawable.ic_camera_download_ref,40,Color.WHITE);download.setPadding(dp(8),dp(8),dp(8),dp(8));
+        download.setBackground(bg(Color.rgb(36,37,41),20));LinearLayout.LayoutParams xp=new LinearLayout.LayoutParams(dp(40),dp(40));xp.topMargin=dp(6);tools.addView(download,xp);
+        FrameLayout.LayoutParams tp=new FrameLayout.LayoutParams(dp(46),-2,Gravity.TOP|Gravity.END);tp.rightMargin=dp(10);tp.topMargin=dp(66);page.addView(tools,tp);
 
-        ImageButton sticker=icon(R.drawable.ic_camera_sticker_exact_ref,40,Color.WHITE);
-        sticker.clearColorFilter();
-        sticker.setPadding(dp(9),dp(9),dp(9),dp(9));
-        sticker.setBackground(bg(Color.rgb(36,37,41),23));
-        LinearLayout.LayoutParams tp1=new LinearLayout.LayoutParams(dp(46),dp(46));
-        tp1.topMargin=dp(7);
-        tools.addView(sticker,tp1);
+        download.setOnClickListener(v->{try{
+            byte[] rendered=renderCapturedComposition(composition);if(rendered==null)return;
+            android.provider.MediaStore.Images.Media.insertImage(getContentResolver(),BitmapFactory.decodeByteArray(rendered,0,rendered.length),
+                "Messenger-"+System.currentTimeMillis(),"Messenger photo");toast("Saved");
+        }catch(Exception e){toast("Couldn't save photo.");}});
 
-        ImageButton draw=icon(R.drawable.ic_camera_draw_exact_ref,40,Color.WHITE);
-        draw.clearColorFilter();
-        draw.setPadding(dp(9),dp(9),dp(9),dp(9));
-        draw.setBackground(bg(Color.rgb(36,37,41),23));
-        LinearLayout.LayoutParams tp2=new LinearLayout.LayoutParams(dp(46),dp(46));
-        tp2.topMargin=dp(7);
-        tools.addView(draw,tp2);
+        int[] mode={2};TextView view=text("View twice",14,Color.WHITE,Typeface.BOLD);view.setGravity(Gravity.CENTER);setCapturedViewModeButton(view,2);
+        view.setBackground(bg(Color.rgb(34,35,39),22));FrameLayout.LayoutParams vp=new FrameLayout.LayoutParams(dp(150),dp(46),Gravity.BOTTOM|Gravity.START);
+        vp.leftMargin=dp(14);vp.bottomMargin=dp(18);page.addView(view,vp);view.setOnClickListener(v->showCapturedViewModeMenu(view,mode));
 
-        ImageButton download=icon(R.drawable.ic_camera_download_ref,40,Color.WHITE);
-        download.setPadding(dp(10),dp(10),dp(10),dp(10));
-        download.setBackground(bg(Color.rgb(36,37,41),23));
-        LinearLayout.LayoutParams tp3=new LinearLayout.LayoutParams(dp(46),dp(46));
-        tp3.topMargin=dp(7);
-        tools.addView(download,tp3);
+        LinearLayout send=new LinearLayout(this);send.setGravity(Gravity.CENTER);send.setPadding(dp(6),0,dp(11),0);send.setBackground(bg(Color.WHITE,23));
+        View avatar=buildUserAvatar(activeConversation==null?"":activeConversation.optString("avatar",""),conversationName(),30);
+        send.addView(avatar,new LinearLayout.LayoutParams(dp(30),dp(30)));TextView st=text("Send",15,Color.rgb(35,35,35),Typeface.BOLD);st.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams stp=new LinearLayout.LayoutParams(-2,dp(40));stp.leftMargin=dp(6);send.addView(st,stp);
+        FrameLayout.LayoutParams sendp=new FrameLayout.LayoutParams(dp(112),dp(46),Gravity.BOTTOM|Gravity.END);sendp.rightMargin=dp(14);sendp.bottomMargin=dp(18);page.addView(send,sendp);
+        send.setOnClickListener(v->{byte[] rendered=renderCapturedComposition(composition);if(rendered==null)return;d.dismiss();
+            uploadAttachment(rendered,"camera-"+System.currentTimeMillis()+".jpg","image/jpeg");});
 
-        FrameLayout.LayoutParams toolsLp=
-            new FrameLayout.LayoutParams(dp(52),-2,Gravity.TOP|Gravity.END);
-        toolsLp.rightMargin=dp(10);
-        toolsLp.topMargin=dp(66);
-        page.addView(tools,toolsLp);
-
-        download.setOnClickListener(v->{
-            try{
-                android.provider.MediaStore.Images.Media.insertImage(
-                    getContentResolver(),
-                    BitmapFactory.decodeByteArray(bytes,0,bytes.length),
-                    "Messenger-"+System.currentTimeMillis(),
-                    "Messenger photo"
-                );
-                toast("Saved");
-            }catch(Exception e){
-                toast("Couldn't save photo.");
-            }
-        });
-
-        final int[] viewMode={2};
-
-        TextView viewModeButton=text("View twice",14,Color.WHITE,Typeface.BOLD);
-        viewModeButton.setGravity(Gravity.CENTER);
-        setCapturedViewModeButton(viewModeButton,2);
-        viewModeButton.setBackground(bg(Color.rgb(34,35,39),22));
-        FrameLayout.LayoutParams viewLp=
-            new FrameLayout.LayoutParams(dp(156),dp(46),Gravity.BOTTOM|Gravity.START);
-        viewLp.leftMargin=dp(14);
-        viewLp.bottomMargin=dp(18);
-        page.addView(viewModeButton,viewLp);
-        viewModeButton.setOnClickListener(v->
-            showCapturedViewModeMenu(viewModeButton,viewMode)
-        );
-
-        LinearLayout sendPill=new LinearLayout(this);
-        sendPill.setGravity(Gravity.CENTER);
-        sendPill.setPadding(dp(6),0,dp(11),0);
-        sendPill.setBackground(bg(Color.WHITE,23));
-
-        View avatar=buildUserAvatar(
-            activeConversation==null?"":activeConversation.optString("avatar",""),
-            conversationName(),
-            30
-        );
-        sendPill.addView(avatar,new LinearLayout.LayoutParams(dp(30),dp(30)));
-
-        TextView sendText=text("Send",15,Color.rgb(35,35,35),Typeface.BOLD);
-        LinearLayout.LayoutParams stp=new LinearLayout.LayoutParams(-2,dp(40));
-        stp.leftMargin=dp(6);
-        sendPill.addView(sendText,stp);
-
-        FrameLayout.LayoutParams sendLp=
-            new FrameLayout.LayoutParams(dp(112),dp(46),Gravity.BOTTOM|Gravity.END);
-        sendLp.rightMargin=dp(14);
-        sendLp.bottomMargin=dp(18);
-        page.addView(sendPill,sendLp);
-
-        sendPill.setOnClickListener(v->{
-            d.dismiss();
-            uploadAttachment(
-                bytes,
-                "camera-"+System.currentTimeMillis()+".jpg",
-                "image/jpeg"
-            );
-        });
-
-        d.setContentView(page);
-        d.show();
-
-        Window w=d.getWindow();
-        if(w!=null){
-            w.setLayout(-1,-1);
-            w.setStatusBarColor(Color.BLACK);
-            w.setNavigationBarColor(Color.BLACK);
-        }
+        d.setContentView(page);d.show();Window w=d.getWindow();if(w!=null){w.setLayout(-1,-1);w.setStatusBarColor(Color.BLACK);w.setNavigationBarColor(Color.BLACK);}
     }
 
     private void showCapturedViewModeMenu(
@@ -1585,9 +1669,9 @@ reactionsCard.animate().cancel();
                 ?R.drawable.ic_camera_view_twice_ref
                 :R.drawable.ic_camera_view_unlimited_ref;
         android.graphics.drawable.Drawable icon=getDrawable(drawable);
-        if(icon!=null)icon.setBounds(0,0,dp(24),dp(24));
+        if(icon!=null)icon.setBounds(0,0,dp(21),dp(21));
         button.setCompoundDrawables(icon,null,null,null);
-        button.setCompoundDrawablePadding(dp(6));
+        button.setCompoundDrawablePadding(dp(2));
         button.setText(value==1?"View once":value==2?"View twice":"Unlimited");
     }
 
@@ -4527,4 +4611,21 @@ reactionsCard.animate().cancel();
             p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(1.15f*d);p.setColor(selected?Color.rgb(91,167,255):Color.rgb(174,179,187));canvas.drawRoundRect(l,t,r,b,rad,rad,p);
         }
     }
+    private static final class DrawOverlay extends View {
+        private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final List<Path> paths=new ArrayList<>();
+        private final List<Integer> colors=new ArrayList<>();
+        private final List<Float> widths=new ArrayList<>();
+        private Path current;
+        DrawOverlay(Context c){super(c);paint.setStyle(Paint.Style.STROKE);paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeJoin(Paint.Join.ROUND);paint.setColor(Color.WHITE);paint.setStrokeWidth(8f);setBackgroundColor(Color.TRANSPARENT);}
+        void setDrawColor(int c){paint.setColor(c);} void setStrokeWidth(float w){paint.setStrokeWidth(Math.max(2f,w));}
+        void undo(){int n=paths.size();if(n>0){paths.remove(n-1);colors.remove(n-1);widths.remove(n-1);invalidate();}}
+        @Override protected void onDraw(Canvas c){super.onDraw(c);for(int i=0;i<paths.size();i++){paint.setColor(colors.get(i));paint.setStrokeWidth(widths.get(i));c.drawPath(paths.get(i),paint);}}
+        @Override public boolean onTouchEvent(MotionEvent e){switch(e.getActionMasked()){
+            case MotionEvent.ACTION_DOWN:current=new Path();current.moveTo(e.getX(),e.getY());paths.add(current);colors.add(paint.getColor());widths.add(paint.getStrokeWidth());invalidate();return true;
+            case MotionEvent.ACTION_MOVE:if(current!=null){current.lineTo(e.getX(),e.getY());invalidate();}return true;
+            case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:current=null;invalidate();return true;}return true;}
+    }
+
 }
