@@ -62,10 +62,12 @@ final class StickerLoader {
         prefetchExecutor.execute(()->{try{getCachedOrFetch(url);}catch(Exception ignored){}});
     }
 
-    void load(String url,ImageView view){
+    void load(String url,ImageView view){load(url,view,null);}
+
+    void load(String url,ImageView view,Runnable ready){
         view.setTag(url);
         view.setBackgroundColor(android.graphics.Color.TRANSPARENT);
-        if(url==null||url.isEmpty()){view.setImageDrawable(null);return;}
+        if(url==null||url.isEmpty()){view.setImageDrawable(null);if(ready!=null)view.post(ready);return;}
         visibleExecutor.execute(()->{
             try{
                 byte[] bytes=getCachedOrFetch(url);
@@ -73,19 +75,20 @@ final class StickerLoader {
                 if(Build.VERSION.SDK_INT>=28){
                     ImageDecoder.Source source=ImageDecoder.createSource(ByteBuffer.wrap(bytes));
                     Drawable drawable=ImageDecoder.decodeDrawable(source,(decoder,info,src)->decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE));
-                    view.post(()->setDrawable(url,drawable,view));
+                    view.post(()->{if(setDrawable(url,drawable,view)&&ready!=null)ready.run();});
                 }else{
                     android.graphics.Bitmap bitmap=BitmapFactory.decodeByteArray(bytes,0,bytes.length);
-                    view.post(()->{if(url.equals(view.getTag()))view.setImageBitmap(bitmap);});
+                    view.post(()->{if(url.equals(view.getTag())){view.setImageBitmap(bitmap);if(ready!=null)ready.run();}});
                 }
             }catch(Exception ignored){}
         });
     }
 
-    private void setDrawable(String url,Drawable drawable,ImageView view){
-        if(!url.equals(view.getTag())||drawable==null)return;
+    private boolean setDrawable(String url,Drawable drawable,ImageView view){
+        if(!url.equals(view.getTag())||drawable==null)return false;
         view.setImageDrawable(drawable);
         if(drawable instanceof AnimatedImageDrawable)((AnimatedImageDrawable)drawable).start();
+        return true;
     }
 
     private static String hash(String value)throws Exception{
