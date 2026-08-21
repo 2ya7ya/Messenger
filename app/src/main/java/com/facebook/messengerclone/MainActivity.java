@@ -1506,7 +1506,7 @@ reactionsCard.animate().cancel();
         input.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP,36);
         input.setMaxLines(6);
         input.setMinLines(1);
-        input.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        input.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
         input.setSingleLine(false);
         FrameLayout.LayoutParams ilp=new FrameLayout.LayoutParams(-1,-2,Gravity.CENTER);
         ilp.leftMargin=dp(46);
