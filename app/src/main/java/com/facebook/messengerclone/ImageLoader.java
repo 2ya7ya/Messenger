@@ -29,34 +29,50 @@ final class ImageLoader {
     }
 
     void load(String url, ImageView view) {
+        load(url, view, null);
+    }
+
+    void load(String url, ImageView view, Runnable ready) {
         view.setTag(url);
         if (url == null || url.isEmpty()) { view.setImageDrawable(null); return; }
         Bitmap m = memory.get(url);
-        if (m != null) { view.setImageBitmap(m); return; }
+        if (m != null) { view.setImageBitmap(m); if (ready != null) view.post(ready); return; }
         executor.execute(() -> {
             try {
-                File f = new File(dir, hash(url));
-                byte[] bytes;
-                if (url.startsWith("data:image/")) {
-                    int comma = url.indexOf(',');
-                    if (comma < 0) return;
-                    bytes = Base64.decode(url.substring(comma + 1), Base64.DEFAULT);
-                } else if (url.startsWith("file:")) {
-                    String path=Uri.parse(url).getPath();
-                    if(path==null||path.isEmpty())return;
-                    bytes=java.nio.file.Files.readAllBytes(new File(path).toPath());
-                } else if (f.exists()) bytes = java.nio.file.Files.readAllBytes(f.toPath());
-                else {
-                    bytes = api.getBytesSync(url);
-                    try (FileOutputStream out = new FileOutputStream(f)) { out.write(bytes); }
-                }
-                Bitmap b = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                Bitmap b = fetch(url);
                 if (b != null) {
-                    memory.put(url, b);
-                    view.post(() -> { if (url.equals(view.getTag())) view.setImageBitmap(b); });
+                    view.post(() -> { if (url.equals(view.getTag())) { view.setImageBitmap(b); if (ready != null) ready.run(); } });
                 }
             } catch (Exception ignored) {}
         });
+    }
+
+    void prefetch(String url) {
+        if (url == null || url.isEmpty() || memory.get(url) != null) return;
+        executor.execute(() -> { try { fetch(url); } catch (Exception ignored) {} });
+    }
+
+    private Bitmap fetch(String url) throws Exception {
+        Bitmap cached = memory.get(url);
+        if (cached != null) return cached;
+        File f = new File(dir, hash(url));
+        byte[] bytes;
+        if (url.startsWith("data:image/")) {
+            int comma = url.indexOf(',');
+            if (comma < 0) return null;
+            bytes = Base64.decode(url.substring(comma + 1), Base64.DEFAULT);
+        } else if (url.startsWith("file:")) {
+            String path=Uri.parse(url).getPath();
+            if(path==null||path.isEmpty())return null;
+            bytes=java.nio.file.Files.readAllBytes(new File(path).toPath());
+        } else if (f.exists()) bytes = java.nio.file.Files.readAllBytes(f.toPath());
+        else {
+            bytes = api.getBytesSync(url);
+            try (FileOutputStream out = new FileOutputStream(f)) { out.write(bytes); }
+        }
+        Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+        if (bitmap != null) memory.put(url, bitmap);
+        return bitmap;
     }
 
     private static String hash(String s) throws Exception {
