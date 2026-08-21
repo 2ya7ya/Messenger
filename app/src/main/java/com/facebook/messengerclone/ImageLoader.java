@@ -3,6 +3,7 @@ package com.facebook.messengerclone;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.net.Uri;
 import android.util.LruCache;
 import android.util.Base64;
 import android.widget.ImageView;
@@ -40,6 +41,10 @@ final class ImageLoader {
                     int comma = url.indexOf(',');
                     if (comma < 0) return;
                     bytes = Base64.decode(url.substring(comma + 1), Base64.DEFAULT);
+                } else if (url.startsWith("file:")) {
+                    String path=Uri.parse(url).getPath();
+                    if(path==null||path.isEmpty())return;
+                    bytes=java.nio.file.Files.readAllBytes(new File(path).toPath());
                 } else if (f.exists()) bytes = java.nio.file.Files.readAllBytes(f.toPath());
                 else {
                     bytes = api.getBytesSync(url);
