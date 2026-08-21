@@ -9,54 +9,87 @@ import android.os.Build;
 import android.util.LruCache;
 import android.widget.ImageView;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.nio.ByteBuffer;
+import java.security.MessageDigest;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 final class StickerLoader {
     private final ApiClient api;
-    private final ExecutorService executor = Executors.newFixedThreadPool(4);
-    private final LruCache<String, byte[]> memory = new LruCache<String, byte[]>(12 * 1024 * 1024) {
-        @Override protected int sizeOf(String key, byte[] value) { return value == null ? 0 : value.length; }
+    private final File dir;
+    private final ExecutorService visibleExecutor=Executors.newFixedThreadPool(2);
+    private final ExecutorService prefetchExecutor=Executors.newSingleThreadExecutor();
+    private final Map<String,Object> locks=new ConcurrentHashMap<>();
+    private final LruCache<String,byte[]> memory=new LruCache<String,byte[]>(12*1024*1024){
+        @Override protected int sizeOf(String key,byte[] value){return value==null?0:value.length;}
     };
 
-    StickerLoader(Context context, ApiClient api) { this.api = api; }
-
-    byte[] getCachedOrFetch(String url) throws Exception {
-        byte[] cached = memory.get(url);
-        if (cached != null) return cached;
-        byte[] bytes = api.getBytesSync(url);
-        if (bytes != null && bytes.length > 0) memory.put(url, bytes);
-        return bytes;
+    StickerLoader(Context context,ApiClient api){
+        this.api=api;
+        dir=new File(context.getCacheDir(),"messenger_stickers");
+        if(!dir.exists())dir.mkdirs();
     }
 
-    void load(String url, ImageView view) {
+    byte[] getCachedOrFetch(String url)throws Exception{
+        byte[] cached=memory.get(url);
+        if(cached!=null)return cached;
+        Object lock=locks.computeIfAbsent(url,k->new Object());
+        try{
+            synchronized(lock){
+                cached=memory.get(url);
+                if(cached!=null)return cached;
+                File file=new File(dir,hash(url)+".bin");
+                byte[] bytes;
+                if(file.exists()&&file.length()>0){
+                    bytes=java.nio.file.Files.readAllBytes(file.toPath());
+                    file.setLastModified(System.currentTimeMillis());
+                }else{
+                    bytes=api.getBytesSync(url);
+                    if(bytes!=null&&bytes.length>0)try(FileOutputStream out=new FileOutputStream(file)){out.write(bytes);}
+                }
+                if(bytes!=null&&bytes.length>0)memory.put(url,bytes);
+                return bytes;
+            }
+        }finally{locks.remove(url,lock);}
+    }
+
+    void prefetch(String url){
+        if(url==null||url.isEmpty()||memory.get(url)!=null)return;
+        prefetchExecutor.execute(()->{try{getCachedOrFetch(url);}catch(Exception ignored){}});
+    }
+
+    void load(String url,ImageView view){
         view.setTag(url);
         view.setBackgroundColor(android.graphics.Color.TRANSPARENT);
-        if (url == null || url.isEmpty()) { view.setImageDrawable(null); return; }
-        byte[] cached = memory.get(url);
-        if (cached != null) { setBytes(url, cached, view); return; }
-        executor.execute(() -> {
-            try {
-                byte[] bytes = getCachedOrFetch(url);
-                view.post(() -> setBytes(url, bytes, view));
-            } catch (Exception ignored) {}
+        if(url==null||url.isEmpty()){view.setImageDrawable(null);return;}
+        visibleExecutor.execute(()->{
+            try{
+                byte[] bytes=getCachedOrFetch(url);
+                if(bytes==null||bytes.length==0)return;
+                if(Build.VERSION.SDK_INT>=28){
+                    ImageDecoder.Source source=ImageDecoder.createSource(ByteBuffer.wrap(bytes));
+                    Drawable drawable=ImageDecoder.decodeDrawable(source,(decoder,info,src)->decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE));
+                    view.post(()->setDrawable(url,drawable,view));
+                }else{
+                    android.graphics.Bitmap bitmap=BitmapFactory.decodeByteArray(bytes,0,bytes.length);
+                    view.post(()->{if(url.equals(view.getTag()))view.setImageBitmap(bitmap);});
+                }
+            }catch(Exception ignored){}
         });
     }
 
-    private void setBytes(String url, byte[] bytes, ImageView view) {
-        if (!url.equals(view.getTag()) || bytes == null || bytes.length == 0) return;
-        try {
-            if (Build.VERSION.SDK_INT >= 28) {
-                ImageDecoder.Source source = ImageDecoder.createSource(ByteBuffer.wrap(bytes));
-                Drawable drawable = ImageDecoder.decodeDrawable(source, (decoder, info, src) -> decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE));
-                view.setImageDrawable(drawable);
-                if (drawable instanceof AnimatedImageDrawable) ((AnimatedImageDrawable) drawable).start();
-            } else {
-                view.setImageBitmap(BitmapFactory.decodeByteArray(bytes, 0, bytes.length));
-            }
-        } catch (Exception e) {
-            try { view.setImageBitmap(BitmapFactory.decodeByteArray(bytes, 0, bytes.length)); } catch (Exception ignored) {}
-        }
+    private void setDrawable(String url,Drawable drawable,ImageView view){
+        if(!url.equals(view.getTag())||drawable==null)return;
+        view.setImageDrawable(drawable);
+        if(drawable instanceof AnimatedImageDrawable)((AnimatedImageDrawable)drawable).start();
+    }
+
+    private static String hash(String value)throws Exception{
+        byte[] digest=MessageDigest.getInstance("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        StringBuilder out=new StringBuilder();for(byte item:digest)out.append(String.format("%02x",item));return out.toString();
     }
 }

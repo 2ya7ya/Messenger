@@ -104,7 +104,7 @@ public class MainActivity extends Activity {
     private final Map<String,String> temporaryVideoFiles=new HashMap<>();
     private final Set<String> temporaryVideoLoading=new HashSet<>();
     private final ExecutorService temporaryMediaExecutor=Executors.newFixedThreadPool(2);
-    private JSONObject activeConversation, replyTo; private EditText searchBox, messageInput; private TextView typingView; private LinearLayout replyBar, composer, recordBar; private ProgressBar conversationMediaLoading;
+    private JSONObject activeConversation, replyTo; private EditText searchBox, messageInput; private TextView typingView; private LinearLayout replyBar, composer, recordBar;
     private int socketRetry=0; private boolean socketConnecting=false;
     private static final String COMMENT_STICKER_API_KEY="PvlaAZvthRs8jWekpX4blV5ORIDrykTm";
     private final Runnable socketReconnect=()->{ if(api!=null&&api.hasSession()) connectSocket(); };
@@ -122,8 +122,6 @@ public class MainActivity extends Activity {
     private FrameLayout recordOverlay; private View recordLockIndicator; private TextView recordLockHint; private boolean recordLockReady=false,recordDeleteHot=false,recordLockHot=false;
     private String beforeCursor=""; private boolean loadingOlderMessages=false; private JSONObject groupEditConversation; private String groupEditImageData="", groupEditEmoji="", groupEditColor="#3da9ef", groupEditDraftName="";
     private boolean conversationInitialScrollPending=false;
-    private boolean conversationVisualsReady=false;
-    private int conversationVisualGeneration=0;
     private String socketMessageBatchConversationId="";
     private final Runnable flushSocketMessages=this::flushSocketMessageBatch;
     private boolean scheduledMessageRefreshKeepsBottom=false;
@@ -308,7 +306,7 @@ public class MainActivity extends Activity {
         }catch(Exception ignored){}
     }
 
-    private void openConversation(JSONObject c){activeConversation=c;replyTo=null;messages.clear();socketMessageBatch.clear();main.removeCallbacks(flushSocketMessages);socketMessageBatchConversationId="";composerHasText=false;typingStateSent=false;conversationInitialScrollPending=true;conversationVisualsReady=false;conversationVisualGeneration++;
+    private void openConversation(JSONObject c){activeConversation=c;replyTo=null;messages.clear();socketMessageBatch.clear();main.removeCallbacks(flushSocketMessages);socketMessageBatchConversationId="";composerHasText=false;typingStateSent=false;conversationInitialScrollPending=true;
         boolean instagramTheme="instagram".equals(activeTheme());
         if(instagramTheme){
             getWindow().setStatusBarColor(Color.BLACK);
@@ -326,7 +324,6 @@ public class MainActivity extends Activity {
         list.setClipToPadding(false);
         list.setBackground(themeConversationBackground());
         messageArea.addView(list,new FrameLayout.LayoutParams(-1,-1));
-        conversationMediaLoading=new ProgressBar(this);FrameLayout.LayoutParams conversationLoadingLp=new FrameLayout.LayoutParams(dp(34),dp(34),Gravity.CENTER);messageArea.addView(conversationMediaLoading,conversationLoadingLp);
 
         // Older-message loader is a real ListView header row, never an overlay.
         FrameLayout loaderRow=new FrameLayout(this);
@@ -383,8 +380,7 @@ public class MainActivity extends Activity {
                 int visibleItemCount,
                 int totalItemCount
             ){
-                // Never start a page request during a fling/drag.
-                // That was causing the viewport to jump between batches.
+                prefetchConversationWindow(firstVisibleItem,visibleItemCount);
             }
         });
         wireConversationTimeRevealGesture();
@@ -568,16 +564,17 @@ public class MainActivity extends Activity {
     private void syncComposerAction(){boolean has=messageInput!=null&&composerHasText;if(sendButton!=null){sendButton.setVisibility(has?View.VISIBLE:View.GONE);sendButton.setImageResource(R.drawable.msg_send_enabled);sendButton.setColorFilter(Color.WHITE);sendButton.setBackground(bg(Color.rgb(98,55,255),19));}if(micButton!=null){micButton.setColorFilter(themeAccent());micButton.setVisibility(has?View.GONE:View.VISIBLE);}}
 
     private void loadCachedMessages(String cid){String raw=cache.get("messages:"+cid);if(raw==null)return;try{applyMessages(new JSONObject(raw).optJSONArray("messages"),false);}catch(Exception ignored){}}
-    private void refreshMessages(String cid){if(refreshingMessages)return;refreshingMessages=true;api.get("/api/messaging/conversations/"+cid+"/messages?limit=80",(json,error)->main.post(()->{refreshingMessages=false;if(error!=null){if(!conversationVisualsReady){int generation=++conversationVisualGeneration;preloadLatestConversationPhotos(generation,()->revealInitialConversation(generation));}return;}beforeCursor=json.optString("nextBefore","");cache.put("messages:"+cid,json.toString());applyMessages(json.optJSONArray("messages"),true);if(activeConversation!=null&&activeConversation.optString("id").equals(cid))markRead();}));}
+    private void refreshMessages(String cid){if(refreshingMessages)return;refreshingMessages=true;api.get("/api/messaging/conversations/"+cid+"/messages?limit=80",(json,error)->main.post(()->{refreshingMessages=false;if(error!=null)return;beforeCursor=json.optString("nextBefore","");cache.put("messages:"+cid,json.toString());applyMessages(json.optJSONArray("messages"),true);if(activeConversation!=null&&activeConversation.optString("id").equals(cid))markRead();}));}
     private String firstAttachmentName(JSONObject message){JSONArray a=message==null?null:message.optJSONArray("attachments");JSONObject item=a!=null&&a.length()>0?a.optJSONObject(0):null;return item==null?"":item.optString("name","").replaceFirst("^__vm[12]__","");}
     private JSONObject findPreviousMessage(List<JSONObject> previous,JSONObject incoming){if(incoming==null)return null;String id=incoming.optString("id"),client=incoming.optString("clientId");for(JSONObject old:previous){if(!id.isEmpty()&&id.equals(old.optString("id")))return old;if(!client.isEmpty()&&client.equals(old.optString("clientId")))return old;}if(isMine(incoming)){String incomingName=firstAttachmentName(incoming);for(int i=previous.size()-1;i>=0;i--){JSONObject old=previous.get(i);if(!old.optBoolean("pending")||!isMine(old))continue;String oldName=firstAttachmentName(old);if(!incomingName.isEmpty()&&incomingName.equals(oldName))return old;}JSONObject only=null;int candidates=0;String incomingType=incoming.optString("type");for(int i=previous.size()-1;i>=0;i--){JSONObject old=previous.get(i);if(old.optBoolean("pending")&&isMine(old)&&incomingType.equals(old.optString("type"))){only=old;candidates++;}}if(candidates==1)return only;}return null;}
     private void preserveLocalMediaPreview(JSONObject oldMessage,JSONObject merged){if(oldMessage==null||merged==null)return;JSONArray oldAttachments=oldMessage.optJSONArray("attachments"),newAttachments=merged.optJSONArray("attachments");JSONObject oldAttachment=oldAttachments!=null&&oldAttachments.length()>0?oldAttachments.optJSONObject(0):null,newAttachment=newAttachments!=null&&newAttachments.length()>0?newAttachments.optJSONObject(0):null;if(oldAttachment==null||newAttachment==null)return;String local=oldAttachment.optString("localPreviewUrl",oldAttachment.optString("url",""));if(local.startsWith("file:"))try{newAttachment.put("localPreviewUrl",local);if(newAttachment.optInt("width",0)<=0&&oldAttachment.optInt("width",0)>0)newAttachment.put("width",oldAttachment.optInt("width"));if(newAttachment.optInt("height",0)<=0&&oldAttachment.optInt("height",0)>0)newAttachment.put("height",oldAttachment.optInt("height"));if(newAttachment.optString("mime","").isEmpty())newAttachment.put("mime",oldAttachment.optString("mime"));if(newAttachment.optString("name","").isEmpty())newAttachment.put("name",oldAttachment.optString("name"));}catch(Exception ignored){}}
     private String temporaryVideoLocalUrl(String url){if(url==null||url.isEmpty())return"";String remembered=temporaryVideoFiles.get(url);if(remembered!=null){String path=Uri.parse(remembered).getPath();if(path!=null&&new File(path).exists())return remembered;}File cached=new File(getCacheDir(),"temporary-view-"+Integer.toHexString(url.hashCode())+".video");if(cached.exists()&&cached.length()>0){String local=Uri.fromFile(cached).toString();temporaryVideoFiles.put(url,local);return local;}return"";}
     private void preloadTemporaryVideo(JSONObject attachment,Runnable ready){if(attachment==null)return;String url=attachment.optString("url","");if(url.isEmpty())return;String local=temporaryVideoLocalUrl(url);if(!local.isEmpty()){try{attachment.put("localPreloadedUrl",local);}catch(Exception ignored){}if(ready!=null)ready.run();return;}if(ready!=null)temporaryVideoWaiters.computeIfAbsent(url,k->new ArrayList<>()).add(ready);if(temporaryVideoLoading.contains(url))return;temporaryVideoLoading.add(url);temporaryMediaExecutor.execute(()->{String result="";try{byte[] bytes=api.getBytesSync(url);if(bytes!=null&&bytes.length>0){File cached=new File(getCacheDir(),"temporary-view-"+Integer.toHexString(url.hashCode())+".video");try(FileOutputStream out=new FileOutputStream(cached)){out.write(bytes);}result=Uri.fromFile(cached).toString();}}catch(Exception ignored){}String loaded=result;main.post(()->{temporaryVideoLoading.remove(url);List<Runnable> waiters=temporaryVideoWaiters.remove(url);if(!loaded.isEmpty()){temporaryVideoFiles.put(url,loaded);try{attachment.put("localPreloadedUrl",loaded);}catch(Exception ignored){}if(waiters!=null)for(Runnable callback:waiters)callback.run();}});});}
     private void prefetchTemporaryMedia(){if(images==null)return;for(JSONObject message:messages){if(isMine(message))continue;JSONArray attachments=message.optJSONArray("attachments");JSONObject attachment=attachments!=null&&attachments.length()>0?attachments.optJSONObject(0):null;if(attachment==null||mediaViewMode(message,attachment)<=0)continue;String type=actualMediaType(message.optString("type"),attachment);if("image".equals(type))images.prefetch(attachment.optString("url"));else if("video".equals(type))preloadTemporaryVideo(attachment,null);}}
-    private void preloadLatestConversationPhotos(int generation,Runnable finished){java.util.LinkedHashSet<String> urls=new java.util.LinkedHashSet<>();for(int i=messages.size()-1;i>=0&&urls.size()<12;i--){JSONObject message=messages.get(i);JSONArray attachments=message.optJSONArray("attachments");JSONObject attachment=attachments!=null&&attachments.length()>0?attachments.optJSONObject(0):null;if(attachment==null||!"image".equals(actualMediaType(message.optString("type"),attachment)))continue;String mime=attachment.optString("mime","").toLowerCase(Locale.ROOT),name=attachment.optString("name","").toLowerCase(Locale.ROOT),url=displayMediaUrl(attachment);if(message.optBoolean("sticker")||attachment.optBoolean("sticker")||mime.contains("gif")||name.endsWith(".gif")||url.contains("giphy.com"))continue;if(!url.isEmpty())urls.add(url);}if(urls.isEmpty()){finished.run();return;}final int[] remaining={urls.size()};final boolean[] done={false};Runnable complete=()->{if(done[0]||generation!=conversationVisualGeneration)return;done[0]=true;finished.run();};for(String url:urls)images.prefetch(url,()->main.post(()->{if(generation!=conversationVisualGeneration||done[0])return;remaining[0]--;if(remaining[0]<=0)complete.run();}));main.postDelayed(complete,2200);}
-    private void revealInitialConversation(int generation){if(generation!=conversationVisualGeneration||activeConversation==null)return;conversationVisualsReady=true;if(conversationMediaLoading!=null)conversationMediaLoading.setVisibility(View.GONE);if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();scrollToAbsoluteBottom();}
-    private void applyMessages(JSONArray arr,boolean fromNetwork){if(arr==null)return;boolean keepBottom=conversationInitialScrollPending||isConversationAtBottom();List<JSONObject> previous=new ArrayList<>(messages),next=new ArrayList<>();Set<String> matched=new HashSet<>();for(int i=0;i<arr.length();i++){JSONObject incoming=arr.optJSONObject(i);if(incoming==null||incoming.optBoolean("deleted"))continue;JSONObject old=findPreviousMessage(previous,incoming),merged=old==null?incoming:mergeMessage(old,incoming);preserveLocalMediaPreview(old,merged);next.add(merged);if(old!=null)matched.add(old.optString("id")+"|"+old.optString("clientId"));}if(fromNetwork){long now=System.currentTimeMillis();for(JSONObject old:previous){String key=old.optString("id")+"|"+old.optString("clientId");if(matched.contains(key)||old.optBoolean("deleted"))continue;if(old.optBoolean("pending")||old.optLong("optimisticRetainUntil",0)>now)next.add(old);}}messages.clear();messages.addAll(next);prefetchTemporaryMedia();if(!conversationVisualsReady){if(conversationMediaLoading!=null)conversationMediaLoading.setVisibility(View.VISIBLE);if(!fromNetwork){preloadLatestConversationPhotos(conversationVisualGeneration,()->{});return;}int generation=++conversationVisualGeneration;preloadLatestConversationPhotos(generation,()->revealInitialConversation(generation));conversationInitialScrollPending=false;return;}if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();if(keepBottom)scrollToAbsoluteBottom();}if(fromNetwork)conversationInitialScrollPending=false;}
+    private void prefetchConversationWindow(int firstVisibleItem,int visibleItemCount){if(messageAdapter==null||messages.isEmpty())return;int headers=list==null?0:list.getHeaderViewsCount();int firstRow=Math.max(0,firstVisibleItem-headers-2),lastRow=Math.min(messageAdapter.getCount()-1,firstVisibleItem-headers+visibleItemCount+2);for(int row=firstRow;row<=lastRow;row++){int start=messageAdapter.messageIndexForRow(row),end=messageAdapter.messageEndForRow(row);for(int i=start;i<=end&&i>=0&&i<messages.size();i++)prefetchMessageThumbnail(messages.get(i));}}
+    private void prefetchConversationTail(){int start=Math.max(0,messages.size()-8);for(int i=messages.size()-1;i>=start;i--)prefetchMessageThumbnail(messages.get(i));}
+    private void prefetchMessageThumbnail(JSONObject message){if(message==null)return;JSONArray attachments=message.optJSONArray("attachments");JSONObject attachment=attachments!=null&&attachments.length()>0?attachments.optJSONObject(0):null;if(attachment==null||mediaViewMode(message,attachment)>0)return;String type=actualMediaType(message.optString("type"),attachment),url=displayMediaUrl(attachment);if("image".equals(type)){if(isStickerMessage(message))stickers.prefetch(url);else{int width=Math.min(dp(180),(int)(getResources().getDisplayMetrics().widthPixels*.52f));images.prefetch(url,width,stableMediaHeight(attachment,width,false));}}}
+    private void applyMessages(JSONArray arr,boolean fromNetwork){if(arr==null)return;boolean keepBottom=conversationInitialScrollPending||isConversationAtBottom();List<JSONObject> previous=new ArrayList<>(messages),next=new ArrayList<>();Set<String> matched=new HashSet<>();for(int i=0;i<arr.length();i++){JSONObject incoming=arr.optJSONObject(i);if(incoming==null||incoming.optBoolean("deleted"))continue;JSONObject old=findPreviousMessage(previous,incoming),merged=old==null?incoming:mergeMessage(old,incoming);preserveLocalMediaPreview(old,merged);next.add(merged);if(old!=null)matched.add(old.optString("id")+"|"+old.optString("clientId"));}if(fromNetwork){long now=System.currentTimeMillis();for(JSONObject old:previous){String key=old.optString("id")+"|"+old.optString("clientId");if(matched.contains(key)||old.optBoolean("deleted"))continue;if(old.optBoolean("pending")||old.optLong("optimisticRetainUntil",0)>now)next.add(old);}}messages.clear();messages.addAll(next);prefetchTemporaryMedia();prefetchConversationTail();if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();if(keepBottom)scrollToAbsoluteBottom();}conversationInitialScrollPending=false;}
     private void cacheMessagesNow(){if(activeConversation==null)return;try{cache.put("messages:"+activeConversation.optString("id"),new JSONObject().put("messages",new JSONArray(messages)).toString());}catch(Exception ignored){}}
 
     private void cacheIncomingMessage(String cid,JSONObject incoming,boolean allowAppend){
@@ -2715,34 +2712,21 @@ reactionsCard.animate().cancel();
             selectedVideos.clear();
             renderSelectedHolder[0].run();
 
-            for(int si=0;si<sendUris.size();si++){
-                final Uri sendUri=sendUris.get(si);
-                final boolean sendVideo=sendVideos.get(si);
-
-                new Thread(()->{
-                    try{
-                        String name=queryName(sendUri);
-                        String mime=getContentResolver().getType(sendUri);
-                        byte[] bytes=readAll(
-                            getContentResolver().openInputStream(sendUri)
-                        );
-
-                        if(bytes.length>27*1024*1024){
-                            main.post(()->toast("File is too large."));
-                            return;
-                        }
-
-                        main.post(()->uploadAttachment(
-                            bytes,
-                            name,
-                            mime==null?(sendVideo?"video/mp4":"image/jpeg"):mime,
-                            sendViewMode
-                        ));
-                    }catch(Exception ex){
-                        main.post(()->toast(ex.getMessage()));
-                    }
-                }).start();
-            }
+            new Thread(()->{
+                List<byte[]> batchBytes=new ArrayList<>();
+                List<String> batchNames=new ArrayList<>(),batchMimes=new ArrayList<>();
+                for(int si=0;si<sendUris.size();si++)try{
+                    Uri sendUri=sendUris.get(si);boolean sendVideo=sendVideos.get(si);
+                    String name=queryName(sendUri),mime=getContentResolver().getType(sendUri);
+                    byte[] bytes=readAll(getContentResolver().openInputStream(sendUri));
+                    if(bytes.length>27*1024*1024){main.post(()->toast("File is too large."));continue;}
+                    batchBytes.add(bytes);batchNames.add(name);batchMimes.add(mime==null?(sendVideo?"video/mp4":"image/jpeg"):mime);
+                }catch(Exception ex){main.post(()->toast(ex.getMessage()));}
+                main.post(()->{
+                    for(int i=0;i<batchBytes.size();i++)uploadAttachment(batchBytes.get(i),batchNames.get(i),batchMimes.get(i),sendViewMode,true);
+                    if(!batchBytes.isEmpty()){if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();scrollToAbsoluteBottom();}cacheMessagesNow();}
+                });
+            }).start();
 
             dismissInstagramMediaPicker(host);
         });
@@ -3481,7 +3465,8 @@ reactionsCard.animate().cancel();
     private void uploadAttachment(byte[] bytes,String name,String mime){uploadAttachment(bytes,name,mime,0);}
     private String markedMediaName(String name,int viewMode){String clean=name==null||name.trim().isEmpty()?"attachment":name.trim();clean=clean.replaceFirst("^__vm[12]__","");return viewMode==1?"__vm1__"+clean:viewMode==2?"__vm2__"+clean:clean;}
     private JSONObject buildOptimisticMedia(byte[] bytes,String storedName,String mime,String client,JSONObject reply,int viewMode){JSONObject temp=new JSONObject();try{String type=mime!=null&&mime.toLowerCase(Locale.ROOT).startsWith("video/")?"video":mime!=null&&mime.toLowerCase(Locale.ROOT).startsWith("image/")?"image":"file";File local=new File(getCacheDir(),"pending-"+client+"-"+storedName.replaceAll("[^A-Za-z0-9._-]","_"));try(FileOutputStream out=new FileOutputStream(local)){out.write(bytes);}JSONObject attachment=new JSONObject().put("url",Uri.fromFile(local).toString()).put("localPreviewUrl",Uri.fromFile(local).toString()).put("name",storedName).put("mime",mime==null?"application/octet-stream":mime).put("size",bytes.length).put("viewMode",viewMode).put("mediaViewMode",viewMode);if("image".equals(type)){BitmapFactory.Options bounds=new BitmapFactory.Options();bounds.inJustDecodeBounds=true;BitmapFactory.decodeByteArray(bytes,0,bytes.length,bounds);if(bounds.outWidth>0&&bounds.outHeight>0)attachment.put("width",bounds.outWidth).put("height",bounds.outHeight);}temp.put("id","tmp-"+System.nanoTime()).put("clientId",client).put("conversationId",activeConversation==null?"":activeConversation.optString("id")).put("senderId",selfId).put("type",type).put("body","").put("createdAt",new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX",Locale.US).format(new Date())).put("status","sending").put("pending",true).put("optimisticRetainUntil",System.currentTimeMillis()+30000L).put("viewMode",viewMode).put("mediaViewMode",viewMode).put("sender",new JSONObject().put("id",selfId).put("name","You").put("isSelf",true)).put("attachments",new JSONArray().put(attachment)).put("reactions",new JSONArray());if(reply!=null)temp.put("reply",new JSONObject().put("id",reply.optString("id")).put("body",reply.optString("body")).put("type",reply.optString("type","text")).put("senderName",senderName(reply)));}catch(Exception e){return null;}return temp;}
-    private void uploadAttachment(byte[] bytes,String name,String mime,int viewMode){if(activeConversation==null||bytes==null||bytes.length==0)return;int actualMode=Math.max(0,Math.min(2,viewMode));String cid=activeConversation.optString("id"),client="native-"+UUID.randomUUID(),storedName=markedMediaName(name,actualMode);JSONObject replyObj=replyTo;String reply=replyObj==null?"":replyObj.optString("id");JSONObject optimistic=buildOptimisticMedia(bytes,storedName,mime,client,replyObj,actualMode);if(optimistic!=null){messages.add(optimistic);if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();scrollToAbsoluteBottom();}cacheMessagesNow();}setReply(null);api.upload("/api/messaging/conversations/"+cid+"/attachment",bytes,storedName,mime,"",client,reply,actualMode,(json,error)->main.post(()->{if(error!=null){if(optimistic!=null)markOptimisticFailed(client);toast(error.getMessage());cacheMessagesNow();return;}JSONObject m=json.optJSONObject("message");if(m!=null){try{m.put("viewMode",actualMode).put("mediaViewMode",actualMode);JSONArray serverAttachments=m.optJSONArray("attachments");if(serverAttachments!=null&&serverAttachments.length()>0){JSONObject serverAttachment=serverAttachments.optJSONObject(0);if(serverAttachment!=null){serverAttachment.put("viewMode",actualMode).put("mediaViewMode",actualMode);if(serverAttachment.optString("name").isEmpty())serverAttachment.put("name",storedName);}}}catch(Exception ignored){}replaceOptimistic(client,m);cacheMessagesNow();refreshInbox();}}));}
+    private void uploadAttachment(byte[] bytes,String name,String mime,int viewMode){uploadAttachment(bytes,name,mime,viewMode,false);}
+    private void uploadAttachment(byte[] bytes,String name,String mime,int viewMode,boolean deferVisualRefresh){if(activeConversation==null||bytes==null||bytes.length==0)return;int actualMode=Math.max(0,Math.min(2,viewMode));String cid=activeConversation.optString("id"),client="native-"+UUID.randomUUID(),storedName=markedMediaName(name,actualMode);JSONObject replyObj=replyTo;String reply=replyObj==null?"":replyObj.optString("id");JSONObject optimistic=buildOptimisticMedia(bytes,storedName,mime,client,replyObj,actualMode);if(optimistic!=null){messages.add(optimistic);if(!deferVisualRefresh){if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();scrollToAbsoluteBottom();}cacheMessagesNow();}}setReply(null);api.upload("/api/messaging/conversations/"+cid+"/attachment",bytes,storedName,mime,"",client,reply,actualMode,(json,error)->main.post(()->{if(error!=null){if(optimistic!=null)markOptimisticFailed(client);toast(error.getMessage());cacheMessagesNow();return;}JSONObject m=json.optJSONObject("message");if(m!=null){try{m.put("viewMode",actualMode).put("mediaViewMode",actualMode);JSONArray serverAttachments=m.optJSONArray("attachments");if(serverAttachments!=null&&serverAttachments.length()>0){JSONObject serverAttachment=serverAttachments.optJSONObject(0);if(serverAttachment!=null){serverAttachment.put("viewMode",actualMode).put("mediaViewMode",actualMode);if(serverAttachment.optString("name").isEmpty())serverAttachment.put("name",storedName);}}}catch(Exception ignored){}replaceOptimistic(client,m);cacheMessagesNow();refreshInbox();}}));}
 
     private boolean isFingerOver(View target,float rawX,float rawY,int extraDp){if(target==null||target.getVisibility()!=View.VISIBLE)return false;int[] loc=new int[2];target.getLocationOnScreen(loc);float ex=dp(extraDp);return rawX>=loc[0]-ex&&rawX<=loc[0]+target.getWidth()+ex&&rawY>=loc[1]-ex&&rawY<=loc[1]+target.getHeight()+ex;}
     private void syncRecordGestureUi(float rawX,float rawY){
@@ -3757,7 +3742,7 @@ reactionsCard.animate().cancel();
         fallback.setBackgroundColor(Color.TRANSPARENT);
         fallback.setScaleX(1.14f);
         fallback.setScaleY(1.14f);
-        box.addView(fallback,new FrameLayout.LayoutParams(-1,-1));
+        box.addView(fallback,new FrameLayout.LayoutParams(dp(size),dp(size)));
 
         if(url!=null&&!url.isEmpty()&&!"null".equalsIgnoreCase(url)){
             ImageView im=new ImageView(this);
@@ -3765,7 +3750,7 @@ reactionsCard.animate().cancel();
             im.setBackgroundColor(Color.TRANSPARENT);
             im.setScaleX(1.085f);
             im.setScaleY(1.085f);
-            box.addView(im,new FrameLayout.LayoutParams(-1,-1));
+            box.addView(im,new FrameLayout.LayoutParams(dp(size),dp(size)));
             images.load(url,im);
         }
         return box;
@@ -4471,9 +4456,24 @@ reactionsCard.animate().cancel();
         });
     }
 
-    private final class MessageAdapter extends BaseAdapter{public int getCount(){return conversationVisualsReady?messages.size():0;}public Object getItem(int p){return messages.get(p);}public boolean hasStableIds(){return true;}public long getItemId(int p){JSONObject message=messages.get(p);String key=message.optString("clientId","");if(key.isEmpty())key=message.optString("id",String.valueOf(p));return key.hashCode()&0xffffffffL;}
+    private JSONObject mediaStackAttachment(JSONObject message){JSONArray attachments=message==null?null:message.optJSONArray("attachments");return attachments!=null&&attachments.length()>0?attachments.optJSONObject(0):null;}
+    private boolean isMediaStackCandidate(JSONObject message){JSONObject attachment=mediaStackAttachment(message);if(attachment==null||mediaViewMode(message,attachment)>0||isStickerMessage(message))return false;String type=actualMediaType(message.optString("type"),attachment);return "image".equals(type)||"video".equals(type);}
+    private String mediaStackSender(JSONObject message){if(isMine(message))return "self";String senderId=message.optString("senderId","");JSONObject sender=message.optJSONObject("sender");if(senderId.isEmpty()&&sender!=null)senderId=sender.optString("id","");return senderId.isEmpty()?senderName(message):senderId;}
+    private boolean sameMediaStack(JSONObject previous,JSONObject current){if(!isMediaStackCandidate(previous)||!isMediaStackCandidate(current)||!mediaStackSender(previous).equals(mediaStackSender(current)))return false;Date a=parseDate(previous.optString("createdAt")),b=parseDate(current.optString("createdAt"));return a!=null&&b!=null&&Math.abs(b.getTime()-a.getTime())<=90000L;}
+    private View buildMediaStackRow(int start,int end){JSONObject last=messages.get(end);boolean mine=isMine(last);LinearLayout outer=new LinearLayout(this);outer.setOrientation(LinearLayout.VERTICAL);if(needsStamp(start)){TextView stamp=text(clusterStamp(messages.get(start).optString("createdAt")),11,Color.rgb(138,141,145),Typeface.NORMAL);stamp.setGravity(Gravity.CENTER);LinearLayout.LayoutParams slp=new LinearLayout.LayoutParams(-1,dp(31));slp.topMargin=dp(7);slp.bottomMargin=dp(2);outer.addView(stamp,slp);}LinearLayout row=new LinearLayout(this);row.setGravity(mine?Gravity.END|Gravity.BOTTOM:Gravity.START|Gravity.BOTTOM);LinearLayout.LayoutParams rowLp=new LinearLayout.LayoutParams(-1,-2);rowLp.leftMargin=dp(10);rowLp.rightMargin=dp(10);rowLp.topMargin=dp(4);rowLp.bottomMargin=dp(5);outer.addView(row,rowLp);if(!mine){View avatar=buildUserAvatar(senderAvatar(last),senderName(last),30);LinearLayout.LayoutParams avatarLp=new LinearLayout.LayoutParams(dp(30),dp(30));avatarLp.rightMargin=dp(6);row.addView(avatar,avatarLp);}LinearLayout column=new LinearLayout(this);column.setOrientation(LinearLayout.VERTICAL);column.setGravity(mine?Gravity.END:Gravity.START);row.addView(column,new LinearLayout.LayoutParams(-2,-2));int count=end-start+1,photos=0,videos=0;for(int i=start;i<=end;i++){JSONObject attachment=mediaStackAttachment(messages.get(i));String type=actualMediaType(messages.get(i).optString("type"),attachment);if("video".equals(type))videos++;else photos++;}String kind=photos>0&&videos>0?"photos and videos":videos==count?(count==1?"video":"videos"):(count==1?"photo":"photos");TextView label=text((mine?"You":senderName(last))+" sent "+count+" "+kind,12.5f,Color.rgb(138,141,145),Typeface.NORMAL);label.setGravity(mine?Gravity.END:Gravity.START);LinearLayout.LayoutParams labelLp=new LinearLayout.LayoutParams(dp(196),dp(27));column.addView(label,labelLp);FrameLayout deck=new FrameLayout(this);column.addView(deck,new LinearLayout.LayoutParams(dp(196),dp(181)));int shown=Math.min(3,count),first=end-shown+1;for(int i=first;i<=end;i++){int layer=i-first;JSONObject message=messages.get(i),attachment=mediaStackAttachment(message);String type=actualMediaType(message.optString("type"),attachment);FrameLayout card=new FrameLayout(this);card.setPadding(dp(3),dp(3),dp(3),dp(3));card.setBackground(bg(Color.WHITE,14));card.setElevation(dp(2+layer));FrameLayout.LayoutParams cardLp=new FrameLayout.LayoutParams(dp(148),dp(158));int shift=layer*10;if(mine)cardLp.leftMargin=dp(24+shift);else cardLp.leftMargin=dp(4+shift);cardLp.topMargin=dp(12-layer*3);deck.addView(card,cardLp);card.setRotation(layer==shown-1?0f:(layer%2==0?-7f:6f));ImageView media=new ImageView(this);media.setScaleType(ImageView.ScaleType.CENTER_CROP);media.setBackground(bg(Color.rgb(20,20,20),11));media.setClipToOutline(true);FrameLayout.LayoutParams mediaLp=new FrameLayout.LayoutParams(dp(142),dp(152));card.addView(media,mediaLp);if("image".equals(type))images.load(displayMediaUrl(attachment),media);else{String poster=attachment.optString("thumbnailUrl",attachment.optString("previewUrl",attachment.optString("posterUrl","")));if(!poster.isEmpty())images.load(poster,media);TextView play=text("▶",27,Color.WHITE,Typeface.BOLD);play.setGravity(Gravity.CENTER);play.setShadowLayer(dp(2),0,dp(1),Color.BLACK);card.addView(play,new FrameLayout.LayoutParams(-1,-1));}card.setOnClickListener(v->{if("video".equals(type))showVideoMediaViewer(message,attachment);else showMediaViewer(message,attachment);});}boolean pending=false;for(int i=start;i<=end;i++)if(messages.get(i).optBoolean("pending")){pending=true;break;}if(pending){TextView sending=text("Sending…",10.5f,Color.rgb(138,141,145),Typeface.NORMAL);sending.setGravity(mine?Gravity.END:Gravity.START);column.addView(sending,new LinearLayout.LayoutParams(dp(196),dp(18)));}else if(mine&&end==messages.size()-1){String state=status(last);if(!state.isEmpty()){TextView sent=text(state,11.5f,Color.rgb(138,141,145),Typeface.NORMAL);sent.setGravity(Gravity.END);column.addView(sent,new LinearLayout.LayoutParams(dp(196),dp(19)));}}deck.setOnLongClickListener(v->{showMessageActions(last,deck);return true;});return outer;}
+
+    private final class MessageAdapter extends BaseAdapter{
+        private final List<int[]> rows=new ArrayList<>();
+        private int rowMessageCount=-1;
+        private void rebuildRows(){rows.clear();for(int start=0;start<messages.size();){int end=start;if(isMediaStackCandidate(messages.get(start)))while(end+1<messages.size()&&sameMediaStack(messages.get(end),messages.get(end+1)))end++;rows.add(new int[]{start,end});start=end+1;}rowMessageCount=messages.size();}
+        private void ensureRows(){if(rowMessageCount!=messages.size())rebuildRows();}
+        @Override public void notifyDataSetChanged(){rebuildRows();super.notifyDataSetChanged();}
+        int messageIndexForRow(int row){ensureRows();return row>=0&&row<rows.size()?rows.get(row)[0]:-1;}
+        int messageEndForRow(int row){ensureRows();return row>=0&&row<rows.size()?rows.get(row)[1]:-1;}
+        int rowForMessageIndex(int index){ensureRows();for(int i=0;i<rows.size();i++)if(index>=rows.get(i)[0]&&index<=rows.get(i)[1])return i;return Math.max(0,Math.min(index,rows.size()-1));}
+        public int getCount(){ensureRows();return rows.size();}public Object getItem(int p){int index=messageIndexForRow(p);return index>=0?messages.get(index):null;}public boolean hasStableIds(){return true;}public long getItemId(int p){int start=messageIndexForRow(p),end=messageEndForRow(p);if(start<0)return p;JSONObject message=messages.get(start);String key=message.optString("clientId","");if(key.isEmpty())key=message.optString("id",String.valueOf(start));if(end>start)key+="|"+messages.get(end).optString("id",String.valueOf(end));return key.hashCode()&0xffffffffL;}
         private int lastMineIndex(){for(int i=messages.size()-1;i>=0;i--)if(isMine(messages.get(i))&&!messages.get(i).optBoolean("pending"))return i;return-1;}
-        public View getView(int p,View cv,ViewGroup parent){JSONObject m=messages.get(p);LinearLayout outer=new LinearLayout(MainActivity.this);outer.setOrientation(LinearLayout.VERTICAL);if(needsStamp(p)){TextView stamp=text(clusterStamp(m.optString("createdAt")),11,Color.rgb(138,141,145),Typeface.NORMAL);stamp.setGravity(Gravity.CENTER);LinearLayout.LayoutParams slp=new LinearLayout.LayoutParams(-1,dp(31));slp.topMargin=dp(7);slp.bottomMargin=dp(2);outer.addView(stamp,slp);}if("system".equals(m.optString("type"))){TextView sys=text(m.optString("body"),12,Color.rgb(138,141,145),Typeface.NORMAL);sys.setGravity(Gravity.CENTER);sys.setPadding(dp(25),dp(8),dp(25),dp(8));outer.addView(sys,new LinearLayout.LayoutParams(-1,-2));return outer;}boolean mine=isMine(m),samePrev=p>0&&sameBurst(messages.get(p-1),m),sameNext=p+1<messages.size()&&sameBurst(m,messages.get(p+1));
+        public View getView(int rowPosition,View cv,ViewGroup parent){int p=messageIndexForRow(rowPosition),groupEnd=messageEndForRow(rowPosition);if(p<0)return new Space(MainActivity.this);if(groupEnd>p)return buildMediaStackRow(p,groupEnd);JSONObject m=messages.get(p);LinearLayout outer=new LinearLayout(MainActivity.this);outer.setOrientation(LinearLayout.VERTICAL);if(needsStamp(p)){TextView stamp=text(clusterStamp(m.optString("createdAt")),11,Color.rgb(138,141,145),Typeface.NORMAL);stamp.setGravity(Gravity.CENTER);LinearLayout.LayoutParams slp=new LinearLayout.LayoutParams(-1,dp(31));slp.topMargin=dp(7);slp.bottomMargin=dp(2);outer.addView(stamp,slp);}if("system".equals(m.optString("type"))){TextView sys=text(m.optString("body"),12,Color.rgb(138,141,145),Typeface.NORMAL);sys.setGravity(Gravity.CENTER);sys.setPadding(dp(25),dp(8),dp(25),dp(8));outer.addView(sys,new LinearLayout.LayoutParams(-1,-2));return outer;}boolean mine=isMine(m),samePrev=p>0&&sameBurst(messages.get(p-1),m),sameNext=p+1<messages.size()&&sameBurst(m,messages.get(p+1));
 
             FrameLayout swipeHost=new FrameLayout(MainActivity.this);
             swipeHost.setClipChildren(false);
@@ -4900,7 +4900,8 @@ reactionsCard.animate().cancel();
         int childCount=list.getChildCount();
         for(int child=0;child<childCount;child++){
             int adapterPosition=firstVisible+child;
-            int messageIndex=adapterPosition-headers;
+            int rowIndex=adapterPosition-headers;
+            int messageIndex=messageAdapter==null?-1:messageAdapter.messageIndexForRow(rowIndex);
 
             if(messageIndex>=0&&messageIndex<messages.size()){
                 String id=messages.get(messageIndex).optString("id","");
@@ -4990,8 +4991,8 @@ reactionsCard.animate().cancel();
                 if(!stableAnchorId.isEmpty()){
                     int newIndex=findMessageIndex(stableAnchorId);
                     if(newIndex>=0){
-                        targetPosition=
-                            newIndex+list.getHeaderViewsCount();
+                        int newRow=messageAdapter==null?newIndex:messageAdapter.rowForMessageIndex(newIndex);
+                        targetPosition=newRow+list.getHeaderViewsCount();
                     }
                 }else if(fallbackPosition>=0){
                     targetPosition=fallbackPosition+added;
@@ -5029,7 +5030,8 @@ reactionsCard.animate().cancel();
     private void animateMessageTarget(int messageIndex){
         if(list==null)return;
 
-        int position=messageIndex+list.getHeaderViewsCount();
+        int rowIndex=messageAdapter==null?messageIndex:messageAdapter.rowForMessageIndex(messageIndex);
+        int position=rowIndex+list.getHeaderViewsCount();
 
         // ListView smoothScrollToPositionFromTop can overshoot a distant item
         // and then correct backward. Position it exactly once instead.
