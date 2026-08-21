@@ -18,6 +18,8 @@ final class ImageLoader {
     private final ApiClient api;
     private final File dir;
     private final ExecutorService executor = Executors.newFixedThreadPool(3);
+    private final java.util.Set<String> prefetching = new java.util.HashSet<>();
+    private final java.util.Map<String, java.util.List<Runnable>> prefetchWaiters = new java.util.HashMap<>();
     private final LruCache<String, Bitmap> memory = new LruCache<String, Bitmap>(24 * 1024 * 1024) {
         @Override protected int sizeOf(String key, Bitmap value) { return value.getByteCount(); }
     };
@@ -48,8 +50,32 @@ final class ImageLoader {
     }
 
     void prefetch(String url) {
-        if (url == null || url.isEmpty() || memory.get(url) != null) return;
-        executor.execute(() -> { try { fetch(url); } catch (Exception ignored) {} });
+        prefetch(url, null);
+    }
+
+    void prefetch(String url, Runnable ready) {
+        if (url == null || url.isEmpty()) return;
+        if (isReady(url)) { if (ready != null) ready.run(); return; }
+        synchronized (prefetchWaiters) {
+            if (ready != null) prefetchWaiters.computeIfAbsent(url, k -> new java.util.ArrayList<>()).add(ready);
+            if (prefetching.contains(url)) return;
+            prefetching.add(url);
+        }
+        executor.execute(() -> {
+            boolean loaded=false;
+            try { loaded=fetch(url) != null; } catch (Exception ignored) {}
+            java.util.List<Runnable> callbacks;
+            synchronized (prefetchWaiters) {
+                prefetching.remove(url);
+                callbacks=prefetchWaiters.remove(url);
+            }
+            if (loaded && callbacks != null) for (Runnable callback:callbacks) callback.run();
+        });
+    }
+
+    boolean isReady(String url) {
+        if (url == null || url.isEmpty()) return false;
+        return memory.get(url) != null;
     }
 
     private Bitmap fetch(String url) throws Exception {
