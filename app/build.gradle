@@ -8,8 +8,8 @@ android {
         applicationId 'com.facebook.messengerclone'
         minSdk 24
         targetSdk 35
-        versionCode 169
-        versionName '1.68-ephemeral-media-optimistic-send'
+        versionCode 170
+        versionName '1.69-ephemeral-media-polish'
         buildConfigField 'String', 'BASE_URL', '"https://messengerextra.duckdns.org"'
     }
 
