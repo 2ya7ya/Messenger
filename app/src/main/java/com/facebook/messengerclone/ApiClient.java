@@ -88,7 +88,7 @@ final class ApiClient {
     private void execute(Request req, JsonCallback cb) {
         http.newCall(req).enqueue(new Callback() {
             @Override public void onFailure(Call call, IOException e) { cb.done(null, e); }
-            @Override public void onResponse(Call call, Response response) { try(response){ String text=response.body()==null?"{}":response.body().string(); JSONObject json=new JSONObject(text.isEmpty()?"{}":text); if(response.code()==401||(response.code()==403&&json.optString("error").toLowerCase().contains("sign")))clearSession(); if(!response.isSuccessful())cb.done(json,new IOException(json.optString("error","Request failed"))); else cb.done(json,null); }catch(Exception e){cb.done(null,e);} }
+            @Override public void onResponse(Call call, Response response) { try(response){ String text=response.body()==null?"{}":response.body().string();JSONObject json;try{json=new JSONObject(text.isEmpty()?"{}":text);}catch(Exception invalidJson){cb.done(null,new IOException(response.isSuccessful()?"The server returned an invalid response.":"Request failed"));return;}if(response.code()==401||(response.code()==403&&json.optString("error").toLowerCase().contains("sign")))clearSession();if(!response.isSuccessful())cb.done(json,new IOException(json.optString("error","Request failed")));else cb.done(json,null); }catch(Exception e){cb.done(null,new IOException("Request failed"));} }
         });
     }
 

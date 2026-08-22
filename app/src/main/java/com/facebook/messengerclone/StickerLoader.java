@@ -15,14 +15,16 @@ import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.PriorityBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 final class StickerLoader {
     private final ApiClient api;
     private final File dir;
-    private final ExecutorService visibleExecutor=Executors.newFixedThreadPool(2);
-    private final ExecutorService prefetchExecutor=Executors.newSingleThreadExecutor();
+    private final AtomicLong taskOrder=new AtomicLong();
+    private final ThreadPoolExecutor loaderExecutor=new ThreadPoolExecutor(1,1,20L,TimeUnit.SECONDS,new PriorityBlockingQueue<>());
     private final Map<String,Object> locks=new ConcurrentHashMap<>();
     private final LruCache<String,byte[]> memory=new LruCache<String,byte[]>(12*1024*1024){
         @Override protected int sizeOf(String key,byte[] value){return value==null?0:value.length;}
@@ -32,7 +34,11 @@ final class StickerLoader {
         this.api=api;
         dir=new File(context.getCacheDir(),"messenger_stickers");
         if(!dir.exists())dir.mkdirs();
+        loaderExecutor.allowCoreThreadTimeOut(true);
     }
+
+    private final class PriorityTask implements Runnable,Comparable<PriorityTask>{final int priority;final long order;final Runnable action;PriorityTask(int p,Runnable r){priority=p;order=taskOrder.getAndIncrement();action=r;}public void run(){action.run();}public int compareTo(PriorityTask other){int byPriority=Integer.compare(priority,other.priority);return byPriority!=0?byPriority:Long.compare(order,other.order);}}
+    private void submit(int priority,Runnable action){loaderExecutor.execute(new PriorityTask(priority,action));}
 
     byte[] getCachedOrFetch(String url)throws Exception{
         byte[] cached=memory.get(url);
@@ -59,7 +65,7 @@ final class StickerLoader {
 
     void prefetch(String url){
         if(url==null||url.isEmpty()||memory.get(url)!=null)return;
-        prefetchExecutor.execute(()->{try{getCachedOrFetch(url);}catch(Exception ignored){}});
+        submit(10,()->{try{getCachedOrFetch(url);}catch(Exception ignored){}});
     }
 
     void load(String url,ImageView view){load(url,view,null);}
@@ -68,7 +74,7 @@ final class StickerLoader {
         view.setTag(url);
         view.setBackgroundColor(android.graphics.Color.TRANSPARENT);
         if(url==null||url.isEmpty()){view.setImageDrawable(null);if(ready!=null)view.post(ready);return;}
-        visibleExecutor.execute(()->{
+        submit(0,()->{
             try{
                 byte[] bytes=getCachedOrFetch(url);
                 if(bytes==null||bytes.length==0)return;
