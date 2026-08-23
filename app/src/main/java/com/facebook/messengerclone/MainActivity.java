@@ -93,7 +93,7 @@ public class MainActivity extends Activity {
     private static final long BURST_MS=5*60*1000L, STAMP_MS=15*60*1000L;
     private final Handler main=new Handler(Looper.getMainLooper());
     private ApiClient api; private MessengerCache cache; private ImageLoader images; private StickerLoader stickers; private WebSocket socket;
-    private FrameLayout root; private ListView list; private View olderMessagesLoaderRow; private OlderMessagesSpinner olderMessagesSpinner; private BaseAdapter inboxAdapter; private MessageAdapter messageAdapter;
+    private FrameLayout root; private ListView list; private View olderMessagesLoaderRow; private OlderMessagesSpinner olderMessagesSpinner,searchTargetSpinner; private BaseAdapter inboxAdapter; private MessageAdapter messageAdapter;
     private final List<JSONObject> inbox=new ArrayList<>(), filteredInbox=new ArrayList<>(), messages=new ArrayList<>();
     private final List<JSONObject> socketMessageBatch=new ArrayList<>();
     private final Set<String> typingConversations=new HashSet<>();
@@ -108,7 +108,9 @@ public class MainActivity extends Activity {
     private final Set<String> temporaryVideoLoading=new HashSet<>();
     private final ExecutorService temporaryMediaExecutor=Executors.newFixedThreadPool(2);
     private JSONObject activeConversation, replyTo; private EditText searchBox, messageInput; private TextView typingView; private LinearLayout replyBar, composer, recordBar;
-    private int socketRetry=0; private boolean socketConnecting=false; private int inboxSearchRequest=0; private Runnable inboxSearchTask; private String inboxMessageSearchQuery=""; private boolean refreshingInbox=false,inboxRefreshQueued=false,inboxDedicatedSearch=false;
+    private int socketRetry=0; private boolean socketConnecting=false; private int inboxSearchRequest=0; private Runnable inboxSearchTask; private String inboxMessageSearchQuery=""; private boolean refreshingInbox=false,inboxRefreshQueued=false,inboxDedicatedSearch=false,showingInboxSearchPage=false,conversationOpenedFromInboxSearch=false;
+    private int inboxSearchScrollPosition=0;
+    private String pendingSearchTargetMessageId="";
     private static final String COMMENT_STICKER_API_KEY="PvlaAZvthRs8jWekpX4blV5ORIDrykTm";
     private final Runnable socketReconnect=()->{ if(api!=null&&api.hasSession()) connectSocket(); };
     private ImageButton sendButton, micButton; private String selfId=""; private boolean refreshingMessages=false;
@@ -156,7 +158,8 @@ public class MainActivity extends Activity {
                 return;
             }
         }
-        if(activeConversation!=null)showInbox(false);
+        if(activeConversation!=null)leaveActiveConversation();
+        else if(showingInboxSearchPage)showInbox(false);
         else super.onBackPressed();
     }
 
@@ -184,11 +187,99 @@ public class MainActivity extends Activity {
 
     private void showLogin(){root.removeAllViews();activeConversation=null;LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setGravity(Gravity.CENTER_HORIZONTAL);box.setPadding(dp(26),dp(52),dp(26),dp(24));root.addView(box,new FrameLayout.LayoutParams(-1,-1));TextView logo=text("Messenger",31,BLUE,Typeface.BOLD);logo.setGravity(Gravity.CENTER);box.addView(logo,new LinearLayout.LayoutParams(-1,dp(90)));EditText id=new EditText(this);id.setHint("Mobile number or email");id.setSingleLine(true);id.setTextSize(16);id.setPadding(dp(14),0,dp(14),0);id.setBackground(bg(LIGHT,12));box.addView(id,new LinearLayout.LayoutParams(-1,dp(52)));Space sp=new Space(this);box.addView(sp,new LinearLayout.LayoutParams(1,dp(12)));EditText pass=new EditText(this);pass.setHint("Password");pass.setSingleLine(true);pass.setInputType(0x81);pass.setTextSize(16);pass.setPadding(dp(14),0,dp(14),0);pass.setBackground(bg(LIGHT,12));box.addView(pass,new LinearLayout.LayoutParams(-1,dp(52)));Button login=new Button(this);login.setText("Log in");login.setTextColor(Color.WHITE);login.setTextSize(16);login.setTypeface(Typeface.DEFAULT,Typeface.BOLD);login.setBackground(bg(BLUE,24));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(48));lp.topMargin=dp(16);box.addView(login,lp);ProgressBar p=new ProgressBar(this);p.setVisibility(View.GONE);box.addView(p,new LinearLayout.LayoutParams(dp(48),dp(38)));login.setOnClickListener(v->{String a=id.getText().toString().trim(),b=pass.getText().toString();if(a.isEmpty()||b.isEmpty()){toast("Enter your login details.");return;}login.setEnabled(false);p.setVisibility(View.VISIBLE);api.login(a,b,(json,error)->main.post(()->{login.setEnabled(true);p.setVisibility(View.GONE);if(error!=null){toast(error.getMessage());return;}showInbox(true);}));});}
 
-    private void showInbox(boolean initial){inboxDedicatedSearch=false;activeConversation=null;replyTo=null;getWindow().setStatusBarColor(Color.WHITE);getWindow().setNavigationBarColor(Color.WHITE);getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setBackgroundColor(Color.WHITE);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(15),0,dp(12),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(58)));TextView title=text("Chats",25,TEXT,Typeface.BOLD);head.addView(title,new LinearLayout.LayoutParams(0,-1,1));ImageButton search=icon(R.drawable.ic_msg_search,40,TEXT);head.addView(search);ImageButton plus=icon(R.drawable.ic_msg_edit,40,TEXT);head.addView(plus);
+    private void showInbox(boolean initial){inboxDedicatedSearch=false;showingInboxSearchPage=false;conversationOpenedFromInboxSearch=false;pendingSearchTargetMessageId="";activeConversation=null;replyTo=null;getWindow().setStatusBarColor(Color.WHITE);getWindow().setNavigationBarColor(Color.WHITE);getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setBackgroundColor(Color.WHITE);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(15),0,dp(12),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(58)));TextView title=text("Chats",25,TEXT,Typeface.BOLD);head.addView(title,new LinearLayout.LayoutParams(0,-1,1));ImageButton search=icon(R.drawable.ic_msg_search,40,TEXT);head.addView(search);ImageButton plus=icon(R.drawable.ic_msg_plus,40,TEXT);head.addView(plus);
         searchBox=new EditText(this);searchBox.setSingleLine(true);searchBox.setHint("Search");searchBox.setHintTextColor(Color.rgb(101,103,107));searchBox.setTextSize(14.5f);searchBox.setTextColor(TEXT);android.graphics.drawable.Drawable searchGlyph=getDrawable(R.drawable.ic_msg_search);if(searchGlyph!=null){searchGlyph=searchGlyph.mutate();searchGlyph.setTint(Color.rgb(101,103,107));searchGlyph.setBounds(0,0,dp(17),dp(17));searchBox.setCompoundDrawables(searchGlyph,null,null,null);searchBox.setCompoundDrawablePadding(dp(8));}searchBox.setPadding(dp(12),0,dp(12),0);searchBox.setBackground(bg(LIGHT,18));LinearLayout.LayoutParams sl=new LinearLayout.LayoutParams(-1,dp(34));sl.setMargins(dp(12),dp(5),dp(12),dp(4));page.addView(searchBox,sl);list=new ListView(this);list.setDivider(null);list.setSelector(android.R.color.transparent);list.setVerticalScrollBarEnabled(false);list.setPadding(dp(8),dp(2),dp(8),dp(90));list.setClipToPadding(false);page.addView(list,new LinearLayout.LayoutParams(-1,0,1));inboxAdapter=new InboxAdapter();list.setAdapter(inboxAdapter);list.setOnItemClickListener((p,v,pos,id)->openConversation(filteredInbox.get(pos)));
-        ImageButton fab=icon(R.drawable.ic_msg_plus,54,Color.WHITE);fab.setPadding(dp(14),dp(14),dp(14),dp(14));fab.setBackground(bg(BLUE,30));FrameLayout.LayoutParams fp=new FrameLayout.LayoutParams(dp(54),dp(54),Gravity.END|Gravity.BOTTOM);fp.setMargins(0,0,dp(18),dp(22));root.addView(fab,fp);plus.setOnClickListener(v->showContacts());fab.setOnClickListener(v->showContacts());search.setOnClickListener(v->{inboxDedicatedSearch=true;showInboxSearchPage();});wireInboxSearchBox(searchBox);loadCachedInbox();refreshInbox();connectSocket();}
+        ImageButton fab=icon(R.drawable.ic_msg_plus,54,Color.WHITE);fab.setPadding(dp(14),dp(14),dp(14),dp(14));fab.setBackground(bg(BLUE,30));FrameLayout.LayoutParams fp=new FrameLayout.LayoutParams(dp(54),dp(54),Gravity.END|Gravity.BOTTOM);fp.setMargins(0,0,dp(18),dp(22));root.addView(fab,fp);plus.setOnClickListener(v->showContacts());fab.setOnClickListener(v->showContacts());search.setOnClickListener(v->showInboxSearchPage(false));wireInboxSearchBox(searchBox);loadCachedInbox();refreshInbox();connectSocket();}
     private void wireInboxSearchBox(EditText field){field.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int b,int c){String query=s.toString();inboxMessageSearchQuery=query.trim().toLowerCase(Locale.ROOT);inboxMessageSearchMatches.clear();inboxMessageSearchResults.clear();filterInbox(query);if(inboxSearchTask!=null)main.removeCallbacks(inboxSearchTask);int request=++inboxSearchRequest;if(query.trim().isEmpty())return;inboxSearchTask=()->searchAllConversationMessagesV2(query,request);main.postDelayed(inboxSearchTask,240);}public void afterTextChanged(Editable e){}});}
-    private void showInboxSearchPage(){activeConversation=null;replyTo=null;getWindow().setStatusBarColor(Color.WHITE);getWindow().setNavigationBarColor(Color.WHITE);getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(8),0,dp(12),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(56)));ImageButton back=icon(R.drawable.ic_msg_back,40,TEXT);head.addView(back);back.setOnClickListener(v->showInbox(false));TextView title=text("Search",20,TEXT,Typeface.BOLD);head.addView(title,new LinearLayout.LayoutParams(0,-1,1));searchBox=new EditText(this);searchBox.setSingleLine(true);searchBox.setHint("Search");searchBox.setHintTextColor(SUB);searchBox.setTextColor(TEXT);searchBox.setTextSize(14.5f);android.graphics.drawable.Drawable glyph=getDrawable(R.drawable.ic_msg_search);if(glyph!=null){glyph=glyph.mutate();glyph.setTint(SUB);glyph.setBounds(0,0,dp(17),dp(17));searchBox.setCompoundDrawables(glyph,null,null,null);searchBox.setCompoundDrawablePadding(dp(8));}searchBox.setPadding(dp(12),0,dp(12),0);searchBox.setBackground(bg(LIGHT,18));LinearLayout.LayoutParams searchParams=new LinearLayout.LayoutParams(-1,dp(34));searchParams.setMargins(dp(12),dp(3),dp(12),dp(6));page.addView(searchBox,searchParams);list=new ListView(this);list.setDivider(null);list.setSelector(android.R.color.transparent);list.setVerticalScrollBarEnabled(false);list.setPadding(dp(8),dp(2),dp(8),dp(18));list.setClipToPadding(false);page.addView(list,new LinearLayout.LayoutParams(-1,0,1));inboxAdapter=new InboxAdapter();list.setAdapter(inboxAdapter);list.setOnItemClickListener((p,v,pos,id)->openConversation(filteredInbox.get(pos)));wireInboxSearchBox(searchBox);loadCachedInbox();refreshInbox();searchBox.requestFocus();main.postDelayed(()->{InputMethodManager imm=(InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);if(imm!=null)imm.showSoftInput(searchBox,InputMethodManager.SHOW_IMPLICIT);},120);}
+    private void showInboxSearchPage(boolean restore){
+        inboxDedicatedSearch=true;
+        showingInboxSearchPage=true;
+        activeConversation=null;
+        replyTo=null;
+        if(!restore){
+            conversationOpenedFromInboxSearch=false;
+            pendingSearchTargetMessageId="";
+            inboxSearchScrollPosition=0;
+            inboxMessageSearchQuery="";
+            inboxMessageSearchMatches.clear();
+            inboxMessageSearchResults.clear();
+        }
+        getWindow().setStatusBarColor(Color.WHITE);
+        getWindow().setNavigationBarColor(Color.WHITE);
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+        root.removeAllViews();
+        LinearLayout page=new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setBackgroundColor(Color.WHITE);
+        root.addView(page,new FrameLayout.LayoutParams(-1,-1));
+        LinearLayout head=new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.setPadding(dp(8),0,dp(12),0);
+        page.addView(head,new LinearLayout.LayoutParams(-1,dp(56)));
+        ImageButton back=icon(R.drawable.ic_msg_back,40,TEXT);
+        head.addView(back);
+        back.setOnClickListener(v->showInbox(false));
+        TextView title=text("Search",20,TEXT,Typeface.BOLD);
+        head.addView(title,new LinearLayout.LayoutParams(0,-1,1));
+        searchBox=new EditText(this);
+        searchBox.setSingleLine(true);
+        searchBox.setHint("Search");
+        searchBox.setHintTextColor(SUB);
+        searchBox.setTextColor(TEXT);
+        searchBox.setTextSize(14.5f);
+        android.graphics.drawable.Drawable glyph=getDrawable(R.drawable.ic_msg_search);
+        if(glyph!=null){
+            glyph=glyph.mutate();
+            glyph.setTint(SUB);
+            glyph.setBounds(0,0,dp(17),dp(17));
+            searchBox.setCompoundDrawables(glyph,null,null,null);
+            searchBox.setCompoundDrawablePadding(dp(8));
+        }
+        searchBox.setPadding(dp(12),0,dp(12),0);
+        searchBox.setBackground(bg(LIGHT,18));
+        if(restore&&!inboxMessageSearchQuery.isEmpty()){
+            searchBox.setText(inboxMessageSearchQuery);
+            searchBox.setSelection(searchBox.length());
+        }
+        LinearLayout.LayoutParams searchParams=new LinearLayout.LayoutParams(-1,dp(34));
+        searchParams.setMargins(dp(12),dp(3),dp(12),dp(6));
+        page.addView(searchBox,searchParams);
+        list=new ListView(this);
+        list.setDivider(null);
+        list.setSelector(android.R.color.transparent);
+        list.setVerticalScrollBarEnabled(false);
+        list.setPadding(dp(8),dp(2),dp(8),dp(18));
+        list.setClipToPadding(false);
+        page.addView(list,new LinearLayout.LayoutParams(-1,0,1));
+        inboxAdapter=new InboxAdapter();
+        list.setAdapter(inboxAdapter);
+        list.setOnItemClickListener((p,v,pos,id)->{
+            if(pos<filteredInbox.size())openConversation(filteredInbox.get(pos));
+        });
+        wireInboxSearchBox(searchBox);
+        if(restore){
+            filterInbox(inboxMessageSearchQuery);
+            list.post(()->list.setSelection(Math.min(inboxSearchScrollPosition,Math.max(0,list.getCount()-1))));
+        }else{
+            loadCachedInbox();
+            refreshInbox();
+            searchBox.requestFocus();
+            main.postDelayed(()->{
+                InputMethodManager imm=(InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
+                if(imm!=null)imm.showSoftInput(searchBox,InputMethodManager.SHOW_IMPLICIT);
+            },120);
+        }
+    }
+    private void leaveActiveConversation(){
+        setSearchTargetLoading(false);
+        if(conversationOpenedFromInboxSearch){
+            conversationOpenedFromInboxSearch=false;
+            pendingSearchTargetMessageId="";
+            showInboxSearchPage(true);
+        }else{
+            showInbox(false);
+        }
+    }
     private void loadCachedInbox(){String raw=cache.get("inbox");if(raw==null)return;try{applyInbox(new JSONObject(raw).optJSONArray("conversations"));}catch(Exception ignored){}}
     private void refreshInbox(){if(refreshingInbox){inboxRefreshQueued=true;return;}refreshingInbox=true;fetchInboxPage("",new ArrayList<>(),0);}
     private void fetchInboxPage(String cursor,List<JSONObject> collected,int page){String path="/api/messaging/inbox?limit=50"+(cursor==null||cursor.isEmpty()?"":"&cursor="+Uri.encode(cursor));api.get(path,(json,error)->main.post(()->{if(error!=null){finishInboxRefresh();if(!api.hasSession())showLogin();return;}JSONArray batch=json.optJSONArray("conversations");if(batch!=null)for(int i=0;i<batch.length();i++){JSONObject conversation=batch.optJSONObject(i);if(conversation!=null)collected.add(conversation);}String next=json.optString("nextCursor","");if(!next.isEmpty()&&!next.equals(cursor)&&page<99){fetchInboxPage(next,collected,page+1);return;}JSONArray all=new JSONArray();for(JSONObject conversation:collected)all.put(conversation);try{cache.put("inbox",new JSONObject().put("conversations",all).toString());}catch(Exception ignored){}applyInbox(all);finishInboxRefresh();}));}
@@ -235,9 +326,9 @@ public class MainActivity extends Activity {
         }catch(Exception ignored){}
     }
     private boolean conversationIsPinned(JSONObject c){return c!=null&&(c.optBoolean("pinned")||c.optBoolean("isPinned"));}
-    private String conversationSearchText(JSONObject c){StringBuilder value=new StringBuilder(c.optString("name",""));JSONObject last=c.optJSONObject("lastMessage");if(last!=null)value.append(' ').append(last.optString("body",""));JSONArray participants=c.optJSONArray("participants");if(participants!=null)for(int i=0;i<participants.length();i++){JSONObject person=participants.optJSONObject(i);if(person!=null)value.append(' ').append(person.optString("name","")).append(' ').append(person.optString("username",""));}return value.toString().toLowerCase(Locale.ROOT);}
+    private String conversationSearchText(JSONObject c){StringBuilder value=new StringBuilder(c.optString("name",""));JSONObject last=c.optJSONObject("lastMessage");if(last!=null&&!"system".equals(last.optString("type")))value.append(' ').append(last.optString("body",""));JSONArray participants=c.optJSONArray("participants");if(participants!=null)for(int i=0;i<participants.length();i++){JSONObject person=participants.optJSONObject(i);if(person!=null)value.append(' ').append(person.optString("name","")).append(' ').append(person.optString("username",""));}return value.toString().toLowerCase(Locale.ROOT);}
     private void filterInbox(String q){filteredInbox.clear();String n=q==null?"":q.toLowerCase(Locale.ROOT).trim();boolean includeMessageMatches=!n.isEmpty()&&n.equals(inboxMessageSearchQuery);for(JSONObject c:inbox)if(n.isEmpty()||conversationSearchText(c).contains(n)||(includeMessageMatches&&inboxMessageSearchMatches.contains(c.optString("id"))))filteredInbox.add(c);filteredInbox.sort((a,b)->Boolean.compare(conversationIsPinned(b),conversationIsPinned(a)));if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();}
-    private void searchAllConversationMessagesV2(String query,int request){String wanted=query==null?"":query.trim();if(wanted.isEmpty())return;api.get("/api/messaging/search?q="+Uri.encode(wanted),(json,error)->main.post(()->{if(request!=inboxSearchRequest||searchBox==null||!wanted.equals(searchBox.getText().toString().trim())||error!=null)return;Set<String> matches=new HashSet<>();List<JSONObject> found=new ArrayList<>();JSONArray results=json.optJSONArray("results");if(results!=null)for(int i=0;i<results.length();i++){JSONObject message=results.optJSONObject(i);if(message==null)continue;String id=message.optString("conversationId",message.optString("conversation_id",""));if(!id.isEmpty()){matches.add(id);found.add(message);}}inboxMessageSearchQuery=wanted.toLowerCase(Locale.ROOT);inboxMessageSearchMatches.clear();inboxMessageSearchMatches.addAll(matches);inboxMessageSearchResults.clear();inboxMessageSearchResults.addAll(found);filterInbox(wanted);}));}
+    private void searchAllConversationMessagesV2(String query,int request){String wanted=query==null?"":query.trim();if(wanted.isEmpty())return;api.get("/api/messaging/search?q="+Uri.encode(wanted),(json,error)->main.post(()->{if(request!=inboxSearchRequest||searchBox==null||!wanted.equals(searchBox.getText().toString().trim())||error!=null)return;Set<String> matches=new HashSet<>();List<JSONObject> found=new ArrayList<>();JSONArray results=json.optJSONArray("results");if(results!=null)for(int i=0;i<results.length();i++){JSONObject message=results.optJSONObject(i);if(message==null||"system".equals(message.optString("type")))continue;String id=message.optString("conversationId",message.optString("conversation_id",""));if(!id.isEmpty()){matches.add(id);found.add(message);}}inboxMessageSearchQuery=wanted.toLowerCase(Locale.ROOT);inboxMessageSearchMatches.clear();inboxMessageSearchMatches.addAll(matches);inboxMessageSearchResults.clear();inboxMessageSearchResults.addAll(found);filterInbox(wanted);}));}
     private void searchAllConversationMessages(String query,int request){String wanted=query==null?"":query.trim();if(wanted.isEmpty())return;api.get("/api/messaging/search?q="+Uri.encode(wanted),(json,error)->main.post(()->{if(request!=inboxSearchRequest||searchBox==null||!wanted.equals(searchBox.getText().toString().trim())||error!=null)return;Set<String> matchingConversationIds=new HashSet<>();List<JSONObject> returnedConversations=new ArrayList<>();JSONArray conversations=json.optJSONArray("conversations");if(conversations!=null)for(int i=0;i<conversations.length();i++){JSONObject conversation=conversations.optJSONObject(i);if(conversation!=null){returnedConversations.add(conversation);String id=conversation.optString("id",conversation.optString("conversationId",""));if(!id.isEmpty())matchingConversationIds.add(id);}}JSONArray results=json.optJSONArray("results");if(results==null)results=json.optJSONArray("messages");if(results!=null)for(int i=0;i<results.length();i++){JSONObject result=results.optJSONObject(i);if(result==null)continue;JSONObject message=result.optJSONObject("message");if(message==null)message=result;JSONObject conversation=result.optJSONObject("conversation");String id=message.optString("conversationId",message.optString("threadId",""));if(id.isEmpty()&&conversation!=null)id=conversation.optString("id",conversation.optString("conversationId",""));if(!id.isEmpty())matchingConversationIds.add(id);if(conversation!=null)returnedConversations.add(conversation);}String normalized=wanted.toLowerCase(Locale.ROOT);filteredInbox.clear();Set<String> added=new HashSet<>();for(JSONObject conversation:inbox){String id=conversation.optString("id");if(conversationSearchText(conversation).contains(normalized)||matchingConversationIds.contains(id)){filteredInbox.add(conversation);added.add(id);}}for(JSONObject conversation:returnedConversations){String id=conversation.optString("id",conversation.optString("conversationId",""));if(!id.isEmpty()&&!added.contains(id)){filteredInbox.add(conversation);added.add(id);}}filteredInbox.sort((a,b)->Boolean.compare(conversationIsPinned(b),conversationIsPinned(a)));if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();}));}
 
     private void updateInboxFromIncomingMessage(String cid,JSONObject m){
@@ -321,12 +412,12 @@ public class MainActivity extends Activity {
         }catch(Exception ignored){}
     }
 
-    private void openConversation(JSONObject c){activeConversation=c;replyTo=null;messages.clear();socketMessageBatch.clear();main.removeCallbacks(flushSocketMessages);socketMessageBatchConversationId="";composerHasText=false;typingStateSent=false;conversationInitialScrollPending=true;
+    private void openConversation(JSONObject c){activeConversation=c;showingInboxSearchPage=false;searchTargetSpinner=null;beforeCursor="";replyTo=null;messages.clear();socketMessageBatch.clear();main.removeCallbacks(flushSocketMessages);socketMessageBatchConversationId="";composerHasText=false;typingStateSent=false;conversationInitialScrollPending=true;
         boolean lightHeader=themeUsesLightHeader();int headerColor=themeHeaderColor();
         getWindow().setStatusBarColor(lightHeader?Color.WHITE:Color.BLACK);
         getWindow().setNavigationBarColor(lightHeader?Color.WHITE:Color.BLACK);
         getWindow().getDecorView().setSystemUiVisibility(lightHeader?View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR:0);
-        root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackground(themeConversationBackground());root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(6),0,dp(6),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(49)));ImageButton back=icon(R.drawable.ic_msg_back,35,headerColor);head.addView(back);back.setOnClickListener(v->showInbox(false));View avatar=buildConversationAvatar(c,31);LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(dp(31),dp(31));ap.leftMargin=dp(1);head.addView(avatar,ap);LinearLayout names=new LinearLayout(this);names.setOrientation(LinearLayout.VERTICAL);names.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams np=new LinearLayout.LayoutParams(0,-1,1);np.leftMargin=dp(7);head.addView(names,np);TextView name=text(c.optString("name","Conversation"),14,headerColor,Typeface.BOLD);names.addView(name,new LinearLayout.LayoutParams(-1,dp(24)));TextView status=text(conversationStatus(c),10,themeHeaderSubColor(),Typeface.NORMAL);names.addView(status,new LinearLayout.LayoutParams(-1,dp(17)));ImageButton info=icon(R.drawable.ic_msg_info,35,headerColor);head.addView(info);info.setOnClickListener(v->showInfo());
+        root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackground(themeConversationBackground());root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(6),0,dp(6),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(49)));ImageButton back=icon(R.drawable.ic_msg_back,35,headerColor);head.addView(back);back.setOnClickListener(v->leaveActiveConversation());View avatar=buildConversationAvatar(c,31);LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(dp(31),dp(31));ap.leftMargin=dp(1);head.addView(avatar,ap);LinearLayout names=new LinearLayout(this);names.setOrientation(LinearLayout.VERTICAL);names.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams np=new LinearLayout.LayoutParams(0,-1,1);np.leftMargin=dp(7);head.addView(names,np);TextView name=text(c.optString("name","Conversation"),14,headerColor,Typeface.BOLD);names.addView(name,new LinearLayout.LayoutParams(-1,dp(24)));TextView status=text(conversationStatus(c),10,themeHeaderSubColor(),Typeface.NORMAL);names.addView(status,new LinearLayout.LayoutParams(-1,dp(17)));ImageButton info=icon(R.drawable.ic_msg_info,35,headerColor);head.addView(info);info.setOnClickListener(v->showInfo());
         FrameLayout messageArea=new FrameLayout(this);page.addView(messageArea,new LinearLayout.LayoutParams(-1,0,1));
         list=new ListView(this);
         list.setDivider(null);
@@ -337,6 +428,13 @@ public class MainActivity extends Activity {
         list.setClipToPadding(false);
         list.setBackground(themeConversationBackground());
         messageArea.addView(list,new FrameLayout.LayoutParams(-1,-1));
+
+        if(conversationOpenedFromInboxSearch){
+            searchTargetSpinner=new OlderMessagesSpinner(this);
+            FrameLayout.LayoutParams targetLoaderParams=new FrameLayout.LayoutParams(dp(38),dp(38),Gravity.CENTER);
+            messageArea.addView(searchTargetSpinner,targetLoaderParams);
+            searchTargetSpinner.start();
+        }
 
         // Older-message loader is a real ListView header row, never an overlay.
         FrameLayout loaderRow=new FrameLayout(this);
@@ -3811,8 +3909,8 @@ reactionsCard.animate().cancel();
     private boolean isStickerMessage(JSONObject m){if(m==null)return false;if(m.optBoolean("sticker"))return true;JSONArray at=m.optJSONArray("attachments");if(at==null||at.length()==0)return false;JSONObject a=at.optJSONObject(0);if(a==null)return false;String mime=a.optString("mime",a.optString("mimeType",a.optString("type",""))).toLowerCase(Locale.ROOT);String name=a.optString("name","").toLowerCase(Locale.ROOT);String url=a.optString("url","").toLowerCase(Locale.ROOT);return a.optBoolean("sticker")||mime.contains("gif")||name.endsWith(".gif")||name.startsWith("sticker-")||url.contains("giphy.com");}
     private boolean isKnownLastSticker(JSONObject c,JSONObject last){if(c==null||last==null)return false;if(isStickerMessage(last))return true;String cid=c.optString("id");if(stickerLastConversations.contains(cid))return true;try{String raw=cache.get("messages:"+cid);if(raw!=null){JSONArray arr=new JSONObject(raw).optJSONArray("messages");if(arr!=null&&arr.length()>0){JSONObject lm=arr.optJSONObject(arr.length()-1);String lid=last.optString("id");if(lm!=null&&(lid.isEmpty()||lid.equals(lm.optString("id")))&&isStickerMessage(lm))return true;}}}catch(Exception ignored){}return false;}
     private JSONObject inboxConversationById(String id){if(id==null||id.isEmpty())return null;for(JSONObject conversation:inbox)if(id.equals(conversation.optString("id")))return conversation;return null;}
-    private List<JSONObject> visibleInboxMessageResults(){List<JSONObject> visible=new ArrayList<>();if(!inboxDedicatedSearch)return visible;for(JSONObject message:inboxMessageSearchResults)if(inboxConversationById(message.optString("conversationId",message.optString("conversation_id","")))!=null)visible.add(message);return visible;}
-    private View buildInboxMessageSearchRow(JSONObject message){if(list!=null)list.setOnItemClickListener(null);String cid=message.optString("conversationId",message.optString("conversation_id",""));JSONObject conversation=inboxConversationById(cid);LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.VERTICAL);row.setPadding(dp(74),dp(7),dp(12),dp(7));TextView name=text(conversation==null?senderName(message):conversation.optString("name","Conversation"),14.5f,TEXT,Typeface.BOLD);row.addView(name,new LinearLayout.LayoutParams(-1,dp(25)));String body=message.optString("body",previewForType(message.optString("type")));TextView preview=text(body,13.5f,SUB,Typeface.NORMAL);preview.setSingleLine(true);preview.setEllipsize(TextUtils.TruncateAt.END);row.addView(preview,new LinearLayout.LayoutParams(-1,dp(24)));row.setOnClickListener(v->{JSONObject target=inboxConversationById(cid);if(target==null)return;String messageId=message.optString("id");openConversation(target);main.postDelayed(()->{int index=findMessageIndex(messageId);if(index>=0)animateMessageTarget(index);else if(beforeCursor!=null&&!beforeCursor.isEmpty())loadOlderUntil(messageId,0);},520);});return row;}
+    private List<JSONObject> visibleInboxMessageResults(){List<JSONObject> visible=new ArrayList<>();if(!inboxDedicatedSearch)return visible;for(JSONObject message:inboxMessageSearchResults)if(!"system".equals(message.optString("type"))&&inboxConversationById(message.optString("conversationId",message.optString("conversation_id","")))!=null)visible.add(message);return visible;}
+    private View buildInboxMessageSearchRow(JSONObject message){if(list!=null)list.setOnItemClickListener(null);String cid=message.optString("conversationId",message.optString("conversation_id",""));JSONObject conversation=inboxConversationById(cid);LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.VERTICAL);row.setPadding(dp(74),dp(7),dp(12),dp(7));TextView name=text(conversation==null?senderName(message):conversation.optString("name","Conversation"),14.5f,TEXT,Typeface.BOLD);row.addView(name,new LinearLayout.LayoutParams(-1,dp(25)));String body=message.optString("body",previewForType(message.optString("type")));TextView preview=text(body,13.5f,SUB,Typeface.NORMAL);preview.setSingleLine(true);preview.setEllipsize(TextUtils.TruncateAt.END);row.addView(preview,new LinearLayout.LayoutParams(-1,dp(24)));row.setOnClickListener(v->{JSONObject target=inboxConversationById(cid);if(target==null)return;inboxSearchScrollPosition=list==null?0:list.getFirstVisiblePosition();String messageId=message.optString("id");conversationOpenedFromInboxSearch=true;pendingSearchTargetMessageId=messageId;openConversation(target);main.postDelayed(()->openInboxSearchTarget(messageId,0),180);});return row;}
     private final class InboxAdapter extends BaseAdapter{
         public int getCount(){return filteredInbox.size()+visibleInboxMessageResults().size();}
         public Object getItem(int p){if(p<filteredInbox.size())return filteredInbox.get(p);return visibleInboxMessageResults().get(p-filteredInbox.size());}
@@ -5075,9 +5173,33 @@ reactionsCard.animate().cancel();
         );
     }
 
+    private void setSearchTargetLoading(boolean visible){
+        if(searchTargetSpinner==null)return;
+        if(visible)searchTargetSpinner.start();
+        else searchTargetSpinner.stop();
+    }
+    private void openInboxSearchTarget(String messageId,int waitAttempt){
+        if(!conversationOpenedFromInboxSearch||activeConversation==null||!messageId.equals(pendingSearchTargetMessageId))return;
+        int index=findMessageIndex(messageId);
+        if(index>=0){
+            setSearchTargetLoading(false);
+            animateMessageTarget(index);
+            return;
+        }
+        if(refreshingMessages&&waitAttempt<30){
+            main.postDelayed(()->openInboxSearchTarget(messageId,waitAttempt+1),100);
+            return;
+        }
+        if(beforeCursor!=null&&!beforeCursor.isEmpty()){
+            loadOlderUntil(messageId,0);
+            return;
+        }
+        setSearchTargetLoading(false);
+        toast("Message is no longer available.");
+    }
     private void jumpToMessage(String messageId){if(messageId==null||messageId.isEmpty()||activeConversation==null)return;int index=findMessageIndex(messageId);if(index>=0){animateMessageTarget(index);return;}loadOlderUntil(messageId,0);}
     private int findMessageIndex(String id){for(int i=0;i<messages.size();i++)if(id.equals(messages.get(i).optString("id")))return i;return-1;}
-    private void loadOlderUntil(String target,int attempts){if(attempts>=40||beforeCursor==null||beforeCursor.isEmpty()){toast("Message is no longer available.");return;}String cursor=beforeCursor;api.get("/api/messaging/conversations/"+activeConversation.optString("id")+"/messages?limit=80&before="+cursor,(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONArray arr=json.optJSONArray("messages");beforeCursor=json.optString("nextBefore","");if(arr!=null){List<JSONObject> older=new ArrayList<>();for(int i=0;i<arr.length();i++){JSONObject x=arr.optJSONObject(i);if(x!=null)older.add(x);}messages.addAll(0,older);if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();}int idx=findMessageIndex(target);if(idx>=0)animateMessageTarget(idx);else if(!beforeCursor.isEmpty()&&!beforeCursor.equals(cursor))loadOlderUntil(target,attempts+1);else toast("Message is no longer available.");}));}
+    private void loadOlderUntil(String target,int attempts){if(attempts>=40||beforeCursor==null||beforeCursor.isEmpty()){if(target.equals(pendingSearchTargetMessageId))setSearchTargetLoading(false);toast("Message is no longer available.");return;}String cursor=beforeCursor;api.get("/api/messaging/conversations/"+activeConversation.optString("id")+"/messages?limit=80&before="+cursor,(json,error)->main.post(()->{if(error!=null){if(target.equals(pendingSearchTargetMessageId))setSearchTargetLoading(false);toast(error.getMessage());return;}JSONArray arr=json.optJSONArray("messages");beforeCursor=json.optString("nextBefore","");if(arr!=null){List<JSONObject> older=new ArrayList<>();for(int i=0;i<arr.length();i++){JSONObject x=arr.optJSONObject(i);if(x!=null)older.add(x);}messages.addAll(0,older);if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();}int idx=findMessageIndex(target);if(idx>=0){if(target.equals(pendingSearchTargetMessageId))setSearchTargetLoading(false);animateMessageTarget(idx);}else if(!beforeCursor.isEmpty()&&!beforeCursor.equals(cursor))loadOlderUntil(target,attempts+1);else{if(target.equals(pendingSearchTargetMessageId))setSearchTargetLoading(false);toast("Message is no longer available.");}}));}
     private void animateMessageTarget(int messageIndex){
         if(list==null)return;
 
