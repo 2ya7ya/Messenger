@@ -93,7 +93,7 @@ public class MainActivity extends Activity {
     private static final long BURST_MS=5*60*1000L, STAMP_MS=15*60*1000L;
     private final Handler main=new Handler(Looper.getMainLooper());
     private ApiClient api; private MessengerCache cache; private ImageLoader images; private StickerLoader stickers; private WebSocket socket;
-    private FrameLayout root; private ListView list; private View olderMessagesLoaderRow; private OlderMessagesSpinner olderMessagesSpinner,searchTargetSpinner; private BaseAdapter inboxAdapter; private MessageAdapter messageAdapter;
+    private FrameLayout root; private ListView list; private View olderMessagesLoaderRow; private OlderMessagesSpinner olderMessagesSpinner,searchTargetSpinner,inboxSearchSpinner; private BaseAdapter inboxAdapter; private MessageAdapter messageAdapter;
     private final List<JSONObject> inbox=new ArrayList<>(), filteredInbox=new ArrayList<>(), messages=new ArrayList<>();
     private final List<JSONObject> socketMessageBatch=new ArrayList<>();
     private final Set<String> typingConversations=new HashSet<>();
@@ -188,9 +188,21 @@ public class MainActivity extends Activity {
     private void showLogin(){root.removeAllViews();activeConversation=null;LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setGravity(Gravity.CENTER_HORIZONTAL);box.setPadding(dp(26),dp(52),dp(26),dp(24));root.addView(box,new FrameLayout.LayoutParams(-1,-1));TextView logo=text("Messenger",31,BLUE,Typeface.BOLD);logo.setGravity(Gravity.CENTER);box.addView(logo,new LinearLayout.LayoutParams(-1,dp(90)));EditText id=new EditText(this);id.setHint("Mobile number or email");id.setSingleLine(true);id.setTextSize(16);id.setPadding(dp(14),0,dp(14),0);id.setBackground(bg(LIGHT,12));box.addView(id,new LinearLayout.LayoutParams(-1,dp(52)));Space sp=new Space(this);box.addView(sp,new LinearLayout.LayoutParams(1,dp(12)));EditText pass=new EditText(this);pass.setHint("Password");pass.setSingleLine(true);pass.setInputType(0x81);pass.setTextSize(16);pass.setPadding(dp(14),0,dp(14),0);pass.setBackground(bg(LIGHT,12));box.addView(pass,new LinearLayout.LayoutParams(-1,dp(52)));Button login=new Button(this);login.setText("Log in");login.setTextColor(Color.WHITE);login.setTextSize(16);login.setTypeface(Typeface.DEFAULT,Typeface.BOLD);login.setBackground(bg(BLUE,24));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(48));lp.topMargin=dp(16);box.addView(login,lp);ProgressBar p=new ProgressBar(this);p.setVisibility(View.GONE);box.addView(p,new LinearLayout.LayoutParams(dp(48),dp(38)));login.setOnClickListener(v->{String a=id.getText().toString().trim(),b=pass.getText().toString();if(a.isEmpty()||b.isEmpty()){toast("Enter your login details.");return;}login.setEnabled(false);p.setVisibility(View.VISIBLE);api.login(a,b,(json,error)->main.post(()->{login.setEnabled(true);p.setVisibility(View.GONE);if(error!=null){toast(error.getMessage());return;}showInbox(true);}));});}
 
     private void showInbox(boolean initial){inboxDedicatedSearch=false;showingInboxSearchPage=false;conversationOpenedFromInboxSearch=false;pendingSearchTargetMessageId="";activeConversation=null;replyTo=null;getWindow().setStatusBarColor(Color.WHITE);getWindow().setNavigationBarColor(Color.WHITE);getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setBackgroundColor(Color.WHITE);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(15),0,dp(12),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(58)));TextView title=text("Chats",25,TEXT,Typeface.BOLD);head.addView(title,new LinearLayout.LayoutParams(0,-1,1));ImageButton search=icon(R.drawable.ic_msg_search,40,TEXT);head.addView(search);ImageButton plus=icon(R.drawable.ic_msg_plus,40,TEXT);head.addView(plus);
-        searchBox=new EditText(this);searchBox.setSingleLine(true);searchBox.setHint("Search");searchBox.setHintTextColor(Color.rgb(101,103,107));searchBox.setTextSize(14.5f);searchBox.setTextColor(TEXT);android.graphics.drawable.Drawable searchGlyph=getDrawable(R.drawable.ic_msg_search);if(searchGlyph!=null){searchGlyph=searchGlyph.mutate();searchGlyph.setTint(Color.rgb(101,103,107));searchGlyph.setBounds(0,0,dp(17),dp(17));searchBox.setCompoundDrawables(searchGlyph,null,null,null);searchBox.setCompoundDrawablePadding(dp(8));}searchBox.setPadding(dp(12),0,dp(12),0);searchBox.setBackground(bg(LIGHT,18));LinearLayout.LayoutParams sl=new LinearLayout.LayoutParams(-1,dp(34));sl.setMargins(dp(12),dp(5),dp(12),dp(4));page.addView(searchBox,sl);list=new ListView(this);list.setDivider(null);list.setSelector(android.R.color.transparent);list.setVerticalScrollBarEnabled(false);list.setPadding(dp(8),dp(2),dp(8),dp(90));list.setClipToPadding(false);page.addView(list,new LinearLayout.LayoutParams(-1,0,1));inboxAdapter=new InboxAdapter();list.setAdapter(inboxAdapter);list.setOnItemClickListener((p,v,pos,id)->openConversation(filteredInbox.get(pos)));
+        searchBox=new EditText(this);searchBox.setSingleLine(true);searchBox.setHint("Search");searchBox.setHintTextColor(Color.rgb(101,103,107));searchBox.setTextSize(14.5f);searchBox.setTextColor(TEXT);android.graphics.drawable.Drawable searchGlyph=getDrawable(R.drawable.ic_msg_search);if(searchGlyph!=null){searchGlyph=searchGlyph.mutate();searchGlyph.setTint(Color.rgb(101,103,107));searchGlyph.setBounds(0,0,dp(17),dp(17));searchBox.setCompoundDrawables(searchGlyph,null,null,null);searchBox.setCompoundDrawablePadding(dp(8));}searchBox.setPadding(dp(12),0,dp(12),0);searchBox.setBackground(bg(LIGHT,18));LinearLayout.LayoutParams sl=new LinearLayout.LayoutParams(-1,dp(34));sl.setMargins(dp(12),dp(5),dp(12),dp(4));page.addView(searchBox,sl);list=new ListView(this);list.setDivider(null);list.setSelector(android.R.color.transparent);list.setVerticalScrollBarEnabled(false);list.setPadding(dp(8),dp(2),dp(8),dp(90));list.setClipToPadding(false);page.addView(list,new LinearLayout.LayoutParams(-1,0,1));attachInboxSearchSpinner();inboxAdapter=new InboxAdapter();list.setAdapter(inboxAdapter);list.setOnItemClickListener((p,v,pos,id)->{if(pos<filteredInbox.size())openConversation(filteredInbox.get(pos));});
         ImageButton fab=icon(R.drawable.ic_msg_plus,54,Color.WHITE);fab.setPadding(dp(14),dp(14),dp(14),dp(14));fab.setBackground(bg(BLUE,30));FrameLayout.LayoutParams fp=new FrameLayout.LayoutParams(dp(54),dp(54),Gravity.END|Gravity.BOTTOM);fp.setMargins(0,0,dp(18),dp(22));root.addView(fab,fp);plus.setOnClickListener(v->showContacts());fab.setOnClickListener(v->showContacts());search.setOnClickListener(v->showInboxSearchPage(false));wireInboxSearchBox(searchBox);loadCachedInbox();refreshInbox();connectSocket();}
-    private void wireInboxSearchBox(EditText field){field.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int b,int c){String query=s.toString();inboxMessageSearchQuery=query.trim().toLowerCase(Locale.ROOT);inboxMessageSearchMatches.clear();inboxMessageSearchResults.clear();filterInbox(query);if(inboxSearchTask!=null)main.removeCallbacks(inboxSearchTask);int request=++inboxSearchRequest;if(query.trim().isEmpty())return;inboxSearchTask=()->searchAllConversationMessagesV2(query,request);main.postDelayed(inboxSearchTask,240);}public void afterTextChanged(Editable e){}});}
+    private void attachInboxSearchSpinner(){
+        inboxSearchSpinner=new OlderMessagesSpinner(this);
+        inboxSearchSpinner.setVisibility(View.INVISIBLE);
+        FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(dp(38),dp(38),Gravity.CENTER);
+        params.topMargin=dp(42);
+        root.addView(inboxSearchSpinner,params);
+    }
+    private void setInboxSearchLoading(boolean visible){
+        if(inboxSearchSpinner==null)return;
+        if(visible)inboxSearchSpinner.start();
+        else inboxSearchSpinner.stop();
+    }
+    private void wireInboxSearchBox(EditText field){field.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int b,int c){String query=s.toString();inboxMessageSearchQuery=query.trim().toLowerCase(Locale.ROOT);inboxMessageSearchMatches.clear();inboxMessageSearchResults.clear();filterInbox(query);if(inboxSearchTask!=null)main.removeCallbacks(inboxSearchTask);int request=++inboxSearchRequest;if(query.trim().isEmpty()){setInboxSearchLoading(false);return;}setInboxSearchLoading(true);inboxSearchTask=()->searchAllConversationMessagesV2(query,request);main.postDelayed(inboxSearchTask,240);}public void afterTextChanged(Editable e){}});}
     private void showInboxSearchPage(boolean restore){
         inboxDedicatedSearch=true;
         showingInboxSearchPage=true;
@@ -251,6 +263,7 @@ public class MainActivity extends Activity {
         list.setPadding(dp(8),dp(2),dp(8),dp(18));
         list.setClipToPadding(false);
         page.addView(list,new LinearLayout.LayoutParams(-1,0,1));
+        attachInboxSearchSpinner();
         inboxAdapter=new InboxAdapter();
         list.setAdapter(inboxAdapter);
         list.setOnItemClickListener((p,v,pos,id)->{
@@ -284,7 +297,85 @@ public class MainActivity extends Activity {
     private void refreshInbox(){if(refreshingInbox){inboxRefreshQueued=true;return;}refreshingInbox=true;fetchInboxPage("",new ArrayList<>(),0);}
     private void fetchInboxPage(String cursor,List<JSONObject> collected,int page){String path="/api/messaging/inbox?limit=50"+(cursor==null||cursor.isEmpty()?"":"&cursor="+Uri.encode(cursor));api.get(path,(json,error)->main.post(()->{if(error!=null){finishInboxRefresh();if(!api.hasSession())showLogin();return;}JSONArray batch=json.optJSONArray("conversations");if(batch!=null)for(int i=0;i<batch.length();i++){JSONObject conversation=batch.optJSONObject(i);if(conversation!=null)collected.add(conversation);}String next=json.optString("nextCursor","");if(!next.isEmpty()&&!next.equals(cursor)&&page<99){fetchInboxPage(next,collected,page+1);return;}JSONArray all=new JSONArray();for(JSONObject conversation:collected)all.put(conversation);try{cache.put("inbox",new JSONObject().put("conversations",all).toString());}catch(Exception ignored){}applyInbox(all);finishInboxRefresh();}));}
     private void finishInboxRefresh(){refreshingInbox=false;if(inboxRefreshQueued){inboxRefreshQueued=false;refreshInbox();}}
-    private void applyInbox(JSONArray arr){if(arr==null)return;inbox.clear();for(int i=0;i<arr.length();i++){JSONObject o=arr.optJSONObject(i);if(o!=null)inbox.add(o);}filterInbox(searchBox==null?"":searchBox.getText().toString());}
+    private String conversationIdentityKey(JSONObject c){
+        if(c==null)return"";
+        if(!"group".equals(c.optString("type"))){
+            JSONObject other=firstOther(c);
+            String userId=other==null?"":other.optString("id");
+            if(!userId.isEmpty())return"direct:"+userId;
+        }
+        String id=c.optString("id",c.optString("conversationId",""));
+        return id.isEmpty()?"unknown:"+c.toString():"conversation:"+id;
+    }
+    private boolean conversationArchived(JSONObject c){
+        return c!=null&&(c.optBoolean("archived")||c.optBoolean("isArchived")||c.optBoolean("hidden"));
+    }
+    private void applyInbox(JSONArray arr){
+        if(arr==null)return;
+        List<JSONObject> localSnapshot=new ArrayList<>(inbox);
+        inbox.clear();
+        Set<String> seen=new HashSet<>();
+        for(int i=0;i<arr.length();i++){
+            JSONObject conversation=arr.optJSONObject(i);
+            if(conversation==null||conversationArchived(conversation))continue;
+            String conversationId=conversation.optString("id");
+            JSONObject last=conversation.optJSONObject("lastMessage");
+            if(conversationDeletionCutoff(conversationId)>0L&&(last==null||!messageAfterDeletion(conversationId,last)))continue;
+            String key=conversationIdentityKey(conversation);
+            if(!seen.add(key))continue;
+            inbox.add(conversation);
+        }
+        for(int i=localSnapshot.size()-1;i>=0;i--){
+            JSONObject local=localSnapshot.get(i);
+            String cid=local.optString("id");
+            JSONObject last=local.optJSONObject("lastMessage");
+            String key=conversationIdentityKey(local);
+            if(conversationDeletionCutoff(cid)>0L&&last!=null&&messageAfterDeletion(cid,last)&&seen.add(key))inbox.add(0,local);
+        }
+        cacheInboxNow();
+        filterInbox(searchBox==null?"":searchBox.getText().toString());
+    }
+    private void cacheInboxNow(){
+        try{cache.put("inbox",new JSONObject().put("conversations",new JSONArray(inbox)).toString());}catch(Exception ignored){}
+    }
+    private long conversationDeletionCutoff(String conversationId){
+        if(conversationId==null||conversationId.isEmpty())return 0L;
+        return getSharedPreferences("messenger_deleted_threads",MODE_PRIVATE).getLong(conversationId,0L);
+    }
+    private void rememberConversationDeletion(JSONObject conversation){
+        if(conversation==null)return;
+        String id=conversation.optString("id");
+        if(id.isEmpty())return;
+        getSharedPreferences("messenger_deleted_threads",MODE_PRIVATE).edit().putLong(id,System.currentTimeMillis()).apply();
+        cache.remove("messages:"+id);
+    }
+    private boolean messageAfterDeletion(String conversationId,JSONObject message){
+        long cutoff=conversationDeletionCutoff(conversationId);
+        if(cutoff<=0L||message==null||message.optBoolean("pending"))return true;
+        Date created=parseDate(message.optString("createdAt"));
+        return created!=null&&created.getTime()>cutoff;
+    }
+    private void restoreActiveConversationToInbox(JSONObject lastMessage){
+        if(activeConversation==null)return;
+        String cid=activeConversation.optString("id");
+        if(cid.isEmpty())return;
+        try{
+            activeConversation.put("archived",false);
+            activeConversation.put("isArchived",false);
+            activeConversation.put("hidden",false);
+            if(lastMessage!=null)activeConversation.put("lastMessage",lastMessage);
+            String identity=conversationIdentityKey(activeConversation);
+            for(int i=inbox.size()-1;i>=0;i--){
+                if(identity.equals(conversationIdentityKey(inbox.get(i))))inbox.remove(i);
+            }
+            inbox.add(0,activeConversation);
+            cacheInboxNow();
+            filterInbox(searchBox==null?"":searchBox.getText().toString());
+            if(conversationDeletionCutoff(cid)>0L){
+                api.patch("/api/messaging/conversations/"+cid+"/settings",new JSONObject().put("archived",false),(json,error)->{});
+            }
+        }catch(Exception ignored){}
+    }
 
     private void markConversationReadLocally(String cid){
         if(cid==null||cid.isEmpty())return;
@@ -328,7 +419,41 @@ public class MainActivity extends Activity {
     private boolean conversationIsPinned(JSONObject c){return c!=null&&(c.optBoolean("pinned")||c.optBoolean("isPinned"));}
     private String conversationSearchText(JSONObject c){StringBuilder value=new StringBuilder(c.optString("name",""));JSONObject last=c.optJSONObject("lastMessage");if(last!=null&&!"system".equals(last.optString("type")))value.append(' ').append(last.optString("body",""));JSONArray participants=c.optJSONArray("participants");if(participants!=null)for(int i=0;i<participants.length();i++){JSONObject person=participants.optJSONObject(i);if(person!=null)value.append(' ').append(person.optString("name","")).append(' ').append(person.optString("username",""));}return value.toString().toLowerCase(Locale.ROOT);}
     private void filterInbox(String q){filteredInbox.clear();String n=q==null?"":q.toLowerCase(Locale.ROOT).trim();boolean includeMessageMatches=!n.isEmpty()&&n.equals(inboxMessageSearchQuery);for(JSONObject c:inbox)if(n.isEmpty()||conversationSearchText(c).contains(n)||(includeMessageMatches&&inboxMessageSearchMatches.contains(c.optString("id"))))filteredInbox.add(c);filteredInbox.sort((a,b)->Boolean.compare(conversationIsPinned(b),conversationIsPinned(a)));if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();}
-    private void searchAllConversationMessagesV2(String query,int request){String wanted=query==null?"":query.trim();if(wanted.isEmpty())return;api.get("/api/messaging/search?q="+Uri.encode(wanted),(json,error)->main.post(()->{if(request!=inboxSearchRequest||searchBox==null||!wanted.equals(searchBox.getText().toString().trim())||error!=null)return;Set<String> matches=new HashSet<>();List<JSONObject> found=new ArrayList<>();JSONArray results=json.optJSONArray("results");if(results!=null)for(int i=0;i<results.length();i++){JSONObject message=results.optJSONObject(i);if(message==null||"system".equals(message.optString("type")))continue;String id=message.optString("conversationId",message.optString("conversation_id",""));if(!id.isEmpty()){matches.add(id);found.add(message);}}inboxMessageSearchQuery=wanted.toLowerCase(Locale.ROOT);inboxMessageSearchMatches.clear();inboxMessageSearchMatches.addAll(matches);inboxMessageSearchResults.clear();inboxMessageSearchResults.addAll(found);filterInbox(wanted);}));}
+    private void searchAllConversationMessagesV2(String query,int request){
+        String wanted=query==null?"":query.trim();
+        if(wanted.isEmpty()){setInboxSearchLoading(false);return;}
+        api.get("/api/messaging/search?q="+Uri.encode(wanted),(json,error)->main.post(()->{
+            if(request!=inboxSearchRequest)return;
+            if(searchBox==null||!wanted.equals(searchBox.getText().toString().trim()))return;
+            setInboxSearchLoading(false);
+            if(error!=null)return;
+            Set<String> matches=new HashSet<>();
+            List<JSONObject> found=new ArrayList<>();
+            JSONArray results=json.optJSONArray("results");
+            if(results==null)results=json.optJSONArray("messages");
+            if(results!=null)for(int i=0;i<results.length();i++){
+                JSONObject result=results.optJSONObject(i);
+                if(result==null)continue;
+                JSONObject message=result.optJSONObject("message");
+                if(message==null)message=result;
+                if("system".equals(message.optString("type")))continue;
+                JSONObject conversation=result.optJSONObject("conversation");
+                String id=message.optString("conversationId",message.optString("conversation_id",message.optString("threadId","")));
+                if(id.isEmpty())id=result.optString("conversationId",result.optString("conversation_id",""));
+                if(id.isEmpty()&&conversation!=null)id=conversation.optString("id",conversation.optString("conversationId",""));
+                if(id.isEmpty()||!messageAfterDeletion(id,message))continue;
+                try{if(message.optString("conversationId").isEmpty())message.put("conversationId",id);}catch(Exception ignored){}
+                matches.add(id);
+                found.add(message);
+            }
+            inboxMessageSearchQuery=wanted.toLowerCase(Locale.ROOT);
+            inboxMessageSearchMatches.clear();
+            inboxMessageSearchMatches.addAll(matches);
+            inboxMessageSearchResults.clear();
+            inboxMessageSearchResults.addAll(found);
+            filterInbox(wanted);
+        }));
+    }
     private void searchAllConversationMessages(String query,int request){String wanted=query==null?"":query.trim();if(wanted.isEmpty())return;api.get("/api/messaging/search?q="+Uri.encode(wanted),(json,error)->main.post(()->{if(request!=inboxSearchRequest||searchBox==null||!wanted.equals(searchBox.getText().toString().trim())||error!=null)return;Set<String> matchingConversationIds=new HashSet<>();List<JSONObject> returnedConversations=new ArrayList<>();JSONArray conversations=json.optJSONArray("conversations");if(conversations!=null)for(int i=0;i<conversations.length();i++){JSONObject conversation=conversations.optJSONObject(i);if(conversation!=null){returnedConversations.add(conversation);String id=conversation.optString("id",conversation.optString("conversationId",""));if(!id.isEmpty())matchingConversationIds.add(id);}}JSONArray results=json.optJSONArray("results");if(results==null)results=json.optJSONArray("messages");if(results!=null)for(int i=0;i<results.length();i++){JSONObject result=results.optJSONObject(i);if(result==null)continue;JSONObject message=result.optJSONObject("message");if(message==null)message=result;JSONObject conversation=result.optJSONObject("conversation");String id=message.optString("conversationId",message.optString("threadId",""));if(id.isEmpty()&&conversation!=null)id=conversation.optString("id",conversation.optString("conversationId",""));if(!id.isEmpty())matchingConversationIds.add(id);if(conversation!=null)returnedConversations.add(conversation);}String normalized=wanted.toLowerCase(Locale.ROOT);filteredInbox.clear();Set<String> added=new HashSet<>();for(JSONObject conversation:inbox){String id=conversation.optString("id");if(conversationSearchText(conversation).contains(normalized)||matchingConversationIds.contains(id)){filteredInbox.add(conversation);added.add(id);}}for(JSONObject conversation:returnedConversations){String id=conversation.optString("id",conversation.optString("conversationId",""));if(!id.isEmpty()&&!added.contains(id)){filteredInbox.add(conversation);added.add(id);}}filteredInbox.sort((a,b)->Boolean.compare(conversationIsPinned(b),conversationIsPinned(a)));if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();}));}
 
     private void updateInboxFromIncomingMessage(String cid,JSONObject m){
@@ -348,9 +473,15 @@ public class MainActivity extends Activity {
                 }
             }
 
-            // Unknown/new conversation:
-            // let refreshInbox() obtain its full metadata.
+            // A locally deleted direct thread may not be in the inbox yet.
+            // Reuse the active thread metadata so its first new message restores it.
+            if(conversation==null&&activeConversation!=null&&cid.equals(activeConversation.optString("id"))){
+                conversation=activeConversation;
+            }
             if(conversation==null)return;
+            conversation.put("archived",false);
+            conversation.put("isArchived",false);
+            conversation.put("hidden",false);
 
             JSONObject last=new JSONObject();
 
@@ -380,11 +511,13 @@ public class MainActivity extends Activity {
                 );
             }
 
-            // Move newest conversation to top immediately.
-            if(oldIndex>0){
-                inbox.remove(oldIndex);
-                inbox.add(0,conversation);
+            // Keep only one row for this direct/group identity and move it to the top.
+            String identity=conversationIdentityKey(conversation);
+            for(int i=inbox.size()-1;i>=0;i--){
+                JSONObject existing=inbox.get(i);
+                if(existing==conversation||identity.equals(conversationIdentityKey(existing)))inbox.remove(i);
             }
+            inbox.add(0,conversation);
 
             // Persist the instantly updated inbox.
             String raw=cache.get("inbox");
@@ -616,12 +749,12 @@ public class MainActivity extends Activity {
         pill.setClickable(true);
         pill.setOnClickListener(v->closePickersAndOpenKeyboard());
 
-        ImageButton mic=icon(R.drawable.ic_instagram_mic,30,composerInk);
-        ImageButton gallery=icon(R.drawable.ic_instagram_gallery,30,composerInk);
-        ImageButton sticker=icon(R.drawable.ic_instagram_sticker,30,composerInk);
-        ImageButton plus=icon(R.drawable.ic_instagram_plus,30,composerInk);
+        ImageButton mic=icon(R.drawable.ic_instagram_mic,30,Color.WHITE);
+        ImageButton gallery=icon(R.drawable.ic_instagram_gallery,30,Color.WHITE);
+        ImageButton sticker=icon(R.drawable.ic_instagram_sticker,30,Color.WHITE);
+        ImageButton plus=icon(R.drawable.ic_instagram_plus,30,Color.WHITE);
         for(ImageButton b:new ImageButton[]{mic,gallery,sticker,plus}){
-            b.setColorFilter(composerInk);
+            b.setColorFilter(Color.WHITE);
             b.setBackgroundColor(Color.TRANSPARENT);
             b.setScaleType(ImageView.ScaleType.FIT_CENTER);
             b.setPadding(dp(4),dp(4),dp(4),dp(4));
@@ -673,7 +806,7 @@ public class MainActivity extends Activity {
         composerHasText=false;
     }
 
-    private void syncComposerAction(){boolean has=messageInput!=null&&composerHasText;if(sendButton!=null){sendButton.setVisibility(has?View.VISIBLE:View.GONE);sendButton.setImageResource(R.drawable.msg_send_enabled);sendButton.setColorFilter(readableOn(themeAccent()));sendButton.setBackground(bg(themeAccent(),19));}if(micButton!=null){micButton.setColorFilter(readableOn(themeReplyBackground()));micButton.setVisibility(has?View.GONE:View.VISIBLE);}}
+    private void syncComposerAction(){boolean has=messageInput!=null&&composerHasText;if(sendButton!=null){sendButton.setVisibility(has?View.VISIBLE:View.GONE);sendButton.setImageResource(R.drawable.msg_send_enabled);sendButton.setColorFilter(readableOn(themeAccent()));sendButton.setBackground(bg(themeAccent(),19));}if(micButton!=null){micButton.setColorFilter(Color.WHITE);micButton.setVisibility(has?View.GONE:View.VISIBLE);}}
 
     private void loadCachedMessages(String cid){String raw=cache.get("messages:"+cid);if(raw==null)return;try{applyMessages(new JSONObject(raw).optJSONArray("messages"),false);}catch(Exception ignored){}}
     private void refreshMessages(String cid){if(refreshingMessages)return;refreshingMessages=true;api.get("/api/messaging/conversations/"+cid+"/messages?limit=80",(json,error)->main.post(()->{refreshingMessages=false;if(error!=null)return;beforeCursor=json.optString("nextBefore","");cache.put("messages:"+cid,json.toString());applyMessages(json.optJSONArray("messages"),true);if(activeConversation!=null&&activeConversation.optString("id").equals(cid))markRead();}));}
@@ -686,7 +819,7 @@ public class MainActivity extends Activity {
     private void prefetchConversationWindow(int firstVisibleItem,int visibleItemCount){if(messageAdapter==null||messages.isEmpty())return;int headers=list==null?0:list.getHeaderViewsCount();int firstRow=Math.max(0,firstVisibleItem-headers-2),lastRow=Math.min(messageAdapter.getCount()-1,firstVisibleItem-headers+visibleItemCount+2);for(int row=firstRow;row<=lastRow;row++){int start=messageAdapter.messageIndexForRow(row),end=messageAdapter.messageEndForRow(row);for(int i=start;i<=end&&i>=0&&i<messages.size();i++)prefetchMessageThumbnail(messages.get(i));}}
     private void prefetchConversationTail(){int start=Math.max(0,messages.size()-8);for(int i=messages.size()-1;i>=start;i--)prefetchMessageThumbnail(messages.get(i));}
     private void prefetchMessageThumbnail(JSONObject message){if(message==null)return;JSONArray attachments=message.optJSONArray("attachments");JSONObject attachment=attachments!=null&&attachments.length()>0?attachments.optJSONObject(0):null;if(attachment==null||mediaViewMode(message,attachment)>0)return;String type=actualMediaType(message.optString("type"),attachment),url=displayMediaUrl(attachment);if("image".equals(type)){if(isStickerMessage(message))stickers.prefetch(url);else{int width=Math.min(dp(180),(int)(getResources().getDisplayMetrics().widthPixels*.52f));images.prefetch(url,width,stableMediaHeight(attachment,width,false));}}}
-    private void applyMessages(JSONArray arr,boolean fromNetwork){if(arr==null)return;boolean keepBottom=conversationInitialScrollPending||isConversationAtBottom();List<JSONObject> previous=new ArrayList<>(messages),next=new ArrayList<>();Set<String> matched=new HashSet<>();for(int i=0;i<arr.length();i++){JSONObject incoming=arr.optJSONObject(i);if(incoming==null||incoming.optBoolean("deleted"))continue;JSONObject old=findPreviousMessage(previous,incoming),merged=old==null?incoming:mergeMessage(old,incoming);preserveLocalMediaPreview(old,merged);next.add(merged);if(old!=null)matched.add(old.optString("id")+"|"+old.optString("clientId"));}if(fromNetwork){long now=System.currentTimeMillis();for(JSONObject old:previous){String key=old.optString("id")+"|"+old.optString("clientId");if(matched.contains(key)||old.optBoolean("deleted"))continue;if(old.optBoolean("pending")||old.optLong("optimisticRetainUntil",0)>now)next.add(old);}}messages.clear();messages.addAll(next);prefetchTemporaryMedia();prefetchConversationTail();if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();if(keepBottom)scrollToAbsoluteBottom();}conversationInitialScrollPending=false;}
+    private void applyMessages(JSONArray arr,boolean fromNetwork){if(arr==null)return;boolean keepBottom=conversationInitialScrollPending||isConversationAtBottom();String cid=activeConversation==null?"":activeConversation.optString("id");List<JSONObject> previous=new ArrayList<>(messages),next=new ArrayList<>();Set<String> matched=new HashSet<>();for(int i=0;i<arr.length();i++){JSONObject incoming=arr.optJSONObject(i);if(incoming==null||incoming.optBoolean("deleted")||!messageAfterDeletion(cid,incoming))continue;JSONObject old=findPreviousMessage(previous,incoming),merged=old==null?incoming:mergeMessage(old,incoming);preserveLocalMediaPreview(old,merged);next.add(merged);if(old!=null)matched.add(old.optString("id")+"|"+old.optString("clientId"));}if(fromNetwork){long now=System.currentTimeMillis();for(JSONObject old:previous){String key=old.optString("id")+"|"+old.optString("clientId");if(matched.contains(key)||old.optBoolean("deleted"))continue;if(old.optBoolean("pending")||old.optLong("optimisticRetainUntil",0)>now)next.add(old);}}messages.clear();messages.addAll(next);prefetchTemporaryMedia();prefetchConversationTail();if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();if(keepBottom)scrollToAbsoluteBottom();}conversationInitialScrollPending=false;}
     private void cacheMessagesNow(){if(activeConversation==null)return;try{cache.put("messages:"+activeConversation.optString("id"),new JSONObject().put("messages",new JSONArray(messages)).toString());}catch(Exception ignored){}}
 
     private void cacheIncomingMessage(String cid,JSONObject incoming,boolean allowAppend){
@@ -806,6 +939,7 @@ public class MainActivity extends Activity {
         JSONObject reply=replyTo;
         JSONObject temp=buildOptimisticText(body,client,reply);
         messages.add(temp);
+        restoreActiveConversationToInbox(temp);
         if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();scrollToAbsoluteBottom();}
         cacheMessagesNow();
         messageInput.setText("");
@@ -1229,7 +1363,7 @@ reactionsCard.animate().cancel();
     private void dismissMessengerStickerPicker(View host){if(host==null||root==null)return;View bridge=root.findViewWithTag("messenger-sticker-bridge");int h=Math.max(host.getHeight(),dp(360));host.animate().translationY(h).setDuration(220).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(()->{if(host.getParent()==root)root.removeView(host);}).start();if(bridge!=null)bridge.animate().translationY(h).setDuration(220).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(()->{if(bridge.getParent()==root)root.removeView(bridge);}).start();if(composer!=null)composer.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null)replyBar.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.setPadding(dp(10),dp(12),dp(10),dp(5));}
 
     private JSONObject buildOptimisticSticker(String url,String client,JSONObject reply){JSONObject temp=new JSONObject();try{temp.put("id","tmp-"+System.nanoTime());temp.put("clientId",client);temp.put("conversationId",activeConversation==null?"":activeConversation.optString("id"));temp.put("senderId",selfId);temp.put("type","image");temp.put("body","");temp.put("createdAt",new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX",Locale.US).format(new Date()));temp.put("status","sending");temp.put("pending",true);temp.put("sticker",true);temp.put("sender",new JSONObject().put("id",selfId).put("name","You").put("isSelf",true));temp.put("attachments",new JSONArray().put(new JSONObject().put("url",url).put("mime","image/gif").put("name","sticker.gif").put("sticker",true)));temp.put("reactions",new JSONArray());if(reply!=null)temp.put("reply",new JSONObject().put("id",reply.optString("id")).put("body",reply.optString("body")).put("type",reply.optString("type","text")).put("senderName",senderName(reply)));}catch(Exception ignored){}return temp;}
-    private void sendStickerFromUrl(String url){if(activeConversation==null||url==null||url.isEmpty())return;final String cid=activeConversation.optString("id"),client="sticker-native-"+UUID.randomUUID();stickerLastConversations.add(cid);final JSONObject replyObj=replyTo;final String reply=replyObj==null?"":replyObj.optString("id");JSONObject temp=buildOptimisticSticker(url,client,replyObj);messages.add(temp);if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();scrollToAbsoluteBottom();}cacheMessagesNow();if(replyObj!=null)setReply(null);new Thread(()->{try{byte[] bytes=stickers.getCachedOrFetch(url);if(bytes==null||bytes.length==0)throw new Exception("Could not load sticker.");api.upload("/api/messaging/conversations/"+cid+"/attachment",bytes,"sticker-"+System.currentTimeMillis()+".gif","image/gif","",client,reply,(json,error)->main.post(()->{if(error!=null){markOptimisticFailed(client);toast(error.getMessage());return;}JSONObject m=json.optJSONObject("message");if(m!=null){try{m.put("sticker",true);}catch(Exception ignored){}stickerLastConversations.add(cid);replaceOptimistic(client,m);cacheMessagesNow();refreshInbox();}}));}catch(Exception ex){main.post(()->{markOptimisticFailed(client);toast(ex.getMessage());});}}).start();}
+    private void sendStickerFromUrl(String url){if(activeConversation==null||url==null||url.isEmpty())return;final String cid=activeConversation.optString("id"),client="sticker-native-"+UUID.randomUUID();stickerLastConversations.add(cid);final JSONObject replyObj=replyTo;final String reply=replyObj==null?"":replyObj.optString("id");JSONObject temp=buildOptimisticSticker(url,client,replyObj);messages.add(temp);restoreActiveConversationToInbox(temp);if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();scrollToAbsoluteBottom();}cacheMessagesNow();if(replyObj!=null)setReply(null);new Thread(()->{try{byte[] bytes=stickers.getCachedOrFetch(url);if(bytes==null||bytes.length==0)throw new Exception("Could not load sticker.");api.upload("/api/messaging/conversations/"+cid+"/attachment",bytes,"sticker-"+System.currentTimeMillis()+".gif","image/gif","",client,reply,(json,error)->main.post(()->{if(error!=null){markOptimisticFailed(client);toast(error.getMessage());return;}JSONObject m=json.optJSONObject("message");if(m!=null){try{m.put("sticker",true);}catch(Exception ignored){}stickerLastConversations.add(cid);replaceOptimistic(client,m);cacheMessagesNow();refreshInbox();}}));}catch(Exception ex){main.post(()->{markOptimisticFailed(client);toast(ex.getMessage());});}}).start();}
 
 
     private void closePickersOnly(){
@@ -3578,7 +3712,7 @@ reactionsCard.animate().cancel();
     private String markedMediaName(String name,int viewMode){String clean=name==null||name.trim().isEmpty()?"attachment":name.trim();clean=clean.replaceFirst("^__vm[12]__","");return viewMode==1?"__vm1__"+clean:viewMode==2?"__vm2__"+clean:clean;}
     private JSONObject buildOptimisticMedia(byte[] bytes,String storedName,String mime,String client,JSONObject reply,int viewMode){JSONObject temp=new JSONObject();try{String type=mime!=null&&mime.toLowerCase(Locale.ROOT).startsWith("video/")?"video":mime!=null&&mime.toLowerCase(Locale.ROOT).startsWith("image/")?"image":"file";File local=new File(getCacheDir(),"pending-"+client+"-"+storedName.replaceAll("[^A-Za-z0-9._-]","_"));try(FileOutputStream out=new FileOutputStream(local)){out.write(bytes);}JSONObject attachment=new JSONObject().put("url",Uri.fromFile(local).toString()).put("localPreviewUrl",Uri.fromFile(local).toString()).put("name",storedName).put("mime",mime==null?"application/octet-stream":mime).put("size",bytes.length).put("viewMode",viewMode).put("mediaViewMode",viewMode);if("image".equals(type)){BitmapFactory.Options bounds=new BitmapFactory.Options();bounds.inJustDecodeBounds=true;BitmapFactory.decodeByteArray(bytes,0,bytes.length,bounds);if(bounds.outWidth>0&&bounds.outHeight>0)attachment.put("width",bounds.outWidth).put("height",bounds.outHeight);}temp.put("id","tmp-"+System.nanoTime()).put("clientId",client).put("conversationId",activeConversation==null?"":activeConversation.optString("id")).put("senderId",selfId).put("type",type).put("body","").put("createdAt",new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX",Locale.US).format(new Date())).put("status","sending").put("pending",true).put("optimisticRetainUntil",System.currentTimeMillis()+30000L).put("viewMode",viewMode).put("mediaViewMode",viewMode).put("sender",new JSONObject().put("id",selfId).put("name","You").put("isSelf",true)).put("attachments",new JSONArray().put(attachment)).put("reactions",new JSONArray());if(reply!=null)temp.put("reply",new JSONObject().put("id",reply.optString("id")).put("body",reply.optString("body")).put("type",reply.optString("type","text")).put("senderName",senderName(reply)));}catch(Exception e){return null;}return temp;}
     private void uploadAttachment(byte[] bytes,String name,String mime,int viewMode){uploadAttachment(bytes,name,mime,viewMode,false);}
-    private void uploadAttachment(byte[] bytes,String name,String mime,int viewMode,boolean deferVisualRefresh){if(activeConversation==null||bytes==null||bytes.length==0)return;int actualMode=Math.max(0,Math.min(2,viewMode));String cid=activeConversation.optString("id"),client="native-"+UUID.randomUUID(),storedName=markedMediaName(name,actualMode);JSONObject replyObj=replyTo;String reply=replyObj==null?"":replyObj.optString("id");JSONObject optimistic=buildOptimisticMedia(bytes,storedName,mime,client,replyObj,actualMode);if(optimistic!=null){messages.add(optimistic);if(!deferVisualRefresh){if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();scrollToAbsoluteBottom();}cacheMessagesNow();}}setReply(null);api.upload("/api/messaging/conversations/"+cid+"/attachment",bytes,storedName,mime,"",client,reply,actualMode,(json,error)->main.post(()->{if(error!=null){if(optimistic!=null)markOptimisticFailed(client);toast(error.getMessage());cacheMessagesNow();return;}JSONObject m=json.optJSONObject("message");if(m!=null){try{m.put("viewMode",actualMode).put("mediaViewMode",actualMode);JSONArray serverAttachments=m.optJSONArray("attachments");if(serverAttachments!=null&&serverAttachments.length()>0){JSONObject serverAttachment=serverAttachments.optJSONObject(0);if(serverAttachment!=null){serverAttachment.put("viewMode",actualMode).put("mediaViewMode",actualMode);if(serverAttachment.optString("name").isEmpty())serverAttachment.put("name",storedName);}}}catch(Exception ignored){}replaceOptimistic(client,m);cacheMessagesNow();refreshInbox();}}));}
+    private void uploadAttachment(byte[] bytes,String name,String mime,int viewMode,boolean deferVisualRefresh){if(activeConversation==null||bytes==null||bytes.length==0)return;int actualMode=Math.max(0,Math.min(2,viewMode));String cid=activeConversation.optString("id"),client="native-"+UUID.randomUUID(),storedName=markedMediaName(name,actualMode);JSONObject replyObj=replyTo;String reply=replyObj==null?"":replyObj.optString("id");JSONObject optimistic=buildOptimisticMedia(bytes,storedName,mime,client,replyObj,actualMode);if(optimistic!=null){messages.add(optimistic);restoreActiveConversationToInbox(optimistic);if(!deferVisualRefresh){if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();scrollToAbsoluteBottom();}cacheMessagesNow();}}setReply(null);api.upload("/api/messaging/conversations/"+cid+"/attachment",bytes,storedName,mime,"",client,reply,actualMode,(json,error)->main.post(()->{if(error!=null){if(optimistic!=null)markOptimisticFailed(client);toast(error.getMessage());cacheMessagesNow();return;}JSONObject m=json.optJSONObject("message");if(m!=null){try{m.put("viewMode",actualMode).put("mediaViewMode",actualMode);JSONArray serverAttachments=m.optJSONArray("attachments");if(serverAttachments!=null&&serverAttachments.length()>0){JSONObject serverAttachment=serverAttachments.optJSONObject(0);if(serverAttachment!=null){serverAttachment.put("viewMode",actualMode).put("mediaViewMode",actualMode);if(serverAttachment.optString("name").isEmpty())serverAttachment.put("name",storedName);}}}catch(Exception ignored){}replaceOptimistic(client,m);cacheMessagesNow();refreshInbox();}}));}
 
     private boolean isFingerOver(View target,float rawX,float rawY,int extraDp){if(target==null||target.getVisibility()!=View.VISIBLE)return false;int[] loc=new int[2];target.getLocationOnScreen(loc);float ex=dp(extraDp);return rawX>=loc[0]-ex&&rawX<=loc[0]+target.getWidth()+ex&&rawY>=loc[1]-ex&&rawY<=loc[1]+target.getHeight()+ex;}
     private void syncRecordGestureUi(float rawX,float rawY){
@@ -3909,8 +4043,44 @@ reactionsCard.animate().cancel();
     private boolean isStickerMessage(JSONObject m){if(m==null)return false;if(m.optBoolean("sticker"))return true;JSONArray at=m.optJSONArray("attachments");if(at==null||at.length()==0)return false;JSONObject a=at.optJSONObject(0);if(a==null)return false;String mime=a.optString("mime",a.optString("mimeType",a.optString("type",""))).toLowerCase(Locale.ROOT);String name=a.optString("name","").toLowerCase(Locale.ROOT);String url=a.optString("url","").toLowerCase(Locale.ROOT);return a.optBoolean("sticker")||mime.contains("gif")||name.endsWith(".gif")||name.startsWith("sticker-")||url.contains("giphy.com");}
     private boolean isKnownLastSticker(JSONObject c,JSONObject last){if(c==null||last==null)return false;if(isStickerMessage(last))return true;String cid=c.optString("id");if(stickerLastConversations.contains(cid))return true;try{String raw=cache.get("messages:"+cid);if(raw!=null){JSONArray arr=new JSONObject(raw).optJSONArray("messages");if(arr!=null&&arr.length()>0){JSONObject lm=arr.optJSONObject(arr.length()-1);String lid=last.optString("id");if(lm!=null&&(lid.isEmpty()||lid.equals(lm.optString("id")))&&isStickerMessage(lm))return true;}}}catch(Exception ignored){}return false;}
     private JSONObject inboxConversationById(String id){if(id==null||id.isEmpty())return null;for(JSONObject conversation:inbox)if(id.equals(conversation.optString("id")))return conversation;return null;}
-    private List<JSONObject> visibleInboxMessageResults(){List<JSONObject> visible=new ArrayList<>();if(!inboxDedicatedSearch)return visible;for(JSONObject message:inboxMessageSearchResults)if(!"system".equals(message.optString("type"))&&inboxConversationById(message.optString("conversationId",message.optString("conversation_id","")))!=null)visible.add(message);return visible;}
-    private View buildInboxMessageSearchRow(JSONObject message){if(list!=null)list.setOnItemClickListener(null);String cid=message.optString("conversationId",message.optString("conversation_id",""));JSONObject conversation=inboxConversationById(cid);LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.VERTICAL);row.setPadding(dp(74),dp(7),dp(12),dp(7));TextView name=text(conversation==null?senderName(message):conversation.optString("name","Conversation"),14.5f,TEXT,Typeface.BOLD);row.addView(name,new LinearLayout.LayoutParams(-1,dp(25)));String body=message.optString("body",previewForType(message.optString("type")));TextView preview=text(body,13.5f,SUB,Typeface.NORMAL);preview.setSingleLine(true);preview.setEllipsize(TextUtils.TruncateAt.END);row.addView(preview,new LinearLayout.LayoutParams(-1,dp(24)));row.setOnClickListener(v->{JSONObject target=inboxConversationById(cid);if(target==null)return;inboxSearchScrollPosition=list==null?0:list.getFirstVisiblePosition();String messageId=message.optString("id");conversationOpenedFromInboxSearch=true;pendingSearchTargetMessageId=messageId;openConversation(target);main.postDelayed(()->openInboxSearchTarget(messageId,0),180);});return row;}
+    private List<JSONObject> visibleInboxMessageResults(){List<JSONObject> visible=new ArrayList<>();String current=searchBox==null?"":searchBox.getText().toString().trim().toLowerCase(Locale.ROOT);if(current.isEmpty()||!current.equals(inboxMessageSearchQuery))return visible;for(JSONObject message:inboxMessageSearchResults)if(!"system".equals(message.optString("type"))&&inboxConversationById(message.optString("conversationId",message.optString("conversation_id","")))!=null)visible.add(message);return visible;}
+    private View buildInboxMessageSearchRow(JSONObject message){
+        if(list!=null)list.setOnItemClickListener(null);
+        String cid=message.optString("conversationId",message.optString("conversation_id",""));
+        JSONObject conversation=inboxConversationById(cid);
+        LinearLayout row=new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(10),dp(6),dp(12),dp(6));
+        View avatar=conversation==null
+            ?buildUserAvatar(avatarUrl(message.optJSONObject("sender")),senderName(message),48)
+            :buildConversationAvatar(conversation,48);
+        row.addView(avatar,new LinearLayout.LayoutParams(dp(48),dp(48)));
+        LinearLayout labels=new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams labelsParams=new LinearLayout.LayoutParams(0,dp(54),1);
+        labelsParams.leftMargin=dp(10);
+        row.addView(labels,labelsParams);
+        TextView name=text(conversation==null?senderName(message):conversation.optString("name","Conversation"),14.5f,TEXT,Typeface.BOLD);
+        name.setSingleLine(true);
+        name.setEllipsize(TextUtils.TruncateAt.END);
+        labels.addView(name,new LinearLayout.LayoutParams(-1,dp(27)));
+        String body=message.optString("body",previewForType(message.optString("type")));
+        TextView preview=text(body,13.5f,SUB,Typeface.NORMAL);
+        preview.setSingleLine(true);
+        preview.setEllipsize(TextUtils.TruncateAt.END);
+        labels.addView(preview,new LinearLayout.LayoutParams(-1,dp(25)));
+        row.setOnClickListener(v->{
+            JSONObject target=inboxConversationById(cid);
+            if(target==null)return;
+            inboxSearchScrollPosition=list==null?0:list.getFirstVisiblePosition();
+            String messageId=message.optString("id");
+            conversationOpenedFromInboxSearch=true;
+            pendingSearchTargetMessageId=messageId;
+            openConversation(target);
+            main.postDelayed(()->openInboxSearchTarget(messageId,0),180);
+        });
+        return row;
+    }
     private final class InboxAdapter extends BaseAdapter{
         public int getCount(){return filteredInbox.size()+visibleInboxMessageResults().size();}
         public Object getItem(int p){if(p<filteredInbox.size())return filteredInbox.get(p);return visibleInboxMessageResults().get(p-filteredInbox.size());}
@@ -4301,7 +4471,7 @@ reactionsCard.animate().cancel();
     }
     private LinearLayout threadActionRow(String label,boolean danger){LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(22),0,dp(22),0);row.setMinimumHeight(dp(52));int col=danger?Color.rgb(255,64,92):Color.WHITE;TextView t=text(label,15.5f,col,Typeface.NORMAL);row.addView(t,new LinearLayout.LayoutParams(-1,dp(52)));return row;}
     private void showDeleteThreadConfirmation(JSONObject c){AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Permanently delete chat?").setMessage("This message will be removed from your Direct messages. Your chat history will be deleted for you.").setNegativeButton("Cancel",null).setPositiveButton("Delete",(d,w)->runThreadAction(c,"delete")).create();dialog.setOnShowListener(x->{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(Color.rgb(255,48,64));dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(Color.rgb(45,105,255));});dialog.show();}
-    private void runThreadAction(JSONObject c,String action){try{if("delete".equals(action)){api.patch("/api/messaging/conversations/"+c.optString("id")+"/settings",new JSONObject().put("archived",true),(json,error)->main.post(()->{if(error!=null)toast(error.getMessage());else{inbox.removeIf(x->x.optString("id").equals(c.optString("id")));filterInbox(searchBox==null?"":searchBox.getText().toString());}}));return;}boolean pinAction="pin".equals(action);boolean on=pinAction?!conversationIsPinned(c):!conversationIsMuted(c);JSONObject req=new JSONObject();if(pinAction)req.put("pinned",on);else req.put("muted",on);api.patch("/api/messaging/conversations/"+c.optString("id")+"/settings",req,(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONObject nc=json.optJSONObject("conversation");try{if(nc!=null){if(pinAction&&!nc.has("pinned")&&!nc.has("isPinned"))nc.put("pinned",on);for(int i=0;i<inbox.size();i++)if(inbox.get(i).optString("id").equals(nc.optString("id"))){inbox.set(i,nc);break;}}else if(pinAction)c.put("pinned",on);else c.put("muted",on);}catch(Exception ignored){}filterInbox(searchBox==null?"":searchBox.getText().toString());if(!pinAction)toast(on?"Messages muted":"Messages unmuted");}));}catch(Exception e){toast(e.getMessage());}}
+    private void runThreadAction(JSONObject c,String action){try{if("delete".equals(action)){api.patch("/api/messaging/conversations/"+c.optString("id")+"/settings",new JSONObject().put("archived",true),(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}rememberConversationDeletion(c);String identity=conversationIdentityKey(c);inbox.removeIf(x->identity.equals(conversationIdentityKey(x)));cacheInboxNow();filterInbox(searchBox==null?"":searchBox.getText().toString());}));return;}boolean pinAction="pin".equals(action);boolean on=pinAction?!conversationIsPinned(c):!conversationIsMuted(c);JSONObject req=new JSONObject();if(pinAction)req.put("pinned",on);else req.put("muted",on);api.patch("/api/messaging/conversations/"+c.optString("id")+"/settings",req,(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONObject nc=json.optJSONObject("conversation");try{if(nc!=null){if(pinAction&&!nc.has("pinned")&&!nc.has("isPinned"))nc.put("pinned",on);for(int i=0;i<inbox.size();i++)if(inbox.get(i).optString("id").equals(nc.optString("id"))){inbox.set(i,nc);break;}}else if(pinAction)c.put("pinned",on);else c.put("muted",on);}catch(Exception ignored){}filterInbox(searchBox==null?"":searchBox.getText().toString());if(!pinAction)toast(on?"Messages muted":"Messages unmuted");}));}catch(Exception e){toast(e.getMessage());}}
 
     private int readableOn(int color){double value=.299*Color.red(color)+.587*Color.green(color)+.114*Color.blue(color);return value>155?Color.rgb(18,18,20):Color.WHITE;}
     private int themeReplyBackground(){switch(activeTheme()){case"instagram":return Color.rgb(19,19,19);case"instagram-classic":return Color.rgb(244,235,250);case"love":return Color.rgb(83,17,70);case"ocean":return Color.rgb(213,239,247);case"sunset":return Color.rgb(255,230,216);case"monochrome":return Color.rgb(214,214,214);case"glow-pup":return Color.rgb(52,43,105);case"odyssey":return Color.rgb(36,85,90);case"supergirl":return Color.rgb(82,43,38);case"avatar":return Color.rgb(52,85,80);case"olivia":return Color.rgb(86,64,76);case"backrooms":return Color.rgb(81,76,41);case"deli-boys":return Color.rgb(61,57,52);case"heart-drive":return Color.rgb(50,27,112);case"valentines":return Color.rgb(73,18,118);default:return Color.rgb(223,225,229);}}
@@ -5110,7 +5280,7 @@ reactionsCard.animate().cancel();
                 if(arr!=null){
                     for(int i=0;i<arr.length();i++){
                         JSONObject item=arr.optJSONObject(i);
-                        if(item==null||item.optBoolean("deleted"))continue;
+                        if(item==null||item.optBoolean("deleted")||!messageAfterDeletion(conversationId,item))continue;
 
                         String id=item.optString("id");
                         if(!id.isEmpty()&&known.contains(id))continue;
@@ -5199,7 +5369,7 @@ reactionsCard.animate().cancel();
     }
     private void jumpToMessage(String messageId){if(messageId==null||messageId.isEmpty()||activeConversation==null)return;int index=findMessageIndex(messageId);if(index>=0){animateMessageTarget(index);return;}loadOlderUntil(messageId,0);}
     private int findMessageIndex(String id){for(int i=0;i<messages.size();i++)if(id.equals(messages.get(i).optString("id")))return i;return-1;}
-    private void loadOlderUntil(String target,int attempts){if(attempts>=40||beforeCursor==null||beforeCursor.isEmpty()){if(target.equals(pendingSearchTargetMessageId))setSearchTargetLoading(false);toast("Message is no longer available.");return;}String cursor=beforeCursor;api.get("/api/messaging/conversations/"+activeConversation.optString("id")+"/messages?limit=80&before="+cursor,(json,error)->main.post(()->{if(error!=null){if(target.equals(pendingSearchTargetMessageId))setSearchTargetLoading(false);toast(error.getMessage());return;}JSONArray arr=json.optJSONArray("messages");beforeCursor=json.optString("nextBefore","");if(arr!=null){List<JSONObject> older=new ArrayList<>();for(int i=0;i<arr.length();i++){JSONObject x=arr.optJSONObject(i);if(x!=null)older.add(x);}messages.addAll(0,older);if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();}int idx=findMessageIndex(target);if(idx>=0){if(target.equals(pendingSearchTargetMessageId))setSearchTargetLoading(false);animateMessageTarget(idx);}else if(!beforeCursor.isEmpty()&&!beforeCursor.equals(cursor))loadOlderUntil(target,attempts+1);else{if(target.equals(pendingSearchTargetMessageId))setSearchTargetLoading(false);toast("Message is no longer available.");}}));}
+    private void loadOlderUntil(String target,int attempts){if(attempts>=40||beforeCursor==null||beforeCursor.isEmpty()){if(target.equals(pendingSearchTargetMessageId))setSearchTargetLoading(false);toast("Message is no longer available.");return;}String conversationId=activeConversation==null?"":activeConversation.optString("id");String cursor=beforeCursor;api.get("/api/messaging/conversations/"+conversationId+"/messages?limit=80&before="+cursor,(json,error)->main.post(()->{if(error!=null){if(target.equals(pendingSearchTargetMessageId))setSearchTargetLoading(false);toast(error.getMessage());return;}JSONArray arr=json.optJSONArray("messages");beforeCursor=json.optString("nextBefore","");if(arr!=null){List<JSONObject> older=new ArrayList<>();for(int i=0;i<arr.length();i++){JSONObject x=arr.optJSONObject(i);if(x!=null&&messageAfterDeletion(conversationId,x))older.add(x);}messages.addAll(0,older);if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();}int idx=findMessageIndex(target);if(idx>=0){if(target.equals(pendingSearchTargetMessageId))setSearchTargetLoading(false);animateMessageTarget(idx);}else if(!beforeCursor.isEmpty()&&!beforeCursor.equals(cursor))loadOlderUntil(target,attempts+1);else{if(target.equals(pendingSearchTargetMessageId))setSearchTargetLoading(false);toast("Message is no longer available.");}}));}
     private void animateMessageTarget(int messageIndex){
         if(list==null)return;
 

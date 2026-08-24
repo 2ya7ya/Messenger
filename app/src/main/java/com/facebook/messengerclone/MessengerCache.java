@@ -25,5 +25,9 @@ final class MessengerCache extends SQLiteOpenHelper {
         }
     }
 
+    synchronized void remove(String key) {
+        getWritableDatabase().delete("snapshots", "cache_key=?", new String[]{key});
+    }
+
     synchronized void clear() { getWritableDatabase().delete("snapshots", null, null); }
 }
