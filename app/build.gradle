@@ -8,8 +8,8 @@ android {
         applicationId 'com.facebook.messengerclone'
         minSdk 24
         targetSdk 35
-        versionCode 186
-        versionName '1.85-inbox-delete-search-icons'
+        versionCode 187
+        versionName '1.86-cache-speed-legacy-restore'
         buildConfigField 'String', 'BASE_URL', '"https://messengerextra.duckdns.org"'
     }
 
