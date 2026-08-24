@@ -1387,7 +1387,7 @@ reactionsCard.animate().cancel();
             if(replyBar!=null)replyBar.setTranslationY(0);
             if(list!=null){
                 list.setTranslationY(0);
-                list.setPadding(dp(10),dp(12),dp(10),dp(5));
+                list.setPadding(0,dp(12),0,dp(5));
             }
         }
 
@@ -1460,7 +1460,7 @@ reactionsCard.animate().cancel();
         host.setTranslationY(sheetH);stickerBridge.setTranslationY(sheetH);composer.setTranslationY(0);if(replyBar!=null)replyBar.setTranslationY(0);if(list!=null){applyConversationPickerInset(sheetH);list.post(()->list.setSelection(Math.max(0,list.getCount()-1)));}host.animate().translationY(0).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();applyConversationPickerInset(sheetH);applyConversationPickerInset(sheetH);composer.animate().translationY(-sheetH).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();
         loader.load("");
     }
-    private void dismissMessengerStickerPicker(View host){if(host==null||root==null)return;View bridge=root.findViewWithTag("messenger-sticker-bridge");int h=Math.max(host.getHeight(),dp(360));host.animate().translationY(h).setDuration(220).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(()->{if(host.getParent()==root)root.removeView(host);}).start();if(bridge!=null)bridge.animate().translationY(h).setDuration(220).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(()->{if(bridge.getParent()==root)root.removeView(bridge);}).start();if(composer!=null)composer.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null)replyBar.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.setPadding(dp(10),dp(12),dp(10),dp(5));}
+    private void dismissMessengerStickerPicker(View host){if(host==null||root==null)return;View bridge=root.findViewWithTag("messenger-sticker-bridge");int h=Math.max(host.getHeight(),dp(360));host.animate().translationY(h).setDuration(220).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(()->{if(host.getParent()==root)root.removeView(host);}).start();if(bridge!=null)bridge.animate().translationY(h).setDuration(220).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(()->{if(bridge.getParent()==root)root.removeView(bridge);}).start();if(composer!=null)composer.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null)replyBar.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.setPadding(0,dp(12),0,dp(5));}
 
     private JSONObject buildOptimisticSticker(String url,String client,JSONObject reply){JSONObject temp=new JSONObject();try{temp.put("id","tmp-"+System.nanoTime());temp.put("clientId",client);temp.put("conversationId",activeConversation==null?"":activeConversation.optString("id"));temp.put("senderId",selfId);temp.put("type","image");temp.put("body","");temp.put("createdAt",new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX",Locale.US).format(new Date()));temp.put("status","sending");temp.put("pending",true);temp.put("sticker",true);temp.put("sender",new JSONObject().put("id",selfId).put("name","You").put("isSelf",true));temp.put("attachments",new JSONArray().put(new JSONObject().put("url",url).put("mime","image/gif").put("name","sticker.gif").put("sticker",true)));temp.put("reactions",new JSONArray());if(reply!=null)temp.put("reply",replySnapshot(reply));}catch(Exception ignored){}return temp;}
     private void sendStickerFromUrl(String url){if(activeConversation==null||url==null||url.isEmpty())return;final String cid=activeConversation.optString("id"),client="sticker-native-"+UUID.randomUUID();stickerLastConversations.add(cid);final JSONObject replyObj=replyTo;final String reply=replyObj==null?"":replyObj.optString("id");JSONObject temp=buildOptimisticSticker(url,client,replyObj);messages.add(temp);restoreActiveConversationToInbox(temp);if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();scrollToAbsoluteBottom();}cacheMessagesNow();if(replyObj!=null)setReply(null);new Thread(()->{try{byte[] bytes=stickers.getCachedOrFetch(url);if(bytes==null||bytes.length==0)throw new Exception("Could not load sticker.");api.upload("/api/messaging/conversations/"+cid+"/attachment",bytes,"sticker-"+System.currentTimeMillis()+".gif","image/gif","",client,reply,(json,error)->main.post(()->{if(error!=null){markOptimisticFailed(client);toast(error.getMessage());return;}JSONObject m=json.optJSONObject("message");if(m!=null){try{m.put("sticker",true);}catch(Exception ignored){}stickerLastConversations.add(cid);replaceOptimistic(client,m);cacheMessagesNow();refreshInbox();}}));}catch(Exception ex){main.post(()->{markOptimisticFailed(client);toast(ex.getMessage());});}}).start();}
@@ -1490,7 +1490,7 @@ reactionsCard.animate().cancel();
         if(list!=null){
             list.animate().cancel();
             list.setTranslationY(0f);
-            list.setPadding(dp(10),dp(12),dp(10),dp(5));
+            list.setPadding(0,dp(12),0,dp(5));
         }
     }
 
@@ -2783,7 +2783,7 @@ reactionsCard.animate().cancel();
         }
 
         // Keep normal conversation padding only.
-        list.setPadding(dp(10),dp(12),dp(10),dp(5));
+        list.setPadding(0,dp(12),0,dp(5));
         list.setClipToPadding(true);
 
         // Move the entire conversation by exactly the same distance
@@ -2814,7 +2814,7 @@ reactionsCard.animate().cancel();
             if(replyBar!=null)replyBar.setTranslationY(0);
             if(list!=null){
                 list.setTranslationY(0);
-                list.setPadding(dp(10),dp(12),dp(10),dp(5));
+                list.setPadding(0,dp(12),0,dp(5));
             }
         }
 
@@ -3852,24 +3852,31 @@ reactionsCard.animate().cancel();
 
     private int targetVideoBitrate(Uri uri){
         long durationMs=0;MediaMetadataRetriever retriever=new MediaMetadataRetriever();try{retriever.setDataSource(this,uri);durationMs=parseLong(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION));}catch(Exception ignored){}finally{try{retriever.release();}catch(Exception ignored){}}
-        if(durationMs<=0)return 650000;double seconds=Math.max(1d,durationMs/1000d);long target=(long)((2.5d*1024d*1024d*8d)/seconds)-96000L;return(int)Math.max(180000L,Math.min(850000L,target));
+        if(durationMs<=0)return 500000;double seconds=Math.max(1d,durationMs/1000d);long target=(long)((1.5d*1024d*1024d*8d)/seconds)-96000L;return(int)Math.max(150000L,Math.min(650000L,target));
     }
     private void failPreparedVideo(PendingAttachmentUpload pending){if(pending!=null&&pending.optimistic!=null)markOptimisticFailed(pending.client);cacheMessagesNow();toast("Could not prepare this video. Please try again.");}
     @androidx.annotation.OptIn(markerClass=androidx.media3.common.util.UnstableApi.class)
     private void compressAndUploadVideo(Uri uri,byte[] previewBytes,String name,int viewMode,boolean deferVisualRefresh){
         if(uri==null||previewBytes==null||previewBytes.length==0)return;String uploadName=name==null||name.trim().isEmpty()?"video.mp4":name.trim().replaceFirst("(?i)\\.[a-z0-9]{1,6}$","")+".mp4";PendingAttachmentUpload pending=beginAttachmentUpload(previewBytes,uploadName,"video/mp4",viewMode,deferVisualRefresh);if(pending==null)return;
         File output=new File(getCacheDir(),"video-upload-"+UUID.randomUUID()+".mp4");if(output.exists())output.delete();
+        startVideoTransform(uri,pending,output,targetVideoBitrate(uri),true);
+    }
+    @androidx.annotation.OptIn(markerClass=androidx.media3.common.util.UnstableApi.class)
+    private void startVideoTransform(Uri uri,PendingAttachmentUpload pending,File output,int bitrate,boolean resize){
         try{
-            androidx.media3.transformer.VideoEncoderSettings settings=new androidx.media3.transformer.VideoEncoderSettings.Builder().setBitrate(targetVideoBitrate(uri)).build();
+            if(output.exists())output.delete();
+            androidx.media3.transformer.VideoEncoderSettings settings=new androidx.media3.transformer.VideoEncoderSettings.Builder().setBitrate(bitrate).build();
             androidx.media3.transformer.DefaultEncoderFactory encoders=new androidx.media3.transformer.DefaultEncoderFactory.Builder(this).setRequestedVideoEncoderSettings(settings).build();
             final androidx.media3.transformer.Transformer[] running={null};
             androidx.media3.transformer.Transformer.Listener listener=new androidx.media3.transformer.Transformer.Listener(){
                 @Override public void onCompleted(androidx.media3.transformer.Composition composition,androidx.media3.transformer.ExportResult result){androidx.media3.transformer.Transformer transformer=running[0];if(transformer!=null)activeVideoTransformers.remove(transformer);temporaryMediaExecutor.execute(()->{try{byte[] compressed=readAll(new FileInputStream(output));output.delete();if(compressed.length==0)throw new Exception("Empty export");main.post(()->transmitAttachment(pending,compressed,"video/mp4"));}catch(Exception error){output.delete();main.post(()->failPreparedVideo(pending));}});}
-                @Override public void onError(androidx.media3.transformer.Composition composition,androidx.media3.transformer.ExportResult result,androidx.media3.transformer.ExportException error){androidx.media3.transformer.Transformer transformer=running[0];if(transformer!=null)activeVideoTransformers.remove(transformer);output.delete();failPreparedVideo(pending);}
+                @Override public void onError(androidx.media3.transformer.Composition composition,androidx.media3.transformer.ExportResult result,androidx.media3.transformer.ExportException error){androidx.media3.transformer.Transformer transformer=running[0];if(transformer!=null)activeVideoTransformers.remove(transformer);output.delete();if(resize)startVideoTransform(uri,pending,output,bitrate,false);else failPreparedVideo(pending);}
             };
             androidx.media3.transformer.Transformer transformer=new androidx.media3.transformer.Transformer.Builder(this).setEncoderFactory(encoders).setVideoMimeType(androidx.media3.common.MimeTypes.VIDEO_H264).setAudioMimeType(androidx.media3.common.MimeTypes.AUDIO_AAC).addListener(listener).build();
-            androidx.media3.transformer.Effects effects=new androidx.media3.transformer.Effects(java.util.Collections.emptyList(),java.util.Collections.singletonList(androidx.media3.effect.Presentation.createForHeight(720)));androidx.media3.transformer.EditedMediaItem edited=new androidx.media3.transformer.EditedMediaItem.Builder(androidx.media3.common.MediaItem.fromUri(uri)).setEffects(effects).setFrameRate(30).build();running[0]=transformer;activeVideoTransformers.add(transformer);transformer.start(edited,output.getAbsolutePath());
-        }catch(Exception error){activeVideoTransformers.removeIf(x->x==null);output.delete();failPreparedVideo(pending);}
+            androidx.media3.transformer.EditedMediaItem.Builder editedBuilder=new androidx.media3.transformer.EditedMediaItem.Builder(androidx.media3.common.MediaItem.fromUri(uri)).setFrameRate(30);
+            if(resize){androidx.media3.transformer.Effects effects=new androidx.media3.transformer.Effects(java.util.Collections.emptyList(),java.util.Collections.singletonList(androidx.media3.effect.Presentation.createForHeight(720)));editedBuilder.setEffects(effects);}
+            androidx.media3.transformer.EditedMediaItem edited=editedBuilder.build();running[0]=transformer;activeVideoTransformers.add(transformer);transformer.start(edited,output.getAbsolutePath());
+        }catch(Exception error){output.delete();if(resize)startVideoTransform(uri,pending,output,bitrate,false);else failPreparedVideo(pending);}
     }
 
     private boolean isFingerOver(View target,float rawX,float rawY,int extraDp){if(target==null||target.getVisibility()!=View.VISIBLE)return false;int[] loc=new int[2];target.getLocationOnScreen(loc);float ex=dp(extraDp);return rawX>=loc[0]-ex&&rawX<=loc[0]+target.getWidth()+ex&&rawY>=loc[1]-ex&&rawY<=loc[1]+target.getHeight()+ex;}
@@ -5321,7 +5328,7 @@ reactionsCard.animate().cancel();
                 sideTime.setTranslationY(dp(19));
             }
 
-            JSONArray reactions=m.optJSONArray("reactions");if(reactions!=null&&reactions.length()>0){StringBuilder r=new StringBuilder();for(int i=0;i<reactions.length();i++){JSONObject rr=reactions.optJSONObject(i);if(rr!=null)r.append(rr.optString("emoji"));}if(reactions.length()>1)r.append(" ").append(reactions.length());int reactionBg=themeAccent();TextView badge=text(r.toString(),12,readableOn(reactionBg),Typeface.NORMAL);badge.setGravity(Gravity.CENTER);badge.setPadding(reactions.length()==1?0:dp(5),0,reactions.length()==1?0:dp(5),0);badge.setBackground(bg(reactionBg,11));badge.setElevation(0f);LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(reactions.length()==1?dp(22):-2,dp(22));bp.gravity=mine?Gravity.END:Gravity.START;bp.topMargin=-dp(4);stack.addView(badge,bp);badge.setOnClickListener(v->showReactionDetails(m));}
+            JSONArray reactions=m.optJSONArray("reactions");if(reactions!=null&&reactions.length()>0){StringBuilder r=new StringBuilder();for(int i=0;i<reactions.length();i++){JSONObject rr=reactions.optJSONObject(i);if(rr!=null)r.append(rr.optString("emoji"));}if(reactions.length()>1)r.append(" ").append(reactions.length());TextView badge=text(r.toString(),12,Color.WHITE,Typeface.NORMAL);badge.setGravity(Gravity.CENTER);badge.setPadding(reactions.length()==1?0:dp(5),0,reactions.length()==1?0:dp(5),0);GradientDrawable reactionShape=bg(Color.rgb(34,32,35),11);reactionShape.setStroke(dp(1),themeAccent());badge.setBackground(reactionShape);badge.setElevation(0f);LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(reactions.length()==1?dp(22):-2,dp(22));bp.gravity=mine?Gravity.END:Gravity.START;bp.topMargin=-dp(4);stack.addView(badge,bp);badge.setOnClickListener(v->showReactionDetails(m));}
             wireMessageGesture(content,content,m,mine,replyArrow,replyProgress);if(mine&&p==lastMineIndex()&&p==messages.size()-1&&!m.optBoolean("pending")){String statusText=status(m);if(!statusText.isEmpty()){TextView st=text(statusText,11.5f,Color.rgb(138,141,145),Typeface.NORMAL);st.setGravity(Gravity.END);LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-2,dp(19));sp.gravity=Gravity.END;sp.rightMargin=dp(7);sp.topMargin=dp(1);outer.addView(st,sp);if("read".equals(m.optString("status")))main.postDelayed(()->{if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();},15000);}}return outer;}
         private String replyPreviewFromReply(JSONObject r){if(isStickerMessage(r)||"sticker".equals(r.optString("type")))return"Sticker";String b=r.optString("body").replaceFirst("^[🎤📷🎥🎬]\\s*","").trim();if(!b.isEmpty())return b;String t=r.optString("type");if("audio".equals(t))return"Voice message";if("image".equals(t))return"Photo";if("video".equals(t))return"Video";if("file".equals(t))return"File";if("shared_reel".equals(t))return"Reel";if("shared_post".equals(t))return"Post";return"Message";}
     }

@@ -97,7 +97,7 @@ final class ApiClient {
                     try(response){
                         String text=response.body()==null?"":response.body().string();JSONObject json=null;try{json=new JSONObject(text.isEmpty()?"{}":text);}catch(Exception ignored){}
                         if(response.isSuccessful()&&json!=null){cb.done(json,null);return;}
-                        if(video&&!compatibility&&response.code()!=401&&response.code()!=403&&response.code()!=413){uploadAttempt(path,bytes,fileName,mimeType,caption,clientId,replyToId,viewMode,true,cb);return;}
+                        if(video&&!compatibility&&response.code()!=401&&response.code()!=403){uploadAttempt(path,bytes,fileName,mimeType,caption,clientId,replyToId,viewMode,true,cb);return;}
                         String fallback=response.code()==413?"Video is too large to upload.":"Request failed";String detail=json==null?fallback:json.optString("error",fallback);cb.done(json,new IOException(detail));
                     }catch(Exception error){if(video&&!compatibility)uploadAttempt(path,bytes,fileName,mimeType,caption,clientId,replyToId,viewMode,true,cb);else cb.done(null,new IOException("Request failed"));}
                 }
