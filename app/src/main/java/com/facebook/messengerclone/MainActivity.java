@@ -4114,7 +4114,7 @@ reactionsCard.animate().cancel();
         JSONObject conversation=inboxConversationById(cid);boolean group=conversation!=null&&"group".equals(conversation.optString("type"));String title=group?conversation.optString("name","Group chat"):latest.optString("sender","New message");
         Notification.InboxStyle style=new Notification.InboxStyle().setBigContentTitle(title);for(int i=0;i<history.length();i++){JSONObject entry=history.optJSONObject(i);if(entry!=null)style.addLine(entry.optString("text"));}builder.setStyle(style);
         builder.setSmallIcon(R.drawable.app_icon).setLargeIcon(latestAvatar).setContentTitle(title).setContentText(latest.optString("text")).setContentIntent(tap).setAutoCancel(true).setCategory(Notification.CATEGORY_MESSAGE).setGroup("conversation-"+cid).setWhen(latest.optLong("at",System.currentTimeMillis())).setShowWhen(true).setOnlyAlertOnce(!alert);
-        if(!alert){if(Build.VERSION.SDK_INT>=26)builder.setSilent(true);else builder.setDefaults(0).setSound(null).setVibrate(null);}
+        if(!alert)builder.setDefaults(0).setSound(null).setVibrate(null);
         NotificationManager manager=(NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE);if(manager!=null)manager.notify(cid.hashCode(),builder.build());
     }
 
