@@ -4062,7 +4062,7 @@ reactionsCard.animate().cancel();
         else if(announce)history.put(replacement);else return;
         while(history.length()>8)history.remove(0);
         saveNotificationHistory(cid,history);
-        JSONArray snapshot;
+        final JSONArray snapshot;
         try{snapshot=new JSONArray(history.toString());}catch(Exception ignored){snapshot=history;}
         temporaryMediaExecutor.execute(()->renderConversationNotification(cid,snapshot));
     }
