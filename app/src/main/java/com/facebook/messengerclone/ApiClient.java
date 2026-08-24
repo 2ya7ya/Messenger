@@ -69,19 +69,39 @@ final class ApiClient {
     }
 
     void upload(String path, byte[] bytes, String fileName, String mimeType, String caption, String clientId, String replyToId, int viewMode, JsonCallback cb) {
+        uploadAttempt(path,bytes,fileName,mimeType,caption,clientId,replyToId,viewMode,false,cb);
+    }
+
+    private void uploadAttempt(String path, byte[] bytes, String fileName, String mimeType, String caption, String clientId, String replyToId, int viewMode, boolean compatibility, JsonCallback cb) {
         try {
             String actualMime=(mimeType==null||mimeType.isEmpty())?"application/octet-stream":mimeType;
+            boolean video=actualMime.toLowerCase(java.util.Locale.ROOT).startsWith("video/");
+            String actualName=fileName==null?"attachment":fileName;
+            if(compatibility&&video){
+                actualMime="video/mp4";
+                actualName=actualName.replaceAll("[^A-Za-z0-9._-]","_");
+                if(!actualName.toLowerCase(java.util.Locale.ROOT).endsWith(".mp4"))actualName+=".mp4";
+            }
             RequestBody body=RequestBody.create(bytes, MediaType.get("application/octet-stream"));
             Request.Builder b=request(path).post(body)
                     .header("Content-Type", "application/octet-stream")
-                    .header("X-File-Name", URLEncoder.encode(fileName==null?"attachment":fileName, StandardCharsets.UTF_8))
+                    .header("X-File-Name", URLEncoder.encode(actualName, StandardCharsets.UTF_8))
                     .header("X-File-Type", actualMime)
                     .header("X-Client-Id", clientId==null?"":clientId)
-                    .header("X-Caption", URLEncoder.encode(caption==null?"":caption, StandardCharsets.UTF_8))
-                    .header("X-View-Mode", Integer.toString(Math.max(0,Math.min(2,viewMode))))
-                    .header("X-Media-View-Mode", Integer.toString(Math.max(0,Math.min(2,viewMode))));
+                    .header("X-Caption", URLEncoder.encode(caption==null?"":caption, StandardCharsets.UTF_8));
+            if(!compatibility){b.header("X-View-Mode",Integer.toString(Math.max(0,Math.min(2,viewMode)))).header("X-Media-View-Mode",Integer.toString(Math.max(0,Math.min(2,viewMode))));}
             if(replyToId!=null&&!replyToId.isEmpty())b.header("X-Reply-To-Id",replyToId);
-            execute(b.build(),cb);
+            http.newCall(b.build()).enqueue(new Callback(){
+                @Override public void onFailure(Call call,IOException error){cb.done(null,error);}
+                @Override public void onResponse(Call call,Response response){
+                    try(response){
+                        String text=response.body()==null?"":response.body().string();JSONObject json=null;try{json=new JSONObject(text.isEmpty()?"{}":text);}catch(Exception ignored){}
+                        if(response.isSuccessful()&&json!=null){cb.done(json,null);return;}
+                        if(video&&!compatibility&&response.code()!=401&&response.code()!=403&&response.code()!=413){uploadAttempt(path,bytes,fileName,mimeType,caption,clientId,replyToId,viewMode,true,cb);return;}
+                        String fallback=response.code()==413?"Video is too large to upload.":"Request failed";String detail=json==null?fallback:json.optString("error",fallback);cb.done(json,new IOException(detail));
+                    }catch(Exception error){if(video&&!compatibility)uploadAttempt(path,bytes,fileName,mimeType,caption,clientId,replyToId,viewMode,true,cb);else cb.done(null,new IOException("Request failed"));}
+                }
+            });
         } catch(Exception e){ cb.done(null,e); }
     }
 

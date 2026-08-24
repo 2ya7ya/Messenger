@@ -766,10 +766,12 @@ public class MainActivity extends Activity {
     private void buildInstagramComposer(LinearLayout page){
         composer=new LinearLayout(this);
         composer.setGravity(Gravity.CENTER_VERTICAL);
-        composer.setPadding(dp(7),dp(4),dp(7),dp(4));
-        composer.setBackground(null);
-        LinearLayout.LayoutParams outerLp=new LinearLayout.LayoutParams(-1,dp(58));
-        outerLp.setMargins(dp(3),dp(2),dp(3),dp(4));
+        // The composer itself is only a transparent layout host. The rounded
+        // message field below is the sole visible background.
+        composer.setPadding(0,0,0,0);
+        composer.setBackgroundColor(Color.TRANSPARENT);
+        LinearLayout.LayoutParams outerLp=new LinearLayout.LayoutParams(-1,dp(52));
+        outerLp.setMargins(dp(7),0,dp(7),dp(5));
         page.addView(composer,outerLp);
 
         LinearLayout pill=new LinearLayout(this);
@@ -4039,6 +4041,39 @@ reactionsCard.animate().cancel();
     private String notificationMessageText(JSONObject message){String body=message==null?"":message.optString("body").trim();return body.isEmpty()?replyPreview(message):body;}
     private long notificationMessageTime(JSONObject message){Date created=parseDate(message==null?"":message.optString("createdAt"));return created==null?System.currentTimeMillis():created.getTime();}
     private JSONObject notificationEntry(String cid,JSONObject message){JSONObject entry=new JSONObject();try{JSONObject sender=message.optJSONObject("sender");entry.put("id",message.optString("id",message.optString("messageId",message.optString("clientId",""))));entry.put("text",notificationMessageText(message));entry.put("sender",isMine(message)?"You":notificationSenderName(cid,message));entry.put("senderId",sender==null?message.optString("senderId"):sender.optString("id",message.optString("senderId")));entry.put("avatar",sender==null?"":avatarUrl(sender));entry.put("mine",isMine(message));entry.put("at",notificationMessageTime(message));}catch(Exception ignored){}return entry;}
+    private JSONObject messageBeforeNotificationUpdate(String cid,JSONObject incoming){
+        if(incoming==null)return null;
+        if(activeConversation!=null&&cid.equals(activeConversation.optString("id"))){JSONObject found=findPreviousMessage(messages,incoming);if(found!=null)return found;}
+        try{
+            String raw=cache.get("messages:"+cid);JSONArray cached=raw==null?null:new JSONObject(raw).optJSONArray("messages");
+            String id=incoming.optString("id"),client=incoming.optString("clientId");
+            if(cached!=null)for(int i=cached.length()-1;i>=0;i--){JSONObject old=cached.optJSONObject(i);if(old==null)continue;if(!id.isEmpty()&&id.equals(old.optString("id")))return old;if(!client.isEmpty()&&client.equals(old.optString("clientId")))return old;}
+        }catch(Exception ignored){}
+        return null;
+    }
+    private String reactionIdentity(JSONObject reaction){if(reaction==null)return"";String userId=reaction.optString("userId",reaction.optString("userid"));if(userId.isEmpty()){JSONObject user=reaction.optJSONObject("user");if(user!=null)userId=user.optString("id");}return userId+"|"+reaction.optString("emoji");}
+    private boolean reactionIsMine(JSONObject reaction){if(reaction==null)return false;if(reaction.optBoolean("mine"))return true;String identity=reactionIdentity(reaction);int split=identity.indexOf('|');String userId=split<0?identity:identity.substring(0,split);return!selfId.isEmpty()&&selfId.equals(userId);}
+    private JSONObject addedExternalReaction(JSONObject before,JSONObject updated){
+        if(before==null||updated==null||!isMine(updated))return null;
+        Set<String> existing=new HashSet<>();JSONArray oldReactions=before.optJSONArray("reactions");if(oldReactions!=null)for(int i=0;i<oldReactions.length();i++)existing.add(reactionIdentity(oldReactions.optJSONObject(i)));
+        JSONArray next=updated.optJSONArray("reactions");if(next==null)return null;for(int i=next.length()-1;i>=0;i--){JSONObject reaction=next.optJSONObject(i);String key=reactionIdentity(reaction);if(reaction!=null&&!reactionIsMine(reaction)&&!key.isEmpty()&&!existing.contains(key))return reaction;}
+        return null;
+    }
+    private String reactionSenderName(String cid,JSONObject reaction){
+        String direct=reaction==null?"":reaction.optString("name").trim();JSONObject user=reaction==null?null:reaction.optJSONObject("user");if(direct.isEmpty()&&user!=null)direct=user.optString("name").trim();JSONObject sender=reaction==null?null:reaction.optJSONObject("sender");if(direct.isEmpty()&&sender!=null)direct=sender.optString("name").trim();
+        String identity=reactionIdentity(reaction);int split=identity.indexOf('|');String userId=split<0?identity:identity.substring(0,split);JSONObject conversation=inboxConversationById(cid);JSONArray participants=conversation==null?null:conversation.optJSONArray("participants");if(participants!=null)for(int i=0;i<participants.length();i++){JSONObject person=participants.optJSONObject(i);if(person!=null&&userId.equals(person.optString("id"))){String nickname=person.optString("nickname").trim();return nickname.isEmpty()?person.optString("name",direct.isEmpty()?"Facebook user":direct):nickname;}}
+        return direct.isEmpty()?"Facebook user":direct;
+    }
+    private void syncReactionNotification(String cid,JSONObject message,JSONObject reaction){
+        if(cid==null||cid.isEmpty()||message==null||reaction==null||reactionIsMine(reaction))return;
+        if(appVisible&&activeConversation!=null&&cid.equals(activeConversation.optString("id")))return;
+        if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)return;
+        JSONArray history=loadNotificationHistory(cid);String messageId=message.optString("id",message.optString("messageId")),identity=reactionIdentity(reaction);String eventId="reaction:"+messageId+":"+identity;
+        for(int i=0;i<history.length();i++){JSONObject old=history.optJSONObject(i);if(old!=null&&eventId.equals(old.optString("id")))return;}
+        String body=message.optString("body").trim(),type=message.optString("type","text");String notificationText="Liked your message";if("text".equals(type)&&!body.isEmpty())notificationText+=": \""+body+"\"";
+        JSONObject entry=new JSONObject();try{entry.put("id",eventId).put("text",notificationText).put("sender",reactionSenderName(cid,reaction)).put("senderId",identity.contains("|")?identity.substring(0,identity.indexOf('|')):identity).put("avatar",reactionAvatar(reaction)).put("mine",false).put("at",System.currentTimeMillis());}catch(Exception ignored){}
+        history.put(entry);while(history.length()>8)history.remove(0);saveNotificationHistory(cid,history);JSONArray candidate;try{candidate=new JSONArray(history.toString());}catch(Exception ignored){candidate=history;}final JSONArray snapshot=candidate;temporaryMediaExecutor.execute(()->renderConversationNotification(cid,snapshot,true));
+    }
     private String notificationHistoryKey(String cid){return"notification-history:"+cid;}
     private JSONArray loadNotificationHistory(String cid){
         android.content.SharedPreferences prefs=getSharedPreferences("messenger_notification_history",MODE_PRIVATE);
@@ -4065,9 +4100,10 @@ reactionsCard.animate().cancel();
         JSONArray snapshotCandidate;
         try{snapshotCandidate=new JSONArray(history.toString());}catch(Exception ignored){snapshotCandidate=history;}
         final JSONArray snapshot=snapshotCandidate;
-        temporaryMediaExecutor.execute(()->renderConversationNotification(cid,snapshot));
+        final boolean shouldAlert=announce;
+        temporaryMediaExecutor.execute(()->renderConversationNotification(cid,snapshot,shouldAlert));
     }
-    private void renderConversationNotification(String cid,JSONArray history){
+    private void renderConversationNotification(String cid,JSONArray history,boolean alert){
         if(history==null||history.length()==0)return;
         JSONObject latest=history.optJSONObject(history.length()-1);if(latest==null)return;
         String avatar=latest.optString("avatar"),absoluteAvatar=avatar==null?"":(avatar.startsWith("http")||avatar.startsWith("data:")||avatar.startsWith("file:")?avatar:api.absolute(avatar));
@@ -4075,13 +4111,10 @@ reactionsCard.animate().cancel();
         Intent open=new Intent(this,MainActivity.class).putExtra("conversationId",cid).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent tap=PendingIntent.getActivity(this,cid.hashCode(),open,PendingIntent.FLAG_UPDATE_CURRENT|(Build.VERSION.SDK_INT>=23?PendingIntent.FLAG_IMMUTABLE:0));
         Notification.Builder builder=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,MESSAGE_CHANNEL_ID):new Notification.Builder(this);
-        if(Build.VERSION.SDK_INT>=28){
-            android.app.Person self=new android.app.Person.Builder().setName("You").setKey("self").build();Notification.MessagingStyle style=new Notification.MessagingStyle(self);JSONObject conversation=inboxConversationById(cid);boolean group=conversation!=null&&"group".equals(conversation.optString("type"));if(group)style.setConversationTitle(conversation.optString("name","Group chat")).setGroupConversation(true);
-            for(int i=0;i<history.length();i++){JSONObject entry=history.optJSONObject(i);if(entry==null)continue;android.app.Person.Builder personBuilder=new android.app.Person.Builder().setName(entry.optString("sender","Facebook user")).setKey(entry.optString("senderId","sender"));if(i==history.length()-1&&latestAvatar!=null)personBuilder.setIcon(android.graphics.drawable.Icon.createWithBitmap(latestAvatar));style.addMessage(entry.optString("text"),entry.optLong("at",System.currentTimeMillis()),personBuilder.build());}builder.setStyle(style);
-        }else{
-            Notification.MessagingStyle style=new Notification.MessagingStyle("You");for(int i=0;i<history.length();i++){JSONObject entry=history.optJSONObject(i);if(entry!=null)style.addMessage(entry.optString("text"),entry.optLong("at",System.currentTimeMillis()),entry.optString("sender","Facebook user"));}builder.setStyle(style);
-        }
-        builder.setSmallIcon(R.drawable.app_icon).setLargeIcon(latestAvatar).setContentTitle(latest.optString("sender","New message")).setContentText(latest.optString("text")).setContentIntent(tap).setAutoCancel(true).setCategory(Notification.CATEGORY_MESSAGE).setGroup("conversation-"+cid).setWhen(latest.optLong("at",System.currentTimeMillis())).setShowWhen(true).setOnlyAlertOnce(false);
+        JSONObject conversation=inboxConversationById(cid);boolean group=conversation!=null&&"group".equals(conversation.optString("type"));String title=group?conversation.optString("name","Group chat"):latest.optString("sender","New message");
+        Notification.InboxStyle style=new Notification.InboxStyle().setBigContentTitle(title);for(int i=0;i<history.length();i++){JSONObject entry=history.optJSONObject(i);if(entry!=null)style.addLine(entry.optString("text"));}builder.setStyle(style);
+        builder.setSmallIcon(R.drawable.app_icon).setLargeIcon(latestAvatar).setContentTitle(title).setContentText(latest.optString("text")).setContentIntent(tap).setAutoCancel(true).setCategory(Notification.CATEGORY_MESSAGE).setGroup("conversation-"+cid).setWhen(latest.optLong("at",System.currentTimeMillis())).setShowWhen(true).setOnlyAlertOnce(!alert);
+        if(!alert){if(Build.VERSION.SDK_INT>=26)builder.setSilent(true);else builder.setDefaults(0).setSound(null).setVibrate(null);}
         NotificationManager manager=(NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE);if(manager!=null)manager.notify(cid.hashCode(),builder.build());
     }
 
@@ -4100,7 +4133,18 @@ reactionsCard.animate().cancel();
     private void handleSocket(JSONObject e){String type=e.optString("type");
         if("ready".equals(type)){selfId=e.optString("userId");socketConnecting=false;socketRetry=0;main.removeCallbacks(socketReconnect);refreshInbox();if(activeConversation!=null){refreshMessages(activeConversation.optString("id"));markRead();}return;}
         if("conversation".equals(type)||"conversation_update".equals(type)){JSONObject c=e.optJSONObject("conversation");if(c!=null&&activeConversation!=null&&c.optString("id").equals(activeConversation.optString("id")))activeConversation=c;refreshInbox();return;}
-        if("message".equals(type)||"message_update".equals(type)){JSONObject m=e.optJSONObject("message");String cid=e.optString("conversationId",m==null?"":m.optString("conversationId"));if(m!=null){if(isStickerMessage(m))stickerLastConversations.add(cid);else if("message".equals(type))stickerLastConversations.remove(cid);}if("message".equals(type)&&m!=null&&!cid.isEmpty())updateInboxFromIncomingMessage(cid,m);if(activeConversation!=null&&activeConversation.optString("id").equals(cid)&&m!=null)queueActiveSocketMessage(cid,m);else if(m!=null&&!cid.isEmpty())cacheIncomingMessage(cid,m,"message".equals(type));if(m!=null&&!cid.isEmpty())syncConversationNotification(cid,m,"message".equals(type));refreshInbox();return;}
+        if("message".equals(type)||"message_update".equals(type)){
+            JSONObject m=e.optJSONObject("message");String cid=e.optString("conversationId",m==null?"":m.optString("conversationId"));
+            JSONObject previous="message_update".equals(type)?messageBeforeNotificationUpdate(cid,m):null;JSONObject newReaction=addedExternalReaction(previous,m);
+            if(m!=null){if(isStickerMessage(m))stickerLastConversations.add(cid);else if("message".equals(type))stickerLastConversations.remove(cid);}
+            if("message".equals(type)&&m!=null&&!cid.isEmpty())updateInboxFromIncomingMessage(cid,m);
+            if(activeConversation!=null&&activeConversation.optString("id").equals(cid)&&m!=null)queueActiveSocketMessage(cid,m);else if(m!=null&&!cid.isEmpty())cacheIncomingMessage(cid,m,"message".equals(type));
+            if(m!=null&&!cid.isEmpty()){
+                if(newReaction!=null)syncReactionNotification(cid,m,newReaction);
+                syncConversationNotification(cid,m,"message".equals(type));
+            }
+            refreshInbox();return;
+        }
         if("message_hidden".equals(type)){String id=e.optString("messageId");messages.removeIf(m->id.equals(m.optString("id")));if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();return;}
         if("typing".equals(type)){String tcid=e.optString("conversationId");boolean active=e.optBoolean("active")&&!selfId.equals(e.optString("userId"));Runnable previous=typingExpiry.remove(tcid);if(previous!=null)main.removeCallbacks(previous);if(active){typingConversations.add(tcid);Runnable expire=()->{typingExpiry.remove(tcid);typingConversations.remove(tcid);if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();if(activeConversation!=null&&activeConversation.optString("id").equals(tcid)&&typingView!=null){typingView.setText("");typingView.setVisibility(View.GONE);}};typingExpiry.put(tcid,expire);main.postDelayed(expire,2400);}else{typingConversations.remove(tcid);}if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();if(activeConversation!=null&&activeConversation.optString("id").equals(tcid)&&typingView!=null){typingView.setText(active?"Typing..":"");typingView.setVisibility(active?View.VISIBLE:View.GONE);}return;}
         if("read".equals(type)){
@@ -5207,7 +5251,7 @@ reactionsCard.animate().cancel();
                 sideTime.setTranslationY(dp(19));
             }
 
-            JSONArray reactions=m.optJSONArray("reactions");if(reactions!=null&&reactions.length()>0){StringBuilder r=new StringBuilder();for(int i=0;i<reactions.length();i++){JSONObject rr=reactions.optJSONObject(i);if(rr!=null)r.append(rr.optString("emoji"));}if(reactions.length()>1)r.append(" ").append(reactions.length());TextView badge=text(r.toString(),12,TEXT,Typeface.NORMAL);badge.setGravity(Gravity.CENTER);badge.setPadding(reactions.length()==1?0:dp(5),0,reactions.length()==1?0:dp(5),0);badge.setBackground(bg("instagram".equals(activeTheme())?Color.rgb(38,38,38):Color.WHITE,11));badge.setElevation(0f);LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(reactions.length()==1?dp(22):-2,dp(22));bp.gravity=mine?Gravity.END:Gravity.START;bp.topMargin=-dp(4);stack.addView(badge,bp);badge.setOnClickListener(v->showReactionDetails(m));}
+            JSONArray reactions=m.optJSONArray("reactions");if(reactions!=null&&reactions.length()>0){StringBuilder r=new StringBuilder();for(int i=0;i<reactions.length();i++){JSONObject rr=reactions.optJSONObject(i);if(rr!=null)r.append(rr.optString("emoji"));}if(reactions.length()>1)r.append(" ").append(reactions.length());int reactionBg=themeAccent();TextView badge=text(r.toString(),12,readableOn(reactionBg),Typeface.NORMAL);badge.setGravity(Gravity.CENTER);badge.setPadding(reactions.length()==1?0:dp(5),0,reactions.length()==1?0:dp(5),0);badge.setBackground(bg(reactionBg,11));badge.setElevation(0f);LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(reactions.length()==1?dp(22):-2,dp(22));bp.gravity=mine?Gravity.END:Gravity.START;bp.topMargin=-dp(4);stack.addView(badge,bp);badge.setOnClickListener(v->showReactionDetails(m));}
             wireMessageGesture(content,content,m,mine,replyArrow,replyProgress);if(mine&&p==lastMineIndex()&&p==messages.size()-1&&!m.optBoolean("pending")){String statusText=status(m);if(!statusText.isEmpty()){TextView st=text(statusText,11.5f,Color.rgb(138,141,145),Typeface.NORMAL);st.setGravity(Gravity.END);LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-2,dp(19));sp.gravity=Gravity.END;sp.rightMargin=dp(7);sp.topMargin=dp(1);outer.addView(st,sp);if("read".equals(m.optString("status")))main.postDelayed(()->{if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();},15000);}}return outer;}
         private String replyPreviewFromReply(JSONObject r){if(isStickerMessage(r)||"sticker".equals(r.optString("type")))return"Sticker";String b=r.optString("body").replaceFirst("^[🎤📷🎥🎬]\\s*","").trim();if(!b.isEmpty())return b;String t=r.optString("type");if("audio".equals(t))return"Voice message";if("image".equals(t))return"Photo";if("video".equals(t))return"Video";if("file".equals(t))return"File";if("shared_reel".equals(t))return"Reel";if("shared_post".equals(t))return"Post";return"Message";}
     }
