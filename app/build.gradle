@@ -8,8 +8,8 @@ android {
         applicationId 'com.facebook.messengerclone'
         minSdk 24
         targetSdk 35
-        versionCode 188
-        versionName '1.87-replies-edits-notifications'
+        versionCode 189
+        versionName '1.88-notification-history-media-fixes'
         buildConfigField 'String', 'BASE_URL', '"https://messengerextra.duckdns.org"'
     }
 

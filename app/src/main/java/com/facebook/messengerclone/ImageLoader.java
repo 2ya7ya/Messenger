@@ -104,6 +104,12 @@ final class ImageLoader {
 
     boolean isReady(String url){return url!=null&&!url.isEmpty()&&decodedUrls.contains(url)&&bestBitmap(url)!=null;}
 
+    Bitmap getBitmap(String url,int width,int height){
+        if(url==null||url.isEmpty())return null;
+        try{return decode(url,Math.max(1,width),Math.max(1,height));}
+        catch(Exception ignored){return null;}
+    }
+
     private int[] targetSize(ImageView view){
         int width=0,height=0;
         boolean fullWidth=false,fullHeight=false;

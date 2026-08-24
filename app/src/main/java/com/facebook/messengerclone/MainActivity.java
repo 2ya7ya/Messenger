@@ -125,6 +125,8 @@ public class MainActivity extends Activity {
     private int mediaPickerPreviewOrigin=0;
     private String previewTextPrefill="";
     private long lastTypingWireAt=0L;
+    private long lastMessageTapAt=0L;
+    private String lastMessageTapId="";
     private float timeRevealOffset=0f,timeRevealDownX=Float.NaN,timeRevealDownY=Float.NaN;
     private boolean timeRevealDragging=false;
     private MediaRecorder recorder; private File recordFile; private long recordStarted; private Runnable recordTicker; private float recordDownX,recordDownY; private boolean recordLocked=false,recordCanceled=false,pendingMicStart=false;
@@ -605,7 +607,7 @@ public class MainActivity extends Activity {
         }catch(Exception ignored){}
     }
 
-    private void openConversation(JSONObject c){activeConversation=c;showingInboxSearchPage=false;searchTargetSpinner=null;beforeCursor="";replyTo=null;editingMessage=null;messages.clear();socketMessageBatch.clear();main.removeCallbacks(flushSocketMessages);socketMessageBatchConversationId="";composerHasText=false;typingStateSent=false;conversationInitialScrollPending=true;
+    private void openConversation(JSONObject c){activeConversation=c;showingInboxSearchPage=false;searchTargetSpinner=null;beforeCursor="";replyTo=null;editingMessage=null;clearConversationNotification(c==null?"":c.optString("id"));messages.clear();socketMessageBatch.clear();main.removeCallbacks(flushSocketMessages);socketMessageBatchConversationId="";composerHasText=false;typingStateSent=false;conversationInitialScrollPending=true;
         boolean lightHeader=themeUsesLightHeader();int headerColor=themeHeaderColor();
         getWindow().setStatusBarColor(lightHeader?Color.WHITE:Color.BLACK);
         getWindow().setNavigationBarColor(lightHeader?Color.WHITE:Color.BLACK);
@@ -619,7 +621,7 @@ public class MainActivity extends Activity {
         list.setFriction(android.view.ViewConfiguration.getScrollFriction()*3f);
         list.setPadding(0,dp(12),0,dp(5));
         list.setClipToPadding(false);
-        list.setBackground(themeConversationBackground());
+        list.setBackgroundColor(Color.TRANSPARENT);
         messageArea.addView(list,new FrameLayout.LayoutParams(-1,-1));
 
         if(conversationOpenedFromInboxSearch){
@@ -1341,9 +1343,10 @@ reactionsCard.animate().cancel();
         messageInput.setText("");
         if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();
         cacheMessagesNow();
+        syncConversationNotification(target.optString("conversationId",activeConversation==null?"":activeConversation.optString("id")),target,false);
         try{api.patch("/api/messaging/messages/"+target.optString("id"),new JSONObject().put("body",body.trim()),(json,error)->main.post(()->{
             if(error!=null){try{target.put("body",previous).put("editedAt",previousEdited);}catch(Exception ignored){}editingMessage=target;if(messageInput!=null){messageInput.setText(body.trim());messageInput.setSelection(messageInput.length());}if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();cacheMessagesNow();toast(error.getMessage());return;}
-            JSONObject updated=json.optJSONObject("message");if(updated!=null){upsertMessage(updated);cacheMessagesNow();}
+            JSONObject updated=json.optJSONObject("message");if(updated!=null){upsertMessage(updated);cacheMessagesNow();syncConversationNotification(updated.optString("conversationId",activeConversation==null?"":activeConversation.optString("id")),updated,false);}
         }));}catch(Exception error){try{target.put("body",previous).put("editedAt",previousEdited);}catch(Exception ignored){}editingMessage=target;if(messageInput!=null){messageInput.setText(body.trim());messageInput.setSelection(messageInput.length());}if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();cacheMessagesNow();toast(error.getMessage());}
     }
     private void deleteMessage(JSONObject m,boolean everyone){api.delete("/api/messaging/messages/"+m.optString("id")+"?scope="+(everyone?"everyone":"me"),(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}if(everyone&&json.optJSONObject("message")!=null)upsertMessage(json.optJSONObject("message"));else messages.removeIf(x->x.optString("id").equals(m.optString("id")));messageAdapter.notifyDataSetChanged();cacheMessagesNow();}));}
@@ -2726,7 +2729,7 @@ reactionsCard.animate().cancel();
 
     private boolean hasInstagramMediaPermission(){
         if(Build.VERSION.SDK_INT>=33){
-            return checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES)==PackageManager.PERMISSION_GRANTED ||
+            return checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES)==PackageManager.PERMISSION_GRANTED &&
                    checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO)==PackageManager.PERMISSION_GRANTED;
         }
         return checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)==PackageManager.PERMISSION_GRANTED;
@@ -3051,7 +3054,7 @@ reactionsCard.animate().cancel();
                     Uri sendUri=sendUris.get(si);boolean sendVideo=sendVideos.get(si);
                     String name=queryName(sendUri),mime=getContentResolver().getType(sendUri);
                     byte[] bytes=readAll(getContentResolver().openInputStream(sendUri));
-                    if(bytes.length>27*1024*1024){main.post(()->toast("File is too large."));continue;}
+                    long maxBytes=sendVideo?180L*1024L*1024L:27L*1024L*1024L;if(bytes.length>maxBytes){main.post(()->toast(sendVideo?"Video is too large.":"File is too large."));continue;}
                     batchBytes.add(bytes);batchNames.add(name);batchMimes.add(mime==null?(sendVideo?"video/mp4":"image/jpeg"):mime);
                 }catch(Exception ex){main.post(()->toast(ex.getMessage()));}
                 main.post(()->{
@@ -3550,7 +3553,7 @@ reactionsCard.animate().cancel();
                     tile.setOnClickListener(v->{
                         if(fullScreenPicker&&previewOrigin>0){
                             if(video){
-                                previewSelectedMedia(uri,true);
+                                openPickedVideoAsCaptured(uri,previewOrigin,host);
                             }else{
                                 openPickedPhotoAsCaptured(uri,previewOrigin,host);
                             }
@@ -3590,6 +3593,30 @@ reactionsCard.animate().cancel();
             }catch(Exception e){
                 main.post(()->toast(e.getMessage()));
             }
+        }).start();
+    }
+
+    private void openPickedVideoAsCaptured(final Uri uri,final int previewOrigin,final View host){
+        if(uri==null)return;
+        new Thread(()->{
+            try{
+                final byte[] bytes=readAll(getContentResolver().openInputStream(uri));
+                if(bytes.length==0)throw new Exception("Could not read this video.");
+                if(bytes.length>180L*1024L*1024L)throw new Exception("Video is too large.");
+                String resolvedName=queryName(uri),resolvedMime=getContentResolver().getType(uri);
+                final String name=resolvedName==null||resolvedName.trim().isEmpty()?"video-"+System.currentTimeMillis()+".mp4":resolvedName;
+                final String mime=resolvedMime==null||!resolvedMime.toLowerCase(Locale.ROOT).startsWith("video/")?"video/mp4":resolvedMime;
+                main.post(()->{
+                    closeInstagramMediaPickerImmediately(host);
+                    final Dialog dialog=new Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+                    FrameLayout page=new FrameLayout(this);page.setBackgroundColor(Color.BLACK);
+                    VideoView video=new VideoView(this);video.setVideoURI(uri);video.setOnPreparedListener(mp->{mp.setLooping(true);video.start();});page.addView(video,new FrameLayout.LayoutParams(-1,-1));
+                    ImageButton back=icon(R.drawable.ic_msg_back,42,Color.WHITE);FrameLayout.LayoutParams backLp=new FrameLayout.LayoutParams(dp(42),dp(42),Gravity.TOP|Gravity.START);backLp.leftMargin=dp(9);backLp.topMargin=dp(10);page.addView(back,backLp);back.setOnClickListener(v->{dialog.dismiss();if(previewOrigin==2)showMessageTextCreate();else showMessageCamera();});
+                    int[] mode={2};TextView view=text("View twice",14,Color.WHITE,Typeface.BOLD);view.setGravity(Gravity.CENTER_VERTICAL);setCapturedViewModeButton(view,2);view.setPadding(dp(31),0,dp(12),0);view.setCompoundDrawablePadding(dp(7));view.setBackground(bg(Color.rgb(34,35,39),22));FrameLayout.LayoutParams viewLp=new FrameLayout.LayoutParams(dp(166),dp(46),Gravity.BOTTOM|Gravity.START);viewLp.leftMargin=dp(14);viewLp.bottomMargin=dp(18);page.addView(view,viewLp);view.setOnClickListener(v->showCapturedViewModeMenu(view,mode));
+                    LinearLayout send=new LinearLayout(this);send.setGravity(Gravity.CENTER);send.setBackground(bg(Color.WHITE,23));TextView sendText=text("Send",15,Color.rgb(35,35,35),Typeface.BOLD);sendText.setGravity(Gravity.CENTER);send.addView(sendText,new LinearLayout.LayoutParams(-1,-1));FrameLayout.LayoutParams sendLp=new FrameLayout.LayoutParams(dp(104),dp(46),Gravity.BOTTOM|Gravity.END);sendLp.rightMargin=dp(14);sendLp.bottomMargin=dp(18);page.addView(send,sendLp);send.setOnClickListener(v->{send.setEnabled(false);dialog.dismiss();uploadAttachment(bytes,name,mime,mode[0]);});
+                    dialog.setOnDismissListener(x->{try{video.stopPlayback();}catch(Exception ignored){}});dialog.setContentView(page);dialog.show();Window window=dialog.getWindow();if(window!=null){window.setLayout(-1,-1);window.setStatusBarColor(Color.BLACK);window.setNavigationBarColor(Color.BLACK);}
+                });
+            }catch(Exception error){main.post(()->toast(error.getMessage()));}
         }).start();
     }
 
@@ -3791,7 +3818,7 @@ reactionsCard.animate().cancel();
     }
 
     private void pickAttachment(){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("*/*");i.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"image/*","video/*","audio/*","application/pdf","text/plain","application/zip"});startActivityForResult(i,PICK_FILE);}
-    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){super.onActivityResult(requestCode,resultCode,data);if(resultCode!=RESULT_OK||data==null||data.getData()==null)return;Uri uri=data.getData();if(requestCode==PICK_GROUP_IMAGE){try{byte[] bytes=readAll(getContentResolver().openInputStream(uri));Bitmap src=BitmapFactory.decodeByteArray(bytes,0,bytes.length);if(src==null)throw new Exception("Could not read this image.");int side=Math.min(src.getWidth(),src.getHeight()),sx=(src.getWidth()-side)/2,sy=(src.getHeight()-side)/2;Bitmap crop=Bitmap.createBitmap(src,sx,sy,side,side);Bitmap small=Bitmap.createScaledBitmap(crop,240,240,true);ByteArrayOutputStream out=new ByteArrayOutputStream();small.compress(Bitmap.CompressFormat.JPEG,72,out);groupEditImageData="data:image/jpeg;base64,"+Base64.encodeToString(out.toByteArray(),Base64.NO_WRAP);groupEditEmoji="";if(groupEditConversation!=null)showGroupEditor(groupEditConversation);}catch(Exception e){toast(e.getMessage());}return;}if(requestCode!=PICK_FILE)return;try{String name=queryName(uri),mime=getContentResolver().getType(uri);byte[] bytes=readAll(getContentResolver().openInputStream(uri));if(bytes.length>27*1024*1024){toast("File is too large.");return;}uploadAttachment(bytes,name,mime==null?"application/octet-stream":mime);}catch(Exception e){toast(e.getMessage());}}
+    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){super.onActivityResult(requestCode,resultCode,data);if(resultCode!=RESULT_OK||data==null||data.getData()==null)return;Uri uri=data.getData();if(requestCode==PICK_GROUP_IMAGE){try{byte[] bytes=readAll(getContentResolver().openInputStream(uri));Bitmap src=BitmapFactory.decodeByteArray(bytes,0,bytes.length);if(src==null)throw new Exception("Could not read this image.");int side=Math.min(src.getWidth(),src.getHeight()),sx=(src.getWidth()-side)/2,sy=(src.getHeight()-side)/2;Bitmap crop=Bitmap.createBitmap(src,sx,sy,side,side);Bitmap small=Bitmap.createScaledBitmap(crop,240,240,true);ByteArrayOutputStream out=new ByteArrayOutputStream();small.compress(Bitmap.CompressFormat.JPEG,72,out);groupEditImageData="data:image/jpeg;base64,"+Base64.encodeToString(out.toByteArray(),Base64.NO_WRAP);groupEditEmoji="";if(groupEditConversation!=null)showGroupEditor(groupEditConversation);}catch(Exception e){toast(e.getMessage());}return;}if(requestCode!=PICK_FILE)return;try{String name=queryName(uri),mime=getContentResolver().getType(uri);byte[] bytes=readAll(getContentResolver().openInputStream(uri));boolean video=mime!=null&&mime.toLowerCase(Locale.ROOT).startsWith("video/");long maxBytes=video?180L*1024L*1024L:27L*1024L*1024L;if(bytes.length>maxBytes){toast(video?"Video is too large.":"File is too large.");return;}uploadAttachment(bytes,name,mime==null?"application/octet-stream":mime);}catch(Exception e){toast(e.getMessage());}}
     private String queryName(Uri u){String name="attachment";try(android.database.Cursor c=getContentResolver().query(u,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){if(c!=null&&c.moveToFirst())name=c.getString(0);}catch(Exception ignored){}return name==null?"attachment":name;}
     private byte[] readAll(InputStream in)throws Exception{try(in;ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[32768];int n;while((n=in.read(b))>0)out.write(b,0,n);return out.toByteArray();}}
     private void uploadAttachment(byte[] bytes,String name,String mime){uploadAttachment(bytes,name,mime,0);}
@@ -4008,18 +4035,53 @@ reactionsCard.animate().cancel();
         String nickname=sender.optString("nickname").trim();
         return nickname.isEmpty()?sender.optString("name","New message"):nickname;
     }
-    private void showIncomingMessageNotification(String cid,JSONObject message){
-        if(message==null||cid==null||cid.isEmpty()||isMine(message))return;
-        if(appVisible&&activeConversation!=null&&cid.equals(activeConversation.optString("id")))return;
+    private boolean isNotificationMessage(JSONObject message){if(message==null||message.optBoolean("isSystem")||message.optBoolean("system"))return false;String type=message.optString("type").toLowerCase(Locale.ROOT);return!type.equals("system")&&!type.equals("conversation_update")&&!type.equals("theme_update")&&!type.equals("group_update")&&!type.equals("name_update")&&!type.equals("avatar_update");}
+    private String notificationMessageText(JSONObject message){String body=message==null?"":message.optString("body").trim();return body.isEmpty()?replyPreview(message):body;}
+    private long notificationMessageTime(JSONObject message){Date created=parseDate(message==null?"":message.optString("createdAt"));return created==null?System.currentTimeMillis():created.getTime();}
+    private JSONObject notificationEntry(String cid,JSONObject message){JSONObject entry=new JSONObject();try{JSONObject sender=message.optJSONObject("sender");entry.put("id",message.optString("id",message.optString("messageId",message.optString("clientId",""))));entry.put("text",notificationMessageText(message));entry.put("sender",isMine(message)?"You":notificationSenderName(cid,message));entry.put("senderId",sender==null?message.optString("senderId"):sender.optString("id",message.optString("senderId")));entry.put("avatar",sender==null?"":avatarUrl(sender));entry.put("mine",isMine(message));entry.put("at",notificationMessageTime(message));}catch(Exception ignored){}return entry;}
+    private String notificationHistoryKey(String cid){return"notification-history:"+cid;}
+    private JSONArray loadNotificationHistory(String cid){
+        android.content.SharedPreferences prefs=getSharedPreferences("messenger_notification_history",MODE_PRIVATE);
+        try{String saved=prefs.getString(notificationHistoryKey(cid),"");if(!saved.isEmpty())return new JSONArray(saved);}catch(Exception ignored){}
+        JSONArray seeded=new JSONArray();
+        try{String raw=cache.get("messages:"+cid);JSONArray cached=raw==null?null:new JSONObject(raw).optJSONArray("messages");if(cached!=null)for(int i=Math.max(0,cached.length()-6);i<cached.length();i++){JSONObject message=cached.optJSONObject(i);if(isNotificationMessage(message)&&!message.optBoolean("deleted"))seeded.put(notificationEntry(cid,message));}}catch(Exception ignored){}
+        return seeded;
+    }
+    private void saveNotificationHistory(String cid,JSONArray history){getSharedPreferences("messenger_notification_history",MODE_PRIVATE).edit().putString(notificationHistoryKey(cid),history.toString()).apply();}
+    private void clearConversationNotification(String cid){if(cid==null||cid.isEmpty())return;getSharedPreferences("messenger_notification_history",MODE_PRIVATE).edit().remove(notificationHistoryKey(cid)).apply();NotificationManager manager=(NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE);if(manager!=null)manager.cancel(cid.hashCode());}
+    private Bitmap fallbackNotificationAvatar(){try{android.graphics.drawable.Drawable drawable=getDrawable(R.drawable.default_profile);int size=dp(56);Bitmap bitmap=Bitmap.createBitmap(size,size,Bitmap.Config.ARGB_8888);drawable.setBounds(0,0,size,size);drawable.draw(new Canvas(bitmap));return bitmap;}catch(Exception ignored){return null;}}
+    private void syncConversationNotification(String cid,JSONObject message,boolean announce){
+        if(cid==null||cid.isEmpty()||!isNotificationMessage(message))return;
+        if(announce&&isMine(message))return;
+        if(announce&&appVisible&&activeConversation!=null&&cid.equals(activeConversation.optString("id")))return;
         if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)return;
+        JSONArray history=loadNotificationHistory(cid);String id=message.optString("id",message.optString("messageId",message.optString("clientId","")));int found=-1;
+        for(int i=0;i<history.length();i++){JSONObject entry=history.optJSONObject(i);if(entry!=null&&!id.isEmpty()&&id.equals(entry.optString("id"))){found=i;break;}}
+        JSONObject replacement=notificationEntry(cid,message);
+        if(found>=0){try{history.put(found,replacement);}catch(Exception ignored){}}
+        else if(announce)history.put(replacement);else return;
+        while(history.length()>8)history.remove(0);
+        saveNotificationHistory(cid,history);
+        JSONArray snapshot;
+        try{snapshot=new JSONArray(history.toString());}catch(Exception ignored){snapshot=history;}
+        temporaryMediaExecutor.execute(()->renderConversationNotification(cid,snapshot));
+    }
+    private void renderConversationNotification(String cid,JSONArray history){
+        if(history==null||history.length()==0)return;
+        JSONObject latest=history.optJSONObject(history.length()-1);if(latest==null)return;
+        String avatar=latest.optString("avatar"),absoluteAvatar=avatar==null?"":(avatar.startsWith("http")||avatar.startsWith("data:")||avatar.startsWith("file:")?avatar:api.absolute(avatar));
+        Bitmap latestAvatar=images.getBitmap(absoluteAvatar,dp(64),dp(64));if(latestAvatar==null)latestAvatar=fallbackNotificationAvatar();
         Intent open=new Intent(this,MainActivity.class).putExtra("conversationId",cid).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent tap=PendingIntent.getActivity(this,cid.hashCode(),open,PendingIntent.FLAG_UPDATE_CURRENT|(Build.VERSION.SDK_INT>=23?PendingIntent.FLAG_IMMUTABLE:0));
-        String title=notificationSenderName(cid,message),body=message.optString("body").trim();
-        if(body.isEmpty())body=replyPreview(message);
         Notification.Builder builder=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,MESSAGE_CHANNEL_ID):new Notification.Builder(this);
-        builder.setSmallIcon(R.drawable.app_icon).setContentTitle(title).setContentText(body).setStyle(new Notification.BigTextStyle().bigText(body)).setContentIntent(tap).setAutoCancel(true).setCategory(Notification.CATEGORY_MESSAGE).setGroup("conversation-"+cid).setWhen(System.currentTimeMillis()).setShowWhen(true);
-        NotificationManager manager=(NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE);
-        if(manager!=null)manager.notify(cid.hashCode(),builder.build());
+        if(Build.VERSION.SDK_INT>=28){
+            android.app.Person self=new android.app.Person.Builder().setName("You").setKey("self").build();Notification.MessagingStyle style=new Notification.MessagingStyle(self);JSONObject conversation=inboxConversationById(cid);boolean group=conversation!=null&&"group".equals(conversation.optString("type"));if(group)style.setConversationTitle(conversation.optString("name","Group chat")).setGroupConversation(true);
+            for(int i=0;i<history.length();i++){JSONObject entry=history.optJSONObject(i);if(entry==null)continue;android.app.Person.Builder personBuilder=new android.app.Person.Builder().setName(entry.optString("sender","Facebook user")).setKey(entry.optString("senderId","sender"));if(i==history.length()-1&&latestAvatar!=null)personBuilder.setIcon(android.graphics.drawable.Icon.createWithBitmap(latestAvatar));style.addMessage(entry.optString("text"),entry.optLong("at",System.currentTimeMillis()),personBuilder.build());}builder.setStyle(style);
+        }else{
+            Notification.MessagingStyle style=new Notification.MessagingStyle("You");for(int i=0;i<history.length();i++){JSONObject entry=history.optJSONObject(i);if(entry!=null)style.addMessage(entry.optString("text"),entry.optLong("at",System.currentTimeMillis()),entry.optString("sender","Facebook user"));}builder.setStyle(style);
+        }
+        builder.setSmallIcon(R.drawable.app_icon).setLargeIcon(latestAvatar).setContentTitle(latest.optString("sender","New message")).setContentText(latest.optString("text")).setContentIntent(tap).setAutoCancel(true).setCategory(Notification.CATEGORY_MESSAGE).setGroup("conversation-"+cid).setWhen(latest.optLong("at",System.currentTimeMillis())).setShowWhen(true).setOnlyAlertOnce(false);
+        NotificationManager manager=(NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE);if(manager!=null)manager.notify(cid.hashCode(),builder.build());
     }
 
     private void connectSocket(){
@@ -4037,7 +4099,7 @@ reactionsCard.animate().cancel();
     private void handleSocket(JSONObject e){String type=e.optString("type");
         if("ready".equals(type)){selfId=e.optString("userId");socketConnecting=false;socketRetry=0;main.removeCallbacks(socketReconnect);refreshInbox();if(activeConversation!=null){refreshMessages(activeConversation.optString("id"));markRead();}return;}
         if("conversation".equals(type)||"conversation_update".equals(type)){JSONObject c=e.optJSONObject("conversation");if(c!=null&&activeConversation!=null&&c.optString("id").equals(activeConversation.optString("id")))activeConversation=c;refreshInbox();return;}
-        if("message".equals(type)||"message_update".equals(type)){JSONObject m=e.optJSONObject("message");String cid=e.optString("conversationId",m==null?"":m.optString("conversationId"));if(m!=null){if(isStickerMessage(m))stickerLastConversations.add(cid);else if("message".equals(type))stickerLastConversations.remove(cid);}if("message".equals(type)&&m!=null&&!cid.isEmpty()){updateInboxFromIncomingMessage(cid,m);showIncomingMessageNotification(cid,m);}if(activeConversation!=null&&activeConversation.optString("id").equals(cid)&&m!=null)queueActiveSocketMessage(cid,m);else if(m!=null&&!cid.isEmpty())cacheIncomingMessage(cid,m,"message".equals(type));refreshInbox();return;}
+        if("message".equals(type)||"message_update".equals(type)){JSONObject m=e.optJSONObject("message");String cid=e.optString("conversationId",m==null?"":m.optString("conversationId"));if(m!=null){if(isStickerMessage(m))stickerLastConversations.add(cid);else if("message".equals(type))stickerLastConversations.remove(cid);}if("message".equals(type)&&m!=null&&!cid.isEmpty())updateInboxFromIncomingMessage(cid,m);if(activeConversation!=null&&activeConversation.optString("id").equals(cid)&&m!=null)queueActiveSocketMessage(cid,m);else if(m!=null&&!cid.isEmpty())cacheIncomingMessage(cid,m,"message".equals(type));if(m!=null&&!cid.isEmpty())syncConversationNotification(cid,m,"message".equals(type));refreshInbox();return;}
         if("message_hidden".equals(type)){String id=e.optString("messageId");messages.removeIf(m->id.equals(m.optString("id")));if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();return;}
         if("typing".equals(type)){String tcid=e.optString("conversationId");boolean active=e.optBoolean("active")&&!selfId.equals(e.optString("userId"));Runnable previous=typingExpiry.remove(tcid);if(previous!=null)main.removeCallbacks(previous);if(active){typingConversations.add(tcid);Runnable expire=()->{typingExpiry.remove(tcid);typingConversations.remove(tcid);if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();if(activeConversation!=null&&activeConversation.optString("id").equals(tcid)&&typingView!=null){typingView.setText("");typingView.setVisibility(View.GONE);}};typingExpiry.put(tcid,expire);main.postDelayed(expire,2400);}else{typingConversations.remove(tcid);}if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();if(activeConversation!=null&&activeConversation.optString("id").equals(tcid)&&typingView!=null){typingView.setText(active?"Typing..":"");typingView.setVisibility(active?View.VISIBLE:View.GONE);}return;}
         if("read".equals(type)){
@@ -5351,7 +5413,18 @@ reactionsCard.animate().cancel();
                             },55);
                         }
                     }else if(tap){
-                        messageTrack.performClick();
+                        String tappedId=m.optString("id",m.optString("messageId",m.optString("clientId","")));
+                        long now=SystemClock.uptimeMillis();
+                        boolean doubleTap=!tappedId.isEmpty()&&tappedId.equals(lastMessageTapId)&&now-lastMessageTapAt<=320L;
+                        lastMessageTapAt=now;
+                        lastMessageTapId=tappedId;
+                        if(doubleTap){
+                            lastMessageTapAt=0L;
+                            lastMessageTapId="";
+                            react(m,"❤️");
+                        }else{
+                            messageTrack.performClick();
+                        }
                     }
                     return true;
             }
@@ -5597,7 +5670,22 @@ reactionsCard.animate().cancel();
     private boolean beginMediaView(JSONObject message,JSONObject attachment){if(isMine(message))return false;String key=ephemeralKey(message,attachment);synchronized(openEphemeralMedia){if(openEphemeralMedia.contains(key))return false;int left=remainingMediaViews(message,attachment);if(left<=0)return false;android.content.SharedPreferences.Editor edit=getSharedPreferences("messenger_ephemeral_media",MODE_PRIVATE).edit();for(String alias:ephemeralKeys(message,attachment))edit.putInt(alias,left-1);if(!edit.commit())return false;openEphemeralMedia.add(key);}if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();return true;}
     private void finishMediaView(JSONObject message,JSONObject attachment){synchronized(openEphemeralMedia){openEphemeralMedia.remove(ephemeralKey(message,attachment));}}
     private String ephemeralRelativeTime(String value){Date dt=parseDate(value);if(dt==null)return"now";long sec=Math.max(0,(System.currentTimeMillis()-dt.getTime())/1000);if(sec<60)return"now";long min=sec/60;if(min<60)return min+"m";long hour=min/60;if(hour<24)return hour+"h";return(hour/24)+"d";}
-    private View buildEphemeralMediaPill(JSONObject message,JSONObject attachment,boolean mine,String type,int mode){LinearLayout pill=new LinearLayout(this);pill.setGravity(Gravity.CENTER_VERTICAL);pill.setPadding(dp(12),0,dp(14),0);int fill=mine?themeSentColors()[0]:themeReceived();int color=mine?themeSentText():themeReceivedText();pill.setBackground(bg(fill,22));ImageView iconView=new ImageView(this);iconView.setImageResource(mode==1?R.drawable.ic_camera_view_once_ref:R.drawable.ic_camera_view_twice_ref);iconView.setScaleType(ImageView.ScaleType.CENTER_INSIDE);iconView.setColorFilter(color);pill.addView(iconView,new LinearLayout.LayoutParams(dp(20),dp(20)));boolean expired=!mine&&remainingMediaViews(message,attachment)<=0;String noun="video".equals(type)?"video":"photo",capital=Character.toUpperCase(noun.charAt(0))+noun.substring(1);String label=mine||expired?capital:"View "+noun;TextView title=text(label,15.5f,color,Typeface.BOLD);LinearLayout.LayoutParams tlp=new LinearLayout.LayoutParams(-2,dp(44));tlp.leftMargin=dp(6);pill.addView(title,tlp);pill.setMinimumHeight(dp(44));pill.setAlpha(1f);if(mine||expired){pill.setEnabled(false);return pill;}pill.setOnClickListener(v->{if("video".equals(type))showVideoMediaViewer(message,attachment);else showMediaViewer(message,attachment);});Runnable ready=()->pill.post(()->{pill.setEnabled(true);pill.setAlpha(1f);});boolean preloaded;if("video".equals(type)){preloaded=!temporaryVideoLocalUrl(attachment.optString("url")).isEmpty();if(!preloaded)preloadTemporaryVideo(attachment,ready);}else{preloaded=images.isReady(attachment.optString("url"));if(!preloaded)images.prefetch(attachment.optString("url"),ready);}pill.setEnabled(preloaded);pill.setAlpha(preloaded?1f:.68f);return pill;}
+    private View buildEphemeralMediaPill(JSONObject message,JSONObject attachment,boolean mine,String type,int mode){
+        LinearLayout pill=new LinearLayout(this);pill.setGravity(Gravity.CENTER_VERTICAL);pill.setPadding(dp(12),0,dp(14),0);
+        boolean expired=!mine&&remainingMediaViews(message,attachment)<=0;
+        int fill=expired?themeDisabled():(mine?themeSentColors()[0]:themeReceived());
+        int color=expired?Color.argb(155,themeReceivedText()==Color.WHITE?255:70,themeReceivedText()==Color.WHITE?255:73,themeReceivedText()==Color.WHITE?255:78):(mine?themeSentText():themeReceivedText());
+        pill.setBackground(bg(fill,22));
+        ImageView iconView=new ImageView(this);iconView.setImageResource(mode==1?R.drawable.ic_camera_view_once_ref:R.drawable.ic_camera_view_twice_ref);iconView.setScaleType(ImageView.ScaleType.CENTER_INSIDE);iconView.setColorFilter(color);pill.addView(iconView,new LinearLayout.LayoutParams(dp(20),dp(20)));
+        String noun="video".equals(type)?"video":"photo",capital=Character.toUpperCase(noun.charAt(0))+noun.substring(1);String label=mine||expired?capital:"View "+noun;TextView title=text(label,15.5f,color,Typeface.BOLD);LinearLayout.LayoutParams tlp=new LinearLayout.LayoutParams(-2,dp(44));tlp.leftMargin=dp(6);pill.addView(title,tlp);pill.setMinimumHeight(dp(44));
+        // Keep every pill enabled so the parent swipe/long-press message gestures work.
+        // Only available received media receives a tap-to-open action.
+        pill.setEnabled(true);pill.setClickable(false);pill.setAlpha(expired?.48f:1f);
+        if(mine||expired)return pill;
+        Runnable open=()->{if("video".equals(type))showVideoMediaViewer(message,attachment);else showMediaViewer(message,attachment);};
+        Runnable ready=()->pill.post(()->{pill.setClickable(true);pill.setAlpha(1f);pill.setOnClickListener(v->open.run());});
+        boolean preloaded;if("video".equals(type)){preloaded=!temporaryVideoLocalUrl(attachment.optString("url")).isEmpty();if(!preloaded)preloadTemporaryVideo(attachment,ready);}else{preloaded=images.isReady(attachment.optString("url"));if(!preloaded)images.prefetch(attachment.optString("url"),ready);}if(preloaded)ready.run();else pill.setAlpha(.68f);return pill;
+    }
     private View buildMessageContent(JSONObject m,boolean mine,boolean samePrev,boolean sameNext){
         String type=m.optString("type","text");
         JSONArray att=m.optJSONArray("attachments");
