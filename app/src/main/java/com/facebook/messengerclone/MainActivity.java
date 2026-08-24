@@ -777,12 +777,10 @@ public class MainActivity extends Activity {
     private void buildInstagramComposer(LinearLayout page){
         composer=new LinearLayout(this);
         composer.setGravity(Gravity.CENTER_VERTICAL);
-        // The composer itself is only a transparent layout host. The rounded
-        // message field below is the sole visible background.
-        composer.setPadding(0,0,0,0);
-        composer.setBackgroundColor(Color.TRANSPARENT);
-        LinearLayout.LayoutParams outerLp=new LinearLayout.LayoutParams(-1,dp(52));
-        outerLp.setMargins(dp(7),0,dp(7),dp(5));
+        composer.setPadding(dp(7),dp(4),dp(7),dp(4));
+        composer.setBackground(null);
+        LinearLayout.LayoutParams outerLp=new LinearLayout.LayoutParams(-1,dp(58));
+        outerLp.setMargins(dp(3),dp(2),dp(3),dp(4));
         page.addView(composer,outerLp);
 
         LinearLayout pill=new LinearLayout(this);
@@ -1039,7 +1037,6 @@ public class MainActivity extends Activity {
             replyBar.setAlpha(1f);
             replyBar.setTranslationY(0);
             replyBar.setVisibility(View.GONE);
-            if(composer!=null)composer.setBackgroundColor(Color.TRANSPARENT);
             return;
         }
 
@@ -1056,7 +1053,6 @@ public class MainActivity extends Activity {
 
         int replyBackground=themeReplyBackground(),replyMuted=themeReplyText(),replyInk=readableOn(replyBackground);
         replyBar.setBackgroundColor(replyBackground);
-        if(composer!=null)composer.setBackgroundColor(replyBackground);
         LinearLayout copy=new LinearLayout(this);copy.setOrientation(LinearLayout.VERTICAL);copy.setGravity(Gravity.TOP);copy.setPadding(0,0,0,0);replyBar.addView(copy,new LinearLayout.LayoutParams(0,-1,1));TextView small=text("Replying to "+senderName(m),11.5f,replyMuted,Typeface.NORMAL);small.setSingleLine(true);copy.addView(small,new LinearLayout.LayoutParams(-1,dp(17)));TextView pv=text(replyPreview(m),13.5f,replyInk,Typeface.NORMAL);pv.setSingleLine(true);pv.setEllipsize(TextUtils.TruncateAt.END);copy.addView(pv,new LinearLayout.LayoutParams(-1,dp(22)));ImageButton x=icon(R.drawable.ic_msg_close,30,replyMuted);replyBar.addView(x);x.setOnClickListener(v->setReply(null));}
     private String replyPreview(JSONObject m){if(isStickerMessage(m))return"Sticker";String body=m==null?"":m.optString("body").replaceFirst("^[🎤📷🎥🎬]\\s*","").trim();if(!body.isEmpty())return body;String t=m==null?"":m.optString("type");if("sticker".equals(t))return"Sticker";if("audio".equals(t))return"Voice message";if("image".equals(t))return"Photo";if("video".equals(t))return"Video";if("file".equals(t))return"File";if("shared_reel".equals(t))return"Reel";if("shared_post".equals(t))return"Post";return"Message";}
     private JSONObject replySnapshot(JSONObject reply){if(reply==null)return null;try{return new JSONObject().put("id",reply.optString("id")).put("body",reply.optString("body")).put("type",isStickerMessage(reply)?"sticker":reply.optString("type","text")).put("sticker",isStickerMessage(reply)).put("senderName",senderName(reply));}catch(Exception ignored){return null;}}
@@ -3856,8 +3852,9 @@ reactionsCard.animate().cancel();
 
     private int targetVideoBitrate(Uri uri){
         long durationMs=0;MediaMetadataRetriever retriever=new MediaMetadataRetriever();try{retriever.setDataSource(this,uri);durationMs=parseLong(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION));}catch(Exception ignored){}finally{try{retriever.release();}catch(Exception ignored){}}
-        if(durationMs<=0)return 900000;double seconds=Math.max(1d,durationMs/1000d);long target=(long)((7.5d*1024d*1024d*8d)/seconds)-128000L;return(int)Math.max(220000L,Math.min(1100000L,target));
+        if(durationMs<=0)return 650000;double seconds=Math.max(1d,durationMs/1000d);long target=(long)((2.5d*1024d*1024d*8d)/seconds)-96000L;return(int)Math.max(180000L,Math.min(850000L,target));
     }
+    private void failPreparedVideo(PendingAttachmentUpload pending){if(pending!=null&&pending.optimistic!=null)markOptimisticFailed(pending.client);cacheMessagesNow();toast("Could not prepare this video. Please try again.");}
     @androidx.annotation.OptIn(markerClass=androidx.media3.common.util.UnstableApi.class)
     private void compressAndUploadVideo(Uri uri,byte[] previewBytes,String name,int viewMode,boolean deferVisualRefresh){
         if(uri==null||previewBytes==null||previewBytes.length==0)return;String uploadName=name==null||name.trim().isEmpty()?"video.mp4":name.trim().replaceFirst("(?i)\\.[a-z0-9]{1,6}$","")+".mp4";PendingAttachmentUpload pending=beginAttachmentUpload(previewBytes,uploadName,"video/mp4",viewMode,deferVisualRefresh);if(pending==null)return;
@@ -3867,11 +3864,12 @@ reactionsCard.animate().cancel();
             androidx.media3.transformer.DefaultEncoderFactory encoders=new androidx.media3.transformer.DefaultEncoderFactory.Builder(this).setRequestedVideoEncoderSettings(settings).build();
             final androidx.media3.transformer.Transformer[] running={null};
             androidx.media3.transformer.Transformer.Listener listener=new androidx.media3.transformer.Transformer.Listener(){
-                @Override public void onCompleted(androidx.media3.transformer.Composition composition,androidx.media3.transformer.ExportResult result){androidx.media3.transformer.Transformer transformer=running[0];if(transformer!=null)activeVideoTransformers.remove(transformer);temporaryMediaExecutor.execute(()->{try{byte[] compressed=readAll(new FileInputStream(output));output.delete();main.post(()->transmitAttachment(pending,compressed,"video/mp4"));}catch(Exception error){output.delete();main.post(()->transmitAttachment(pending,previewBytes,"video/mp4"));}});}
-                @Override public void onError(androidx.media3.transformer.Composition composition,androidx.media3.transformer.ExportResult result,androidx.media3.transformer.ExportException error){androidx.media3.transformer.Transformer transformer=running[0];if(transformer!=null)activeVideoTransformers.remove(transformer);output.delete();transmitAttachment(pending,previewBytes,"video/mp4");}
+                @Override public void onCompleted(androidx.media3.transformer.Composition composition,androidx.media3.transformer.ExportResult result){androidx.media3.transformer.Transformer transformer=running[0];if(transformer!=null)activeVideoTransformers.remove(transformer);temporaryMediaExecutor.execute(()->{try{byte[] compressed=readAll(new FileInputStream(output));output.delete();if(compressed.length==0)throw new Exception("Empty export");main.post(()->transmitAttachment(pending,compressed,"video/mp4"));}catch(Exception error){output.delete();main.post(()->failPreparedVideo(pending));}});}
+                @Override public void onError(androidx.media3.transformer.Composition composition,androidx.media3.transformer.ExportResult result,androidx.media3.transformer.ExportException error){androidx.media3.transformer.Transformer transformer=running[0];if(transformer!=null)activeVideoTransformers.remove(transformer);output.delete();failPreparedVideo(pending);}
             };
-            androidx.media3.transformer.Transformer transformer=new androidx.media3.transformer.Transformer.Builder(this).setEncoderFactory(encoders).setVideoMimeType(androidx.media3.common.MimeTypes.VIDEO_H264).addListener(listener).build();running[0]=transformer;activeVideoTransformers.add(transformer);transformer.start(androidx.media3.common.MediaItem.fromUri(uri),output.getAbsolutePath());
-        }catch(Exception error){activeVideoTransformers.removeIf(x->x==null);output.delete();transmitAttachment(pending,previewBytes,"video/mp4");}
+            androidx.media3.transformer.Transformer transformer=new androidx.media3.transformer.Transformer.Builder(this).setEncoderFactory(encoders).setVideoMimeType(androidx.media3.common.MimeTypes.VIDEO_H264).setAudioMimeType(androidx.media3.common.MimeTypes.AUDIO_AAC).addListener(listener).build();
+            androidx.media3.transformer.Effects effects=new androidx.media3.transformer.Effects(java.util.Collections.emptyList(),java.util.Collections.singletonList(androidx.media3.effect.Presentation.createForHeight(720)));androidx.media3.transformer.EditedMediaItem edited=new androidx.media3.transformer.EditedMediaItem.Builder(androidx.media3.common.MediaItem.fromUri(uri)).setEffects(effects).setFrameRate(30).build();running[0]=transformer;activeVideoTransformers.add(transformer);transformer.start(edited,output.getAbsolutePath());
+        }catch(Exception error){activeVideoTransformers.removeIf(x->x==null);output.delete();failPreparedVideo(pending);}
     }
 
     private boolean isFingerOver(View target,float rawX,float rawY,int extraDp){if(target==null||target.getVisibility()!=View.VISIBLE)return false;int[] loc=new int[2];target.getLocationOnScreen(loc);float ex=dp(extraDp);return rawX>=loc[0]-ex&&rawX<=loc[0]+target.getWidth()+ex&&rawY>=loc[1]-ex&&rawY<=loc[1]+target.getHeight()+ex;}
@@ -4179,7 +4177,12 @@ reactionsCard.animate().cancel();
         PendingIntent tap=PendingIntent.getActivity(this,cid.hashCode(),open,PendingIntent.FLAG_UPDATE_CURRENT|(Build.VERSION.SDK_INT>=23?PendingIntent.FLAG_IMMUTABLE:0));
         Notification.Builder builder=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,MESSAGE_CHANNEL_ID):new Notification.Builder(this);
         JSONObject conversation=inboxConversationById(cid);boolean group=conversation!=null&&"group".equals(conversation.optString("type"));String title=group?conversation.optString("name","Group chat"):latest.optString("sender","New message");
-        Notification.InboxStyle style=new Notification.InboxStyle().setBigContentTitle(title);for(int i=0;i<history.length();i++){JSONObject entry=history.optJSONObject(i);if(entry!=null)style.addLine(entry.optString("text"));}builder.setStyle(style);
+        if(Build.VERSION.SDK_INT>=28){
+            android.app.Person self=new android.app.Person.Builder().setName("You").setKey(selfId.isEmpty()?"self":selfId).build();Notification.MessagingStyle style=new Notification.MessagingStyle(self);if(group)style.setConversationTitle(title);style.setGroupConversation(group);
+            for(int i=0;i<history.length();i++){JSONObject entry=history.optJSONObject(i);if(entry==null)continue;android.app.Person senderPerson=null;if(!entry.optBoolean("mine")){String entryAvatar=entry.optString("avatar"),entryAbsolute=entryAvatar.isEmpty()?"":(entryAvatar.startsWith("http")||entryAvatar.startsWith("data:")||entryAvatar.startsWith("file:")?entryAvatar:api.absolute(entryAvatar));Bitmap senderBitmap=images.getBitmap(entryAbsolute,dp(56),dp(56));if(senderBitmap==null)senderBitmap=latestAvatar;android.app.Person.Builder person=new android.app.Person.Builder().setName(entry.optString("sender","New message")).setKey(entry.optString("senderId",entry.optString("sender","sender")));if(senderBitmap!=null)person.setIcon(android.graphics.drawable.Icon.createWithBitmap(senderBitmap));senderPerson=person.build();}style.addMessage(new Notification.MessagingStyle.Message(entry.optString("text"),entry.optLong("at",System.currentTimeMillis()),senderPerson));}builder.setStyle(style);
+        }else{
+            Notification.MessagingStyle style=new Notification.MessagingStyle("You");if(group)style.setConversationTitle(title);for(int i=0;i<history.length();i++){JSONObject entry=history.optJSONObject(i);if(entry!=null)style.addMessage(entry.optString("text"),entry.optLong("at",System.currentTimeMillis()),entry.optBoolean("mine")?null:entry.optString("sender","New message"));}builder.setStyle(style);
+        }
         builder.setSmallIcon(R.drawable.app_icon).setLargeIcon(latestAvatar).setContentTitle(title).setContentText(latest.optString("text")).setContentIntent(tap).setAutoCancel(true).setCategory(Notification.CATEGORY_MESSAGE).setGroup("conversation-"+cid).setWhen(latest.optLong("at",System.currentTimeMillis())).setShowWhen(true).setOnlyAlertOnce(!alert);
         if(!alert)builder.setDefaults(0).setSound(null).setVibrate(null);
         NotificationManager manager=(NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE);if(manager!=null)manager.notify(cid.hashCode(),builder.build());
@@ -5139,8 +5142,6 @@ reactionsCard.animate().cancel();
             swipeHost.setClipToPadding(false);
             outer.setClipChildren(false);
             outer.setClipToPadding(false);
-            outer.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
-            outer.setLayoutParams(new android.widget.AbsListView.LayoutParams(-1,-2));
             LinearLayout.LayoutParams swipeHostLp=new LinearLayout.LayoutParams(-1,-2);
             swipeHostLp.leftMargin=dp(10);
             swipeHostLp.rightMargin=mine?dp(4):dp(10);
@@ -5203,7 +5204,6 @@ reactionsCard.animate().cancel();
             LinearLayout row=new LinearLayout(MainActivity.this);
             row.setClipChildren(false);
             row.setClipToPadding(false);
-            row.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
             row.setGravity(mine?Gravity.END|Gravity.BOTTOM:Gravity.START|Gravity.BOTTOM);
             swipeHost.addView(row,new FrameLayout.LayoutParams(-1,-2));
 

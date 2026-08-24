@@ -8,8 +8,8 @@ android {
         applicationId 'com.facebook.messengerclone'
         minSdk 24
         targetSdk 35
-        versionCode 195
-        versionName '1.94-androidx-build-fix'
+        versionCode 196
+        versionName '1.95-composer-notification-video-fix'
         buildConfigField 'String', 'BASE_URL', '"https://messengerextra.duckdns.org"'
     }
 
@@ -28,5 +28,6 @@ android {
 dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'androidx.media3:media3-common:1.4.1'
+    implementation 'androidx.media3:media3-effect:1.4.1'
     implementation 'androidx.media3:media3-transformer:1.4.1'
 }
