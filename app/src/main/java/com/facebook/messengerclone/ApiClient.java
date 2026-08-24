@@ -92,7 +92,7 @@ final class ApiClient {
             if(!compatibility){b.header("X-View-Mode",Integer.toString(Math.max(0,Math.min(2,viewMode)))).header("X-Media-View-Mode",Integer.toString(Math.max(0,Math.min(2,viewMode))));}
             if(replyToId!=null&&!replyToId.isEmpty())b.header("X-Reply-To-Id",replyToId);
             http.newCall(b.build()).enqueue(new Callback(){
-                @Override public void onFailure(Call call,IOException error){cb.done(null,error);}
+                @Override public void onFailure(Call call,IOException error){if(video&&!compatibility)uploadAttempt(path,bytes,fileName,mimeType,caption,clientId,replyToId,viewMode,true,cb);else cb.done(null,error);}
                 @Override public void onResponse(Call call,Response response){
                     try(response){
                         String text=response.body()==null?"":response.body().string();JSONObject json=null;try{json=new JSONObject(text.isEmpty()?"{}":text);}catch(Exception ignored){}
