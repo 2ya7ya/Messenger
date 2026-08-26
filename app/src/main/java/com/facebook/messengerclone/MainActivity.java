@@ -39,6 +39,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
+import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
@@ -110,19 +111,51 @@ public class MainActivity extends Activity {
     private ImageButton recordCancelButton; private TextView recordCancelHint; private final float[] recordLevels=new float[34];
     private FrameLayout recordOverlay; private View recordLockIndicator; private TextView recordLockHint; private boolean recordLockReady=false,recordDeleteHot=false,recordLockHot=false;
     private String beforeCursor=""; private boolean loadingOlderMessages=false; private JSONObject groupEditConversation; private String groupEditImageData="", groupEditEmoji="", groupEditColor="#3da9ef", groupEditDraftName="";
+    private String pendingExternalUserId=""; private ViewTreeObserver.OnGlobalLayoutListener imeSafetyListener;
 
-    @Override protected void onCreate(Bundle state){super.onCreate(state);requestWindowFeature(Window.FEATURE_NO_TITLE);getWindow().setStatusBarColor(Color.WHITE);getWindow().setNavigationBarColor(Color.WHITE);getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);api=new ApiClient(this);cache=new MessengerCache(this);images=new ImageLoader(this,api);stickers=new StickerLoader(this,api);root=new FrameLayout(this);root.setBackgroundColor(Color.WHITE);setContentView(root);if(api.hasSession()){showInbox(true);handleExternalConversationIntent(getIntent());}else showLogin();}
-    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);if(api!=null&&api.hasSession())handleExternalConversationIntent(intent);}
-    private void handleExternalConversationIntent(Intent intent){
-        if(intent==null||api==null||!api.hasSession())return;
+    @Override protected void onCreate(Bundle state){super.onCreate(state);requestWindowFeature(Window.FEATURE_NO_TITLE);getWindow().setStatusBarColor(Color.WHITE);getWindow().setNavigationBarColor(Color.WHITE);getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);getWindow().clearFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);api=new ApiClient(this);cache=new MessengerCache(this);images=new ImageLoader(this,api);stickers=new StickerLoader(this,api);root=new FrameLayout(this);root.setBackgroundColor(Color.WHITE);setContentView(root);installImeSafety();captureExternalConversationIntent(getIntent());if(api.hasSession()){showInbox(true);main.post(this::openPendingExternalConversation);}else showLogin();}
+    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);captureExternalConversationIntent(intent);if(api!=null&&api.hasSession()){if(activeConversation==null)showInbox(false);main.post(this::openPendingExternalConversation);}}
+    private void captureExternalConversationIntent(Intent intent){
+        if(intent==null)return;
         String uid=intent.getStringExtra("user_id");
         if(uid==null||uid.isEmpty())uid=intent.getStringExtra("recipient_id");
         if(uid==null||uid.isEmpty())uid=intent.getStringExtra("open_user_id");
-        if(uid==null||uid.trim().isEmpty())return;
-        final String target=uid.trim();
+        if((uid==null||uid.isEmpty())&&intent.getData()!=null&&"facebookclone-messenger".equals(intent.getData().getScheme())){
+            java.util.List<String> parts=intent.getData().getPathSegments();if(parts!=null&&!parts.isEmpty())uid=parts.get(parts.size()-1);
+        }
+        if(uid!=null&&!uid.trim().isEmpty())pendingExternalUserId=uid.trim();
         intent.removeExtra("user_id");intent.removeExtra("recipient_id");intent.removeExtra("open_user_id");
-        try{api.post("/api/messaging/conversations",new JSONObject().put("type","direct").put("userId",target),(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONObject conversation=json.optJSONObject("conversation");if(conversation!=null)openConversation(conversation);}));}
-        catch(Exception e){toast(e.getMessage());}
+    }
+    private void openPendingExternalConversation(){
+        if(api==null||!api.hasSession()||pendingExternalUserId==null||pendingExternalUserId.isEmpty())return;
+        final String target=pendingExternalUserId;pendingExternalUserId="";
+        try{api.post("/api/messaging/conversations",new JSONObject().put("type","direct").put("userId",target),(json,error)->main.post(()->{
+            if(error!=null){pendingExternalUserId=target;toast(error.getMessage());return;}
+            JSONObject conversation=json.optJSONObject("conversation");
+            if(conversation!=null){openConversation(conversation);main.postDelayed(()->{if(activeConversation!=null&&conversation.optString("id").equals(activeConversation.optString("id")))scrollToAbsoluteBottom();},120);}
+            else pendingExternalUserId=target;
+        }));}catch(Exception e){pendingExternalUserId=target;toast(e.getMessage());}
+    }
+    private void installImeSafety(){
+        if(root==null)return;
+        imeSafetyListener=()->{
+            if(root==null||composer==null||activeConversation==null)return;
+            if(root.findViewWithTag("messenger-native-media-sheet")!=null||root.findViewWithTag("messenger-native-sticker-sheet")!=null)return;
+            Rect visible=new Rect();root.getWindowVisibleDisplayFrame(visible);
+            int[] rootLoc=new int[2];root.getLocationOnScreen(rootLoc);int rootBottom=rootLoc[1]+root.getHeight();
+            int obscured=Math.max(0,rootBottom-visible.bottom);
+            int lift=0;
+            if(obscured>dp(80)){
+                int[] loc=new int[2];composer.getLocationOnScreen(loc);
+                int baseBottom=Math.round(loc[1]+composer.getHeight()-composer.getTranslationY());
+                lift=Math.max(0,baseBottom-visible.bottom);
+            }
+            float target=-lift;
+            if(Math.abs(composer.getTranslationY()-target)>.5f)composer.setTranslationY(target);
+            if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE&&Math.abs(replyBar.getTranslationY()-target)>.5f)replyBar.setTranslationY(target);
+            if(list!=null){int bottom=dp(26)+lift;if(list.getPaddingBottom()!=bottom)list.setPadding(dp(10),dp(12),dp(10),bottom);}
+        };
+        root.getViewTreeObserver().addOnGlobalLayoutListener(imeSafetyListener);
     }
     @Override protected void onResume(){super.onResume();if(api!=null&&api.hasSession())connectSocket();}
     @Override protected void onPause(){
@@ -133,7 +166,7 @@ public class MainActivity extends Activity {
         }
         super.onPause();
     }
-    @Override protected void onDestroy(){main.removeCallbacks(socketReconnect);if(socket!=null)socket.close(1000,"bye");socket=null;stopRecorder(false);super.onDestroy();}
+    @Override protected void onDestroy(){main.removeCallbacks(socketReconnect);if(root!=null&&imeSafetyListener!=null&&root.getViewTreeObserver().isAlive())root.getViewTreeObserver().removeOnGlobalLayoutListener(imeSafetyListener);if(socket!=null)socket.close(1000,"bye");socket=null;stopRecorder(false);super.onDestroy();}
     @Override public void onBackPressed(){
         if(root!=null){
             View mediaSheet=root.findViewWithTag("messenger-native-media-sheet");
@@ -169,7 +202,7 @@ public class MainActivity extends Activity {
     private TextView text(String v,float sp,int color,int style){TextView t=new TextView(this);t.setText(v==null?"":v);t.setTextSize(sp);t.setTextColor(color);t.setGravity(Gravity.CENTER_VERTICAL);if(style!=Typeface.NORMAL)t.setTypeface(Typeface.DEFAULT,style);return t;}
     private ImageButton icon(int drawable,int sizeDp,int tint){ImageButton b=new ImageButton(this);b.setImageResource(drawable);b.setColorFilter(tint);b.setBackgroundColor(Color.TRANSPARENT);b.setPadding(dp(7),dp(7),dp(7),dp(7));b.setScaleType(ImageView.ScaleType.CENTER_INSIDE);b.setLayoutParams(new LinearLayout.LayoutParams(dp(sizeDp),dp(sizeDp)));return b;}
 
-    private void showLogin(){root.removeAllViews();activeConversation=null;LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setGravity(Gravity.CENTER_HORIZONTAL);box.setPadding(dp(26),dp(52),dp(26),dp(24));root.addView(box,new FrameLayout.LayoutParams(-1,-1));TextView logo=text("Messenger",31,BLUE,Typeface.BOLD);logo.setGravity(Gravity.CENTER);box.addView(logo,new LinearLayout.LayoutParams(-1,dp(90)));EditText id=new EditText(this);id.setHint("Mobile number or email");id.setSingleLine(true);id.setTextSize(16);id.setPadding(dp(14),0,dp(14),0);id.setBackground(bg(LIGHT,12));box.addView(id,new LinearLayout.LayoutParams(-1,dp(52)));Space sp=new Space(this);box.addView(sp,new LinearLayout.LayoutParams(1,dp(12)));EditText pass=new EditText(this);pass.setHint("Password");pass.setSingleLine(true);pass.setInputType(0x81);pass.setTextSize(16);pass.setPadding(dp(14),0,dp(14),0);pass.setBackground(bg(LIGHT,12));box.addView(pass,new LinearLayout.LayoutParams(-1,dp(52)));Button login=new Button(this);login.setText("Log in");login.setTextColor(Color.WHITE);login.setTextSize(16);login.setTypeface(Typeface.DEFAULT,Typeface.BOLD);login.setBackground(bg(BLUE,24));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(48));lp.topMargin=dp(16);box.addView(login,lp);ProgressBar p=new ProgressBar(this);p.setVisibility(View.GONE);box.addView(p,new LinearLayout.LayoutParams(dp(48),dp(38)));login.setOnClickListener(v->{String a=id.getText().toString().trim(),b=pass.getText().toString();if(a.isEmpty()||b.isEmpty()){toast("Enter your login details.");return;}login.setEnabled(false);p.setVisibility(View.VISIBLE);api.login(a,b,(json,error)->main.post(()->{login.setEnabled(true);p.setVisibility(View.GONE);if(error!=null){toast(error.getMessage());return;}showInbox(true);}));});}
+    private void showLogin(){root.removeAllViews();activeConversation=null;LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setGravity(Gravity.CENTER_HORIZONTAL);box.setPadding(dp(26),dp(52),dp(26),dp(24));root.addView(box,new FrameLayout.LayoutParams(-1,-1));TextView logo=text("Messenger",31,BLUE,Typeface.BOLD);logo.setGravity(Gravity.CENTER);box.addView(logo,new LinearLayout.LayoutParams(-1,dp(90)));EditText id=new EditText(this);id.setHint("Mobile number or email");id.setSingleLine(true);id.setTextSize(16);id.setPadding(dp(14),0,dp(14),0);id.setBackground(bg(LIGHT,12));box.addView(id,new LinearLayout.LayoutParams(-1,dp(52)));Space sp=new Space(this);box.addView(sp,new LinearLayout.LayoutParams(1,dp(12)));EditText pass=new EditText(this);pass.setHint("Password");pass.setSingleLine(true);pass.setInputType(0x81);pass.setTextSize(16);pass.setPadding(dp(14),0,dp(14),0);pass.setBackground(bg(LIGHT,12));box.addView(pass,new LinearLayout.LayoutParams(-1,dp(52)));Button login=new Button(this);login.setText("Log in");login.setTextColor(Color.WHITE);login.setTextSize(16);login.setTypeface(Typeface.DEFAULT,Typeface.BOLD);login.setBackground(bg(BLUE,24));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(48));lp.topMargin=dp(16);box.addView(login,lp);ProgressBar p=new ProgressBar(this);p.setVisibility(View.GONE);box.addView(p,new LinearLayout.LayoutParams(dp(48),dp(38)));login.setOnClickListener(v->{String a=id.getText().toString().trim(),b=pass.getText().toString();if(a.isEmpty()||b.isEmpty()){toast("Enter your login details.");return;}login.setEnabled(false);p.setVisibility(View.VISIBLE);api.login(a,b,(json,error)->main.post(()->{login.setEnabled(true);p.setVisibility(View.GONE);if(error!=null){toast(error.getMessage());return;}showInbox(true);main.post(this::openPendingExternalConversation);}));});}
 
     private void showInbox(boolean initial){activeConversation=null;replyTo=null;root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setBackground(themeConversationBackground());head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(15),0,dp(12),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(58)));TextView title=text("Chats",25,TEXT,Typeface.BOLD);head.addView(title,new LinearLayout.LayoutParams(0,-1,1));ImageButton search=icon(R.drawable.ic_msg_search,40,TEXT);head.addView(search);ImageButton plus=icon(R.drawable.ic_msg_plus,40,TEXT);head.addView(plus);
         searchBox=new EditText(this);searchBox.setSingleLine(true);searchBox.setHint("Search chats");searchBox.setTextSize(16);searchBox.setPadding(dp(15),0,dp(15),0);searchBox.setBackground(bg(LIGHT,22));LinearLayout.LayoutParams sl=new LinearLayout.LayoutParams(-1,dp(40));sl.setMargins(dp(12),dp(8),dp(12),dp(5));page.addView(searchBox,sl);list=new ListView(this);list.setDivider(null);list.setSelector(android.R.color.transparent);list.setPadding(dp(8),dp(2),dp(8),dp(90));list.setClipToPadding(false);page.addView(list,new LinearLayout.LayoutParams(-1,0,1));inboxAdapter=new InboxAdapter();list.setAdapter(inboxAdapter);list.setOnItemClickListener((p,v,pos,id)->openConversation(filteredInbox.get(pos)));
