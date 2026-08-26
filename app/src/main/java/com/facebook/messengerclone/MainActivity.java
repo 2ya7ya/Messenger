@@ -140,7 +140,8 @@ public class MainActivity extends Activity {
 
     private void openPendingExternalConversation(){
         if(api==null||!api.hasSession()||pendingExternalUserId==null||pendingExternalUserId.isEmpty())return;
-        final String target=pendingExternalUserId;pendingExternalUserId="";
+        final String target=pendingExternalUserId;
+        pendingExternalUserId="";
         try{
             api.post("/api/messaging/conversations",
                 new JSONObject().put("type","direct").put("userId",target),
@@ -155,8 +156,7 @@ public class MainActivity extends Activity {
                     if(conversation!=null){
                         openConversation(conversation);
                         main.postDelayed(()->{
-                            if(activeConversation!=null&&conversation.optString("id").equals(activeConversation.optString("id")))
-                                scrollToAbsoluteBottom();
+                            if(activeConversation!=null&&conversation.optString("id").equals(activeConversation.optString("id")))scrollToAbsoluteBottom();
                         },120);
                     }else{
                         pendingExternalUserId=target;
@@ -173,82 +173,60 @@ public class MainActivity extends Activity {
 
     private void installImeSafety(){
         if(root==null)return;
-
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
 
         if(Build.VERSION.SDK_INT>=30){
-            try{getWindow().setDecorFitsSystemWindows(true);}catch(Throwable ignored){}
             root.setOnApplyWindowInsetsListener((v,insets)->{
                 main.post(this::applyImeSafetyNow);
-                return v.onApplyWindowInsets(insets);
+                return insets;
             });
         }
-
         imeSafetyListener=()->main.post(this::applyImeSafetyNow);
         root.getViewTreeObserver().addOnGlobalLayoutListener(imeSafetyListener);
     }
 
     private void applyImeSafetyNow(){
         if(root==null||composer==null||activeConversation==null)return;
-        if(root.findViewWithTag("messenger-native-media-sheet")!=null||
-           root.findViewWithTag("messenger-native-sticker-sheet")!=null)return;
+        if(root.findViewWithTag("messenger-native-media-sheet")!=null||root.findViewWithTag("messenger-native-sticker-sheet")!=null)return;
 
         View decor=getWindow().getDecorView();
         Rect visible=new Rect();
         decor.getWindowVisibleDisplayFrame(visible);
 
-        int[] composerLoc=new int[2];
-        composer.getLocationOnScreen(composerLoc);
-
-        int naturalComposerBottom=Math.round(
-            composerLoc[1]+composer.getHeight()-composer.getTranslationY()
-        );
-
-        int keyboardTopFromVisible=visible.bottom;
-        int keyboardTopFromInsets=Integer.MAX_VALUE;
-
+        int keyboardTop=visible.bottom;
+        boolean imeVisible=false;
         if(Build.VERSION.SDK_INT>=30){
             try{
                 android.view.WindowInsets wi=root.getRootWindowInsets();
                 if(wi!=null){
-                    android.graphics.Insets ime=
-                        wi.getInsets(android.view.WindowInsets.Type.ime());
-                    if(ime.bottom>dp(40)){
-                        int[] decorLoc=new int[2];
-                        decor.getLocationOnScreen(decorLoc);
-                        keyboardTopFromInsets=
-                            decorLoc[1]+decor.getHeight()-ime.bottom;
+                    imeVisible=wi.isVisible(android.view.WindowInsets.Type.ime());
+                    android.graphics.Insets ime=wi.getInsets(android.view.WindowInsets.Type.ime());
+                    if(imeVisible&&ime.bottom>0){
+                        int[] dloc=new int[2];
+                        decor.getLocationOnScreen(dloc);
+                        keyboardTop=Math.min(keyboardTop,dloc[1]+decor.getHeight()-ime.bottom);
                     }
                 }
             }catch(Throwable ignored){}
+        }else{
+            int obscured=Math.max(0,decor.getHeight()-visible.height());
+            imeVisible=obscured>dp(80);
         }
 
-        int keyboardTop=Math.min(keyboardTopFromVisible,keyboardTopFromInsets);
-        int lift=Math.max(0,naturalComposerBottom-keyboardTop+dp(2));
-        if(lift<dp(4))lift=0;
-
+        int[] cloc=new int[2];
+        composer.getLocationOnScreen(cloc);
+        int naturalBottom=Math.round(cloc[1]+composer.getHeight()-composer.getTranslationY());
+        int lift=imeVisible?Math.max(0,naturalBottom-keyboardTop+dp(2)):0;
+        if(lift<dp(3))lift=0;
         float target=-lift;
-        if(Math.abs(composer.getTranslationY()-target)>.5f)
-            composer.setTranslationY(target);
 
-        if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE&&
-           Math.abs(replyBar.getTranslationY()-target)>.5f)
-            replyBar.setTranslationY(target);
-
-        if(recordBar!=null&&recordBar.getVisibility()==View.VISIBLE&&
-           Math.abs(recordBar.getTranslationY()-target)>.5f)
-            recordBar.setTranslationY(target);
+        if(Math.abs(composer.getTranslationY()-target)>.5f)composer.setTranslationY(target);
+        if(replyBar!=null&&Math.abs(replyBar.getTranslationY()-target)>.5f)replyBar.setTranslationY(target);
+        if(recordBar!=null&&Math.abs(recordBar.getTranslationY()-target)>.5f)recordBar.setTranslationY(target);
 
         if(list!=null){
             int bottom=dp(26)+lift;
-            if(list.getPaddingBottom()!=bottom){
-                list.setPadding(
-                    list.getPaddingLeft(),
-                    list.getPaddingTop(),
-                    list.getPaddingRight(),
-                    bottom
-                );
-            }
+            if(list.getPaddingBottom()!=bottom)list.setPadding(list.getPaddingLeft(),list.getPaddingTop(),list.getPaddingRight(),bottom);
         }
     }
 
@@ -3627,24 +3605,7 @@ reactionsCard.animate().cancel();
     private void toggleMute(JSONObject c){try{api.patch("/api/messaging/conversations/"+c.optString("id")+"/settings",new JSONObject().put("muted",c.optString("mutedUntil").isEmpty()),(json,error)->main.post(()->{if(error!=null)toast(error.getMessage());else{JSONObject nc=json.optJSONObject("conversation");if(nc!=null)activeConversation=nc;showInfo();}}));}catch(Exception e){toast(e.getMessage());}}
     private LinearLayout darkSubPage(String titleText,Runnable backAction){root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.rgb(11,15,20));root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(7),0,dp(7),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(50)));ImageButton back=icon(R.drawable.ic_msg_back,38,Color.WHITE);back.setPadding(dp(9),dp(9),dp(9),dp(9));head.addView(back);back.setOnClickListener(v->backAction.run());TextView title=text(titleText,17,Color.WHITE,Typeface.BOLD);head.addView(title,new LinearLayout.LayoutParams(0,-1,1));Space sp=new Space(this);head.addView(sp,new LinearLayout.LayoutParams(dp(38),dp(38)));return page;}
     private void showConversationSearch(JSONObject c){LinearLayout page=darkSubPage("Search",this::showInfo);LinearLayout wrap=new LinearLayout(this);wrap.setOrientation(LinearLayout.VERTICAL);wrap.setPadding(dp(16),dp(7),dp(16),0);page.addView(wrap,new LinearLayout.LayoutParams(-1,0,1));EditText q=new EditText(this);q.setHint("Search in conversation");q.setHintTextColor(Color.rgb(174,179,187));q.setTextColor(Color.WHITE);q.setSingleLine(true);q.setTextSize(16);q.setPadding(dp(16),0,dp(16),0);q.setBackground(bg(Color.rgb(36,40,46),22));wrap.addView(q,new LinearLayout.LayoutParams(-1,dp(43)));LinearLayout results=new LinearLayout(this);results.setOrientation(LinearLayout.VERTICAL);ScrollView scroll=new ScrollView(this);scroll.addView(results,new ScrollView.LayoutParams(-1,-2));LinearLayout.LayoutParams slp=new LinearLayout.LayoutParams(-1,0,1);slp.topMargin=dp(8);wrap.addView(scroll,slp);final Runnable[] run=new Runnable[1];run[0]=()->{String query=q.getText().toString().trim();if(query.isEmpty()){results.removeAllViews();return;}api.get("/api/messaging/search?q="+Uri.encode(query)+"&conversationId="+c.optString("id"),(json,error)->main.post(()->{results.removeAllViews();if(error!=null){TextView e=text(error.getMessage(),13,Color.rgb(174,179,187),Typeface.NORMAL);e.setGravity(Gravity.CENTER);results.addView(e,new LinearLayout.LayoutParams(-1,dp(80)));return;}JSONArray a=json.optJSONArray("results");if(a==null||a.length()==0){TextView empty=text("No messages found",13,Color.rgb(174,179,187),Typeface.NORMAL);empty.setGravity(Gravity.CENTER);results.addView(empty,new LinearLayout.LayoutParams(-1,dp(80)));return;}for(int i=0;i<a.length();i++){JSONObject m=a.optJSONObject(i);if(m==null)continue;LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.VERTICAL);row.setPadding(dp(7),dp(10),dp(7),dp(10));TextView sn=text(senderName(m),15,Color.WHITE,Typeface.BOLD);row.addView(sn,new LinearLayout.LayoutParams(-1,dp(25)));TextView body=text(m.optString("body",previewForType(m.optString("type"))),13,Color.rgb(174,179,187),Typeface.NORMAL);body.setSingleLine(true);body.setEllipsize(TextUtils.TruncateAt.END);row.addView(body,new LinearLayout.LayoutParams(-1,dp(22)));results.addView(row,new LinearLayout.LayoutParams(-1,dp(58)));View div=new View(this);div.setBackgroundColor(Color.rgb(32,36,42));results.addView(div,new LinearLayout.LayoutParams(-1,dp(1)));row.setOnClickListener(v->{String target=m.optString("id");openConversation(c);main.postDelayed(()->{int pos=-1;for(int x=0;x<messages.size();x++)if(target.equals(messages.get(x).optString("id"))){pos=x;break;}if(pos>=0&&list!=null){list.setSelection(Math.max(0,pos-2));}},260);});}}));};q.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c1,int a){}public void onTextChanged(CharSequence cs,int st,int b,int c1){main.removeCallbacks(run[0]);main.postDelayed(run[0],240);}public void afterTextChanged(Editable e){}});q.requestFocus();getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);}
-    private String themeLabel(String key){
-        String k=key==null?"default":key;
-        String[] keys={
-            "default","instagram","love","ocean","sunset","monochrome",
-            "glow-pup","odyssey","supergirl","avatar","olivia",
-            "backrooms","deli-boys","heart-drive","valentines"
-        };
-        String[] labels={
-            "Default","Instagram","Love","Ocean","Sunset","Monochrome",
-            "Glow Pup","The Odyssey","Supergirl","Avatar: The Last Airbender",
-            "Olivia Rodrigo","Backrooms","Deli Boys","Heart Drive",
-            "Valentine’s Day"
-        };
-        for(int i=0;i<keys.length;i++)if(keys[i].equals(k))return labels[i];
-        if("instagram-classic".equals(k))return "Instagram";
-        return "Default";
-    }
-
+    private String themeLabel(String key){String k=key==null?"default":key;String[] keys={"default","instagram","love","ocean","sunset","monochrome","glow-pup","odyssey","supergirl","avatar","olivia","backrooms","deli-boys","heart-drive","valentines"};String[] labels={"Default","Instagram","Love","Ocean","Sunset","Monochrome","Glow Pup","The Odyssey","Supergirl","Avatar: The Last Airbender","Olivia Rodrigo","Backrooms","Deli Boys","Heart Drive","Valentine’s Day"};for(int i=0;i<keys.length;i++)if(keys[i].equals(k))return labels[i];if("instagram-classic".equals(k))return"Instagram";return"Default";}
     private void showThemePage(JSONObject c){LinearLayout page=darkSubPage("Theme",this::showInfo);ScrollView scroll=new ScrollView(this);page.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));GridLayout grid=new GridLayout(this);grid.setColumnCount(3);grid.setPadding(dp(16),dp(12),dp(16),dp(28));scroll.addView(grid,new ScrollView.LayoutParams(-1,-2));String[] keys={"default","instagram","love","ocean","sunset","monochrome","glow-pup","odyssey","supergirl","avatar","olivia","backrooms","deli-boys","heart-drive","valentines"};int totalW=getResources().getDisplayMetrics().widthPixels-dp(56);int cardW=totalW/3;int previewH=Math.round(cardW/.69f);for(String key:keys){LinearLayout card=new LinearLayout(this);card.setOrientation(LinearLayout.VERTICAL);card.setPadding(dp(3),0,dp(3),dp(12));ThemePreviewView preview=new ThemePreviewView(this,key,key.equals(c.optString("theme","default")));card.addView(preview,new LinearLayout.LayoutParams(-1,previewH));TextView label=text(themeLabel(key),12,Color.WHITE,Typeface.NORMAL);label.setGravity(Gravity.TOP|Gravity.START);LinearLayout.LayoutParams llp=new LinearLayout.LayoutParams(-1,dp(38));llp.topMargin=dp(8);card.addView(label,llp);GridLayout.LayoutParams cp=new GridLayout.LayoutParams();cp.width=cardW;cp.height=previewH+dp(58);cp.setMargins(dp(2),0,dp(2),dp(4));grid.addView(card,cp);card.setOnClickListener(v->{String previous=c.optString("theme","default");try{c.put("theme",key);activeConversation=c;}catch(Exception ignored){}showThemePage(c);try{api.patch("/api/messaging/conversations/"+c.optString("id")+"/theme",new JSONObject().put("theme",key),(json,error)->main.post(()->{if(error!=null){try{c.put("theme",previous);}catch(Exception ignored){}toast(error.getMessage());showThemePage(c);return;}JSONObject nc=json.optJSONObject("conversation");if(nc!=null)activeConversation=nc;}));}catch(Exception e){toast(e.getMessage());}});}}
     private void showNicknames(JSONObject c){LinearLayout page=darkSubPage("Nicknames",this::showInfo);ScrollView scroll=new ScrollView(this);page.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(dp(12),dp(4),dp(12),0);scroll.addView(body,new ScrollView.LayoutParams(-1,-2));JSONArray ps=c.optJSONArray("participants");if(ps==null)return;for(int i=0;i<ps.length();i++){JSONObject person=ps.optJSONObject(i);if(person==null)continue;LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(9),dp(6),dp(9),dp(6));row.setBackgroundColor(Color.TRANSPARENT);View av=buildUserAvatar(avatarUrl(person),person.optString("name"),46);row.addView(av,new LinearLayout.LayoutParams(dp(46),dp(46)));LinearLayout labels=new LinearLayout(this);labels.setOrientation(LinearLayout.VERTICAL);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(54),1);lp.leftMargin=dp(10);row.addView(labels,lp);String nick=person.optString("nickname");labels.addView(text(nick.isEmpty()?"Set nickname":nick,15,Color.WHITE,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(28)));labels.addView(text(person.optString("originalName",person.optString("name")),12,Color.rgb(174,179,187),Typeface.NORMAL),new LinearLayout.LayoutParams(-1,dp(23)));TextView chev=text("›",22,Color.rgb(174,179,187),Typeface.NORMAL);chev.setGravity(Gravity.CENTER);row.addView(chev,new LinearLayout.LayoutParams(dp(28),dp(54)));body.addView(row,new LinearLayout.LayoutParams(-1,dp(66)));row.setOnClickListener(v->editNickname(c,person));}}
     private void editNickname(JSONObject c,JSONObject person){Dialog d=new Dialog(this);d.requestWindowFeature(Window.FEATURE_NO_TITLE);FrameLayout overlay=new FrameLayout(this);overlay.setBackgroundColor(Color.argb(153,0,0,0));LinearLayout card=new LinearLayout(this);card.setOrientation(LinearLayout.VERTICAL);card.setPadding(dp(18),dp(16),dp(18),dp(16));card.setBackground(bg(Color.rgb(39,43,48),18));FrameLayout.LayoutParams cp=new FrameLayout.LayoutParams(Math.min(getResources().getDisplayMetrics().widthPixels-dp(40),dp(340)),-2,Gravity.CENTER);overlay.addView(card,cp);card.addView(text("Set nickname",20,Color.WHITE,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(34)));EditText input=new EditText(this);input.setSingleLine(true);input.setMaxLines(1);input.setText(person.optString("nickname"));input.setHint(person.optString("originalName",person.optString("name")));input.setHintTextColor(Color.rgb(174,179,187));input.setTextColor(Color.WHITE);input.setPadding(dp(12),0,dp(12),0);input.setBackground(bg(Color.rgb(23,25,29),10));LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(-1,dp(44));ip.topMargin=dp(6);card.addView(input,ip);LinearLayout actions=new LinearLayout(this);actions.setGravity(Gravity.END);LinearLayout.LayoutParams alp=new LinearLayout.LayoutParams(-1,dp(48));alp.topMargin=dp(10);card.addView(actions,alp);Button cancel=new Button(this);cancel.setText("Cancel");cancel.setTextColor(Color.WHITE);cancel.setAllCaps(false);cancel.setBackground(bg(Color.rgb(58,63,69),9));actions.addView(cancel,new LinearLayout.LayoutParams(dp(88),dp(39)));Button save=new Button(this);save.setText("Save");save.setTextColor(Color.WHITE);save.setAllCaps(false);save.setBackground(bg(Color.rgb(124,92,255),9));LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(dp(78),dp(39));sp.leftMargin=dp(8);actions.addView(save,sp);cancel.setOnClickListener(v->d.dismiss());save.setOnClickListener(v->{String value=input.getText().toString().trim(),old=person.optString("nickname");try{person.put("nickname",value);}catch(Exception ignored){}d.dismiss();showNicknames(c);try{api.patch("/api/messaging/conversations/"+c.optString("id")+"/nicknames/"+person.optString("id"),new JSONObject().put("nickname",value),(json,error)->main.post(()->{if(error!=null){try{person.put("nickname",old);}catch(Exception ignored){}toast(error.getMessage());showNicknames(c);return;}JSONObject nc=json.optJSONObject("conversation");if(nc!=null)activeConversation=nc;}));}catch(Exception e){toast(e.getMessage());}});d.setContentView(overlay);d.show();Window w=d.getWindow();if(w!=null){w.setBackgroundDrawableResource(android.R.color.transparent);w.setDimAmount(0);w.setLayout(-1,-1);}input.requestFocus();input.setSelection(input.length());}
