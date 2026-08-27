@@ -4,6 +4,10 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -22,6 +26,8 @@ import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.media.MediaRecorder;
+import android.media.MediaMetadataRetriever;
+import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
@@ -38,8 +44,8 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewParent;
 import android.view.ViewTreeObserver;
+import android.view.ViewParent;
 import android.view.Window;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
@@ -56,6 +62,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ProgressBar;
+import android.widget.SeekBar;
 import android.widget.Space;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -65,8 +72,10 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -77,26 +86,46 @@ import java.util.Set;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import android.util.Base64;
 
 import okhttp3.WebSocket;
 
 public class MainActivity extends Activity {
     private static final int BLUE=Color.rgb(8,102,255), TEXT=Color.rgb(5,5,5), SUB=Color.rgb(101,103,107), LIGHT=Color.rgb(240,242,245), RECEIVED=Color.rgb(240,242,245), DIV=Color.rgb(228,230,235);
-    private static final int PICK_FILE=4021, REQ_MIC=4022, PICK_GROUP_IMAGE=4023, REQ_MEDIA=4024, REQ_CAMERA=4025;
+    private static final int PICK_FILE=4021, REQ_MIC=4022, PICK_GROUP_IMAGE=4023, REQ_MEDIA=4024, REQ_CAMERA=4025, REQ_NOTIFICATIONS=4026;
+    private static final String MESSAGE_CHANNEL_ID="messenger_messages";
     private static final long BURST_MS=5*60*1000L, STAMP_MS=15*60*1000L;
     private final Handler main=new Handler(Looper.getMainLooper());
     private ApiClient api; private MessengerCache cache; private ImageLoader images; private StickerLoader stickers; private WebSocket socket;
-    private FrameLayout root; private ListView list; private View olderMessagesLoaderRow; private OlderMessagesSpinner olderMessagesSpinner; private InboxAdapter inboxAdapter; private MessageAdapter messageAdapter;
+    private FrameLayout root; private ListView list; private View olderMessagesLoaderRow,directConversationIntro; private OlderMessagesSpinner olderMessagesSpinner,searchTargetSpinner,inboxSearchSpinner; private BaseAdapter inboxAdapter; private MessageAdapter messageAdapter;
     private final List<JSONObject> inbox=new ArrayList<>(), filteredInbox=new ArrayList<>(), messages=new ArrayList<>();
+    private final List<JSONObject> socketMessageBatch=new ArrayList<>();
     private final Set<String> typingConversations=new HashSet<>();
     private final Set<String> stickerLastConversations=new HashSet<>();
+    private final Set<String> openEphemeralMedia=new HashSet<>();
+    private final Set<String> inboxMessageSearchMatches=new HashSet<>();
+    private final List<JSONObject> inboxMessageSearchResults=new ArrayList<>();
     private final Map<String,Runnable> typingExpiry=new HashMap<>();
     private final Map<String,Long> localSeenAt=new HashMap<>();
-    private JSONObject activeConversation, replyTo; private EditText searchBox, messageInput; private TextView typingView; private LinearLayout replyBar, composer, recordBar;
-    private int socketRetry=0; private boolean socketConnecting=false;
+    private final Map<String,List<Runnable>> temporaryVideoWaiters=new HashMap<>();
+    private final Map<String,String> temporaryVideoFiles=new HashMap<>();
+    private final Set<String> temporaryVideoLoading=new HashSet<>();
+    private final Set<String> pendingLocalReactionIds=new HashSet<>();
+    private final Set<androidx.media3.transformer.Transformer> activeVideoTransformers=new HashSet<>();
+    private final Map<String,Bitmap> videoThumbnailCache=new LinkedHashMap<String,Bitmap>(24,.75f,true){@Override protected boolean removeEldestEntry(Map.Entry<String,Bitmap> eldest){return size()>24;}};
+    private final Map<String,List<ImageView>> videoThumbnailWaiters=new HashMap<>();
+    private final Set<String> videoThumbnailLoading=new HashSet<>();
+    private final ExecutorService temporaryMediaExecutor=Executors.newFixedThreadPool(2);
+    private final ExecutorService videoThumbnailExecutor=Executors.newFixedThreadPool(3);
+    private JSONObject activeConversation, replyTo, editingMessage; private EditText searchBox, messageInput; private TextView typingView; private LinearLayout replyBar, composer, recordBar;
+    private int socketRetry=0; private boolean socketConnecting=false; private int inboxSearchRequest=0; private Runnable inboxSearchTask; private String inboxMessageSearchQuery=""; private boolean refreshingInbox=false,inboxRefreshQueued=false,inboxDedicatedSearch=false,showingInboxSearchPage=false,conversationOpenedFromInboxSearch=false;
+    private int inboxSearchScrollPosition=0;
+    private String pendingSearchTargetMessageId="";
     private static final String COMMENT_STICKER_API_KEY="PvlaAZvthRs8jWekpX4blV5ORIDrykTm";
     private final Runnable socketReconnect=()->{ if(api!=null&&api.hasSession()) connectSocket(); };
     private ImageButton sendButton, micButton; private String selfId=""; private boolean refreshingMessages=false;
@@ -104,134 +133,45 @@ public class MainActivity extends Activity {
     private boolean forceFullScreenMediaPicker=false;
     // 0 = normal composer picker, 1 = camera, 2 = Aa creator.
     private int mediaPickerPreviewOrigin=0;
+    private String previewTextPrefill="";
     private long lastTypingWireAt=0L;
+    private long lastMessageTapAt=0L;
+    private String lastMessageTapId="";
+    private Runnable pendingSingleMessageTap;
     private float timeRevealOffset=0f,timeRevealDownX=Float.NaN,timeRevealDownY=Float.NaN;
     private boolean timeRevealDragging=false;
     private MediaRecorder recorder; private File recordFile; private long recordStarted; private Runnable recordTicker; private float recordDownX,recordDownY; private boolean recordLocked=false,recordCanceled=false,pendingMicStart=false;
     private ImageButton recordCancelButton; private TextView recordCancelHint; private final float[] recordLevels=new float[34];
     private FrameLayout recordOverlay; private View recordLockIndicator; private TextView recordLockHint; private boolean recordLockReady=false,recordDeleteHot=false,recordLockHot=false;
     private String beforeCursor=""; private boolean loadingOlderMessages=false; private JSONObject groupEditConversation; private String groupEditImageData="", groupEditEmoji="", groupEditColor="#3da9ef", groupEditDraftName="";
-    private String pendingExternalUserId=""; private ViewTreeObserver.OnGlobalLayoutListener imeSafetyListener;
+    private boolean conversationInitialScrollPending=false;
+    private boolean appVisible=false;
+    private String pendingNotificationConversationId="";
+    private String socketMessageBatchConversationId="";
+    private final Runnable flushSocketMessages=this::flushSocketMessageBatch;
+    private boolean scheduledMessageRefreshKeepsBottom=false;
+    private String pendingExternalUserId="";
+    private ViewTreeObserver.OnGlobalLayoutListener imeSafetyListener;
+    private final Runnable bottomAnchor=()->{if(list!=null&&list.getCount()>0)list.setSelection(Math.max(0,list.getCount()-1));};
+    private final Runnable messageRefresh=()->{boolean keepBottom=scheduledMessageRefreshKeepsBottom;scheduledMessageRefreshKeepsBottom=false;if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();if(keepBottom)scrollToAbsoluteBottom();}};
 
-    @Override protected void onCreate(Bundle state){super.onCreate(state);requestWindowFeature(Window.FEATURE_NO_TITLE);getWindow().setStatusBarColor(Color.WHITE);getWindow().setNavigationBarColor(Color.WHITE);getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);getWindow().clearFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);api=new ApiClient(this);cache=new MessengerCache(this);images=new ImageLoader(this,api);stickers=new StickerLoader(this,api);root=new FrameLayout(this);root.setBackgroundColor(Color.WHITE);setContentView(root);installImeSafety();captureExternalConversationIntent(getIntent());if(api.hasSession()){if(pendingExternalUserId!=null&&!pendingExternalUserId.isEmpty()){showDirectConversationLoading();main.post(this::openPendingExternalConversation);}else showInbox(true);}else showLogin();}
-    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);captureExternalConversationIntent(intent);if(api!=null&&api.hasSession()){if(pendingExternalUserId!=null&&!pendingExternalUserId.isEmpty()){showDirectConversationLoading();main.post(this::openPendingExternalConversation);}else if(activeConversation==null)showInbox(false);}}
-    private void captureExternalConversationIntent(Intent intent){
-        if(intent==null)return;
-        String uid=intent.getStringExtra("user_id");
-        if(uid==null||uid.isEmpty())uid=intent.getStringExtra("recipient_id");
-        if(uid==null||uid.isEmpty())uid=intent.getStringExtra("open_user_id");
-        if((uid==null||uid.isEmpty())&&intent.getData()!=null&&"facebookclone-messenger".equals(intent.getData().getScheme())){
-            java.util.List<String> parts=intent.getData().getPathSegments();if(parts!=null&&!parts.isEmpty())uid=parts.get(parts.size()-1);
-        }
-        if(uid!=null&&!uid.trim().isEmpty())pendingExternalUserId=uid.trim();
-        intent.removeExtra("user_id");intent.removeExtra("recipient_id");intent.removeExtra("open_user_id");
-    }
-    private void showDirectConversationLoading(){
-        activeConversation=null;replyTo=null;
-        if(root==null)return;
-        root.removeAllViews();
-        FrameLayout loading=new FrameLayout(this);
-        loading.setBackgroundColor(Color.WHITE);
-        ProgressBar spinner=new ProgressBar(this);
-        FrameLayout.LayoutParams sp=new FrameLayout.LayoutParams(dp(42),dp(42),Gravity.CENTER);
-        loading.addView(spinner,sp);
-        root.addView(loading,new FrameLayout.LayoutParams(-1,-1));
-    }
-
-    private void openPendingExternalConversation(){
-        if(api==null||!api.hasSession()||pendingExternalUserId==null||pendingExternalUserId.isEmpty())return;
-        final String target=pendingExternalUserId;
-        pendingExternalUserId="";
-        try{
-            api.post("/api/messaging/conversations",
-                new JSONObject().put("type","direct").put("userId",target),
-                (json,error)->main.post(()->{
-                    if(error!=null){
-                        pendingExternalUserId=target;
-                        showInbox(false);
-                        toast(error.getMessage());
-                        return;
-                    }
-                    JSONObject conversation=json.optJSONObject("conversation");
-                    if(conversation!=null){
-                        openConversation(conversation);
-                        main.postDelayed(()->{
-                            if(activeConversation!=null&&conversation.optString("id").equals(activeConversation.optString("id")))scrollToAbsoluteBottom();
-                        },120);
-                    }else{
-                        pendingExternalUserId=target;
-                        showInbox(false);
-                    }
-                })
-            );
-        }catch(Exception e){
-            pendingExternalUserId=target;
-            showInbox(false);
-            toast(e.getMessage());
-        }
-    }
-
-    private void installImeSafety(){
-        if(root==null)return;
+    @Override protected void onCreate(Bundle state){
+        super.onCreate(state);requestWindowFeature(Window.FEATURE_NO_TITLE);
+        getWindow().setStatusBarColor(Color.WHITE);getWindow().setNavigationBarColor(Color.WHITE);
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
-
-        if(Build.VERSION.SDK_INT>=30){
-            root.setOnApplyWindowInsetsListener((v,insets)->{
-                main.post(this::applyImeSafetyNow);
-                return insets;
-            });
-        }
-        imeSafetyListener=()->main.post(this::applyImeSafetyNow);
-        root.getViewTreeObserver().addOnGlobalLayoutListener(imeSafetyListener);
+        api=new ApiClient(this);cache=new MessengerCache(this);images=new ImageLoader(this,api);stickers=new StickerLoader(this,api);
+        migrateNotificationHistory();createMessageNotificationChannel();requestNotificationPermission();
+        captureLaunchIntent(getIntent());
+        root=new FrameLayout(this);root.setBackgroundColor(Color.WHITE);setContentView(root);installImeSafety();
+        if(api.hasSession()){
+            if(!pendingExternalUserId.isEmpty()){showDirectConversationLoading();main.post(this::openPendingExternalConversation);}
+            else showInbox(true);
+        }else showLogin();
     }
-
-    private void applyImeSafetyNow(){
-        if(root==null||composer==null||activeConversation==null)return;
-        if(root.findViewWithTag("messenger-native-media-sheet")!=null||root.findViewWithTag("messenger-native-sticker-sheet")!=null)return;
-
-        View decor=getWindow().getDecorView();
-        Rect visible=new Rect();
-        decor.getWindowVisibleDisplayFrame(visible);
-
-        int keyboardTop=visible.bottom;
-        boolean imeVisible=false;
-        if(Build.VERSION.SDK_INT>=30){
-            try{
-                android.view.WindowInsets wi=root.getRootWindowInsets();
-                if(wi!=null){
-                    imeVisible=wi.isVisible(android.view.WindowInsets.Type.ime());
-                    android.graphics.Insets ime=wi.getInsets(android.view.WindowInsets.Type.ime());
-                    if(imeVisible&&ime.bottom>0){
-                        int[] dloc=new int[2];
-                        decor.getLocationOnScreen(dloc);
-                        keyboardTop=Math.min(keyboardTop,dloc[1]+decor.getHeight()-ime.bottom);
-                    }
-                }
-            }catch(Throwable ignored){}
-        }else{
-            int obscured=Math.max(0,decor.getHeight()-visible.height());
-            imeVisible=obscured>dp(80);
-        }
-
-        int[] cloc=new int[2];
-        composer.getLocationOnScreen(cloc);
-        int naturalBottom=Math.round(cloc[1]+composer.getHeight()-composer.getTranslationY());
-        int lift=imeVisible?Math.max(0,naturalBottom-keyboardTop+dp(2)):0;
-        if(lift<dp(3))lift=0;
-        float target=-lift;
-
-        if(Math.abs(composer.getTranslationY()-target)>.5f)composer.setTranslationY(target);
-        if(replyBar!=null&&Math.abs(replyBar.getTranslationY()-target)>.5f)replyBar.setTranslationY(target);
-        if(recordBar!=null&&Math.abs(recordBar.getTranslationY()-target)>.5f)recordBar.setTranslationY(target);
-
-        if(list!=null){
-            int bottom=dp(26)+lift;
-            if(list.getPaddingBottom()!=bottom)list.setPadding(list.getPaddingLeft(),list.getPaddingTop(),list.getPaddingRight(),bottom);
-        }
-    }
-
-    @Override protected void onResume(){super.onResume();if(api!=null&&api.hasSession())connectSocket();}
+    @Override protected void onResume(){super.onResume();appVisible=true;if(api!=null&&api.hasSession())connectSocket();}
     @Override protected void onPause(){
+        appVisible=false;
         if(activeConversation!=null&&messageInput!=null){
             messageInput.clearFocus();
             InputMethodManager imm=(InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
@@ -239,7 +179,76 @@ public class MainActivity extends Activity {
         }
         super.onPause();
     }
-    @Override protected void onDestroy(){main.removeCallbacks(socketReconnect);if(root!=null&&imeSafetyListener!=null&&root.getViewTreeObserver().isAlive())root.getViewTreeObserver().removeOnGlobalLayoutListener(imeSafetyListener);if(socket!=null)socket.close(1000,"bye");socket=null;stopRecorder(false);super.onDestroy();}
+    @Override protected void onNewIntent(Intent intent){
+        super.onNewIntent(intent);setIntent(intent);captureLaunchIntent(intent);
+        if(api!=null&&api.hasSession()){
+            if(!pendingExternalUserId.isEmpty()){showDirectConversationLoading();main.post(this::openPendingExternalConversation);}
+            else if(!pendingNotificationConversationId.isEmpty())openPendingNotificationConversation();
+        }
+    }
+    private void captureLaunchIntent(Intent intent){
+        if(intent==null)return;
+        String cid=intent.getStringExtra("conversationId");
+        if(cid!=null&&!cid.isEmpty())pendingNotificationConversationId=cid;
+        String uid=intent.getStringExtra("user_id");
+        if(uid==null||uid.isEmpty())uid=intent.getStringExtra("recipient_id");
+        if(uid==null||uid.isEmpty())uid=intent.getStringExtra("open_user_id");
+        Uri data=intent.getData();
+        if((uid==null||uid.isEmpty())&&data!=null&&"facebookclone-messenger".equals(data.getScheme())&&"conversation".equals(data.getHost())){
+            java.util.List<String> parts=data.getPathSegments();
+            if(parts!=null&&!parts.isEmpty())uid=parts.get(parts.size()-1);
+        }
+        if(uid!=null&&!uid.trim().isEmpty())pendingExternalUserId=uid.trim();
+    }
+
+    private void showDirectConversationLoading(){
+        activeConversation=null;replyTo=null;if(root==null)return;root.removeAllViews();
+        FrameLayout loading=new FrameLayout(this);loading.setBackgroundColor(Color.WHITE);
+        ProgressBar spinner=new ProgressBar(this);loading.addView(spinner,new FrameLayout.LayoutParams(dp(42),dp(42),Gravity.CENTER));
+        root.addView(loading,new FrameLayout.LayoutParams(-1,-1));
+    }
+
+    private void openPendingExternalConversation(){
+        if(api==null||!api.hasSession()||pendingExternalUserId.isEmpty())return;
+        final String target=pendingExternalUserId;pendingExternalUserId="";
+        try{
+            api.post("/api/messaging/conversations",new JSONObject().put("type","direct").put("userId",target),(json,error)->main.post(()->{
+                if(error!=null){pendingExternalUserId=target;showInbox(false);toast(error.getMessage());return;}
+                JSONObject conversation=json.optJSONObject("conversation");
+                if(conversation!=null){openConversation(conversation);main.postDelayed(this::scrollToAbsoluteBottom,120);}
+                else{pendingExternalUserId=target;showInbox(false);}
+            }));
+        }catch(Exception e){pendingExternalUserId=target;showInbox(false);toast(e.getMessage());}
+    }
+
+    private void installImeSafety(){
+        if(root==null)return;
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        imeSafetyListener=()->main.post(this::applyImeSafetyNow);
+        root.getViewTreeObserver().addOnGlobalLayoutListener(imeSafetyListener);
+        if(Build.VERSION.SDK_INT>=30){
+            root.setOnApplyWindowInsetsListener((v,insets)->{main.post(this::applyImeSafetyNow);return v.onApplyWindowInsets(insets);});
+        }
+    }
+
+    private void applyImeSafetyNow(){
+        if(root==null||composer==null||activeConversation==null)return;
+        if(root.findViewWithTag("messenger-native-media-sheet")!=null||root.findViewWithTag("messenger-native-sticker-sheet")!=null)return;
+        View decor=getWindow().getDecorView();Rect visible=new Rect();decor.getWindowVisibleDisplayFrame(visible);
+        int[] loc=new int[2];composer.getLocationOnScreen(loc);
+        int naturalBottom=Math.round(loc[1]+composer.getHeight()-composer.getTranslationY());
+        int keyboardTop=visible.bottom;
+        if(Build.VERSION.SDK_INT>=30){
+            try{android.view.WindowInsets wi=root.getRootWindowInsets();if(wi!=null){android.graphics.Insets ime=wi.getInsets(android.view.WindowInsets.Type.ime());if(ime.bottom>dp(40)){int[] dloc=new int[2];decor.getLocationOnScreen(dloc);keyboardTop=Math.min(keyboardTop,dloc[1]+decor.getHeight()-ime.bottom);}}}catch(Throwable ignored){}
+        }
+        int lift=Math.max(0,naturalBottom-keyboardTop+dp(2));if(lift<dp(4))lift=0;float target=-lift;
+        if(Math.abs(composer.getTranslationY()-target)>.5f)composer.setTranslationY(target);
+        if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.setTranslationY(target);
+        if(recordBar!=null&&recordBar.getVisibility()==View.VISIBLE)recordBar.setTranslationY(target);
+        if(list!=null){int bottom=dp(26)+lift;if(list.getPaddingBottom()!=bottom)list.setPadding(list.getPaddingLeft(),list.getPaddingTop(),list.getPaddingRight(),bottom);}
+    }
+
+    @Override protected void onDestroy(){if(root!=null&&imeSafetyListener!=null&&root.getViewTreeObserver().isAlive())root.getViewTreeObserver().removeOnGlobalLayoutListener(imeSafetyListener);main.removeCallbacks(socketReconnect);main.removeCallbacks(bottomAnchor);main.removeCallbacks(messageRefresh);if(socket!=null)socket.close(1000,"bye");socket=null;temporaryMediaExecutor.shutdownNow();videoThumbnailExecutor.shutdownNow();stopRecorder(false);super.onDestroy();}
     @Override public void onBackPressed(){
         if(root!=null){
             View mediaSheet=root.findViewWithTag("messenger-native-media-sheet");
@@ -254,14 +263,20 @@ public class MainActivity extends Activity {
                 return;
             }
         }
-        if(activeConversation!=null)showInbox(false);
+        if(activeConversation!=null)leaveActiveConversation();
+        else if(showingInboxSearchPage)showInbox(false);
         else super.onBackPressed();
     }
 
     private int dp(float n){return Math.round(n*getResources().getDisplayMetrics().density);}    
     private GradientDrawable bg(int color,float radius){GradientDrawable g=new GradientDrawable();g.setColor(color);g.setCornerRadius(dp(radius));return g;}
+    private void styleColorSwatch(View swatch,int color,boolean selected){GradientDrawable g=new GradientDrawable();g.setShape(GradientDrawable.OVAL);g.setColor(color);g.setStroke(dp(selected?3:1),selected?Color.WHITE:Color.argb(105,255,255,255));swatch.setBackground(g);swatch.setScaleX(selected?1.08f:1f);swatch.setScaleY(selected?1.08f:1f);swatch.setElevation(selected?dp(3):0);}
     private GradientDrawable topBg(int color,float radius){GradientDrawable g=new GradientDrawable();g.setColor(color);float r=dp(radius);g.setCornerRadii(new float[]{r,r,r,r,0,0,0,0});return g;}
-    private String activeTheme(){return activeConversation==null?"default":activeConversation.optString("theme","default");}
+    private String activeTheme(){if(activeConversation==null)return"default";String id=activeConversation.optString("id","");String local=id.isEmpty()?"":getSharedPreferences("messenger_theme_overrides",MODE_PRIVATE).getString(id,"");return local.isEmpty()?activeConversation.optString("theme","default"):local;}
+    private void setThemeOverride(JSONObject conversation,String key){if(conversation==null)return;String id=conversation.optString("id","");if(id.isEmpty())return;android.content.SharedPreferences.Editor edit=getSharedPreferences("messenger_theme_overrides",MODE_PRIVATE).edit();if("instagram-classic".equals(key))edit.putString(id,key);else edit.remove(id);edit.apply();}
+    private boolean themeUsesLightHeader(){switch(activeTheme()){case"default":case"instagram-classic":case"ocean":case"sunset":case"monochrome":return true;default:return false;}}
+    private int themeHeaderColor(){return themeUsesLightHeader()?Color.rgb(9,9,10):Color.WHITE;}
+    private int themeHeaderSubColor(){return themeUsesLightHeader()?Color.rgb(98,101,107):Color.rgb(184,188,195);}
     private int themeAccent(){switch(activeTheme()){case"instagram":return Color.WHITE;case"instagram-classic":return Color.rgb(162,59,234);case"love":return Color.rgb(255,44,145);case"ocean":return Color.rgb(0,159,200);case"sunset":return Color.rgb(255,108,43);case"monochrome":return Color.rgb(34,34,34);case"glow-pup":return Color.rgb(166,140,255);case"odyssey":return Color.rgb(108,186,186);case"supergirl":return Color.rgb(255,156,32);case"avatar":return Color.rgb(129,181,165);case"olivia":return Color.rgb(255,171,195);case"backrooms":return Color.rgb(211,189,100);case"deli-boys":return Color.rgb(232,203,182);case"heart-drive":return Color.rgb(200,168,255);case"valentines":return Color.rgb(207,43,230);default:return BLUE;}}
     private int themeDisabled(){switch(activeTheme()){case"instagram":return Color.rgb(142,142,142);case"instagram-classic":return Color.rgb(184,166,200);case"love":return Color.rgb(185,138,164);case"ocean":return Color.rgb(129,174,185);case"sunset":return Color.rgb(197,160,140);case"monochrome":return Color.rgb(153,153,153);case"glow-pup":return Color.rgb(113,106,145);case"odyssey":return Color.rgb(98,128,130);case"supergirl":return Color.rgb(158,121,87);case"avatar":return Color.rgb(104,127,120);case"olivia":return Color.rgb(159,120,133);case"backrooms":return Color.rgb(130,122,85);case"deli-boys":return Color.rgb(141,130,121);case"heart-drive":return Color.rgb(120,109,147);case"valentines":return Color.rgb(128,91,134);default:return Color.rgb(169,185,209);}}
     private Bitmap themedIconBitmap(int res,int color){Bitmap src=BitmapFactory.decodeResource(getResources(),res);if(src==null)return null;Bitmap out=src.copy(Bitmap.Config.ARGB_8888,true);for(int y=0;y<out.getHeight();y++)for(int x=0;x<out.getWidth();x++){int px=out.getPixel(x,y),a=Color.alpha(px);if(a<20)continue;int r=Color.red(px),g=Color.green(px),b=Color.blue(px);if(r>238&&g>238&&b>238)continue;out.setPixel(x,y,Color.argb(a,Color.red(color),Color.green(color),Color.blue(color)));}return out;}
@@ -272,17 +287,223 @@ public class MainActivity extends Activity {
     private android.graphics.drawable.Drawable themeConversationBackground(){int[] colors;switch(activeTheme()){case"instagram":return new android.graphics.drawable.ColorDrawable(Color.BLACK);case"instagram-classic":colors=new int[]{Color.rgb(255,245,251),Color.rgb(238,232,255),Color.rgb(234,245,255)};break;case"love":colors=new int[]{Color.rgb(118,0,95),Color.rgb(39,0,45)};break;case"ocean":colors=new int[]{Color.rgb(223,248,255),Color.rgb(216,237,244),Color.rgb(237,250,255)};break;case"sunset":colors=new int[]{Color.rgb(255,243,222),Color.rgb(255,231,223),Color.rgb(255,248,236)};break;case"monochrome":colors=new int[]{Color.rgb(244,244,244),Color.rgb(222,222,222)};break;case"glow-pup":colors=new int[]{Color.rgb(3,0,25),Color.rgb(23,16,92),Color.rgb(33,19,173)};break;case"odyssey":colors=new int[]{Color.rgb(3,28,33),Color.rgb(10,59,66),Color.rgb(8,38,44)};break;case"supergirl":colors=new int[]{Color.rgb(17,17,17),Color.rgb(43,24,19),Color.rgb(73,23,15)};break;case"avatar":colors=new int[]{Color.rgb(16,44,45),Color.rgb(37,81,77),Color.rgb(113,110,77)};break;case"olivia":colors=new int[]{Color.rgb(61,41,55),Color.rgb(121,85,106),Color.rgb(83,97,65)};break;case"backrooms":colors=new int[]{Color.rgb(64,58,24),Color.rgb(119,108,46),Color.rgb(48,44,20)};break;case"deli-boys":colors=new int[]{Color.rgb(23,22,18),Color.rgb(42,39,31),Color.rgb(22,21,18)};break;case"heart-drive":colors=new int[]{Color.rgb(6,19,83),Color.rgb(38,18,113),Color.rgb(8,14,68)};break;case"valentines":colors=new int[]{Color.rgb(61,11,112),Color.rgb(19,5,47)};break;default:return new android.graphics.drawable.ColorDrawable(Color.WHITE);}return new GradientDrawable(GradientDrawable.Orientation.TL_BR,colors);}
 
     private GradientDrawable bubbleBg(boolean mine,boolean samePrev,boolean sameNext){float r=dp(18),small=dp(6);float tl=r,tr=r,br=r,bl=r;if(mine){if(samePrev)tr=small;if(sameNext)br=small;}else{if(samePrev)tl=small;if(sameNext)bl=small;}GradientDrawable g;if(mine&&!"default".equals(activeTheme())){g=new GradientDrawable(GradientDrawable.Orientation.TL_BR,themeSentColors());}else{g=new GradientDrawable();g.setColor(mine?BLUE:themeReceived());}g.setCornerRadii(new float[]{tl,tl,tr,tr,br,br,bl,bl});return g;}
-    private TextView text(String v,float sp,int color,int style){TextView t=new TextView(this);t.setText(v==null?"":v);t.setTextSize(sp);t.setTextColor(color);t.setGravity(Gravity.CENTER_VERTICAL);if(style!=Typeface.NORMAL)t.setTypeface(Typeface.DEFAULT,style);return t;}
+    private TextView text(String v,float sp,int color,int style){TextView t=new TextView(this);t.setText(v==null?"":v);t.setTextSize(sp);t.setTextColor(color);t.setGravity(Gravity.CENTER_VERTICAL);if(style!=Typeface.NORMAL)t.setTypeface(Typeface.DEFAULT,style);if(style==Typeface.BOLD)keepNameBesideAvatar(t);return t;}
     private ImageButton icon(int drawable,int sizeDp,int tint){ImageButton b=new ImageButton(this);b.setImageResource(drawable);b.setColorFilter(tint);b.setBackgroundColor(Color.TRANSPARENT);b.setPadding(dp(7),dp(7),dp(7),dp(7));b.setScaleType(ImageView.ScaleType.CENTER_INSIDE);b.setLayoutParams(new LinearLayout.LayoutParams(dp(sizeDp),dp(sizeDp)));return b;}
 
-    private void showLogin(){root.removeAllViews();activeConversation=null;LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setGravity(Gravity.CENTER_HORIZONTAL);box.setPadding(dp(26),dp(52),dp(26),dp(24));root.addView(box,new FrameLayout.LayoutParams(-1,-1));TextView logo=text("Messenger",31,BLUE,Typeface.BOLD);logo.setGravity(Gravity.CENTER);box.addView(logo,new LinearLayout.LayoutParams(-1,dp(90)));EditText id=new EditText(this);id.setHint("Mobile number or email");id.setSingleLine(true);id.setTextSize(16);id.setPadding(dp(14),0,dp(14),0);id.setBackground(bg(LIGHT,12));box.addView(id,new LinearLayout.LayoutParams(-1,dp(52)));Space sp=new Space(this);box.addView(sp,new LinearLayout.LayoutParams(1,dp(12)));EditText pass=new EditText(this);pass.setHint("Password");pass.setSingleLine(true);pass.setInputType(0x81);pass.setTextSize(16);pass.setPadding(dp(14),0,dp(14),0);pass.setBackground(bg(LIGHT,12));box.addView(pass,new LinearLayout.LayoutParams(-1,dp(52)));Button login=new Button(this);login.setText("Log in");login.setTextColor(Color.WHITE);login.setTextSize(16);login.setTypeface(Typeface.DEFAULT,Typeface.BOLD);login.setBackground(bg(BLUE,24));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(48));lp.topMargin=dp(16);box.addView(login,lp);ProgressBar p=new ProgressBar(this);p.setVisibility(View.GONE);box.addView(p,new LinearLayout.LayoutParams(dp(48),dp(38)));login.setOnClickListener(v->{String a=id.getText().toString().trim(),b=pass.getText().toString();if(a.isEmpty()||b.isEmpty()){toast("Enter your login details.");return;}login.setEnabled(false);p.setVisibility(View.VISIBLE);api.login(a,b,(json,error)->main.post(()->{login.setEnabled(true);p.setVisibility(View.GONE);if(error!=null){toast(error.getMessage());return;}if(pendingExternalUserId!=null&&!pendingExternalUserId.isEmpty()){showDirectConversationLoading();main.post(this::openPendingExternalConversation);}else showInbox(true);}));});}
+    private void showLogin(){root.removeAllViews();activeConversation=null;LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setGravity(Gravity.CENTER_HORIZONTAL);box.setPadding(dp(26),dp(52),dp(26),dp(24));root.addView(box,new FrameLayout.LayoutParams(-1,-1));TextView logo=text("Messenger",31,BLUE,Typeface.BOLD);logo.setGravity(Gravity.CENTER);box.addView(logo,new LinearLayout.LayoutParams(-1,dp(90)));EditText id=new EditText(this);id.setHint("Mobile number or email");id.setSingleLine(true);id.setTextSize(16);id.setPadding(dp(14),0,dp(14),0);id.setBackground(bg(LIGHT,12));box.addView(id,new LinearLayout.LayoutParams(-1,dp(52)));Space sp=new Space(this);box.addView(sp,new LinearLayout.LayoutParams(1,dp(12)));EditText pass=new EditText(this);pass.setHint("Password");pass.setSingleLine(true);pass.setInputType(0x81);pass.setTextSize(16);pass.setPadding(dp(14),0,dp(14),0);pass.setBackground(bg(LIGHT,12));box.addView(pass,new LinearLayout.LayoutParams(-1,dp(52)));Button login=new Button(this);login.setText("Log in");login.setTextColor(Color.WHITE);login.setTextSize(16);login.setTypeface(Typeface.DEFAULT,Typeface.BOLD);login.setBackground(bg(BLUE,24));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(48));lp.topMargin=dp(16);box.addView(login,lp);ProgressBar p=new ProgressBar(this);p.setVisibility(View.GONE);box.addView(p,new LinearLayout.LayoutParams(dp(48),dp(38)));login.setOnClickListener(v->{String a=id.getText().toString().trim(),b=pass.getText().toString();if(a.isEmpty()||b.isEmpty()){toast("Enter your login details.");return;}login.setEnabled(false);p.setVisibility(View.VISIBLE);api.login(a,b,(json,error)->main.post(()->{login.setEnabled(true);p.setVisibility(View.GONE);if(error!=null){toast(error.getMessage());return;}if(!pendingExternalUserId.isEmpty()){showDirectConversationLoading();main.post(this::openPendingExternalConversation);}else showInbox(true);}));});}
 
-    private void showInbox(boolean initial){activeConversation=null;replyTo=null;root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setBackground(themeConversationBackground());head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(15),0,dp(12),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(58)));TextView title=text("Chats",25,TEXT,Typeface.BOLD);head.addView(title,new LinearLayout.LayoutParams(0,-1,1));ImageButton search=icon(R.drawable.ic_msg_search,40,TEXT);head.addView(search);ImageButton plus=icon(R.drawable.ic_msg_plus,40,TEXT);head.addView(plus);
-        searchBox=new EditText(this);searchBox.setSingleLine(true);searchBox.setHint("Search chats");searchBox.setTextSize(16);searchBox.setPadding(dp(15),0,dp(15),0);searchBox.setBackground(bg(LIGHT,22));LinearLayout.LayoutParams sl=new LinearLayout.LayoutParams(-1,dp(40));sl.setMargins(dp(12),dp(8),dp(12),dp(5));page.addView(searchBox,sl);list=new ListView(this);list.setDivider(null);list.setSelector(android.R.color.transparent);list.setPadding(dp(8),dp(2),dp(8),dp(90));list.setClipToPadding(false);page.addView(list,new LinearLayout.LayoutParams(-1,0,1));inboxAdapter=new InboxAdapter();list.setAdapter(inboxAdapter);list.setOnItemClickListener((p,v,pos,id)->openConversation(filteredInbox.get(pos)));
-        ImageButton fab=icon(R.drawable.ic_msg_plus,54,Color.WHITE);fab.setPadding(dp(14),dp(14),dp(14),dp(14));fab.setBackground(bg(BLUE,30));FrameLayout.LayoutParams fp=new FrameLayout.LayoutParams(dp(54),dp(54),Gravity.END|Gravity.BOTTOM);fp.setMargins(0,0,dp(18),dp(22));root.addView(fab,fp);plus.setOnClickListener(v->showContacts());fab.setOnClickListener(v->showContacts());search.setOnClickListener(v->searchBox.requestFocus());searchBox.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int b,int c){filterInbox(s.toString());}public void afterTextChanged(Editable e){}});loadCachedInbox();refreshInbox();connectSocket();}
+    private void showInbox(boolean initial){inboxDedicatedSearch=false;showingInboxSearchPage=false;conversationOpenedFromInboxSearch=false;pendingSearchTargetMessageId="";activeConversation=null;replyTo=null;getWindow().setStatusBarColor(Color.WHITE);getWindow().setNavigationBarColor(Color.WHITE);getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setBackgroundColor(Color.WHITE);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(15),0,dp(12),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(58)));TextView title=text("Chats",25,TEXT,Typeface.BOLD);head.addView(title,new LinearLayout.LayoutParams(0,-1,1));ImageButton search=icon(R.drawable.ic_msg_search,40,TEXT);head.addView(search);ImageButton plus=icon(R.drawable.ic_msg_plus,40,TEXT);head.addView(plus);
+        searchBox=new EditText(this);searchBox.setSingleLine(true);searchBox.setHint("Search");searchBox.setHintTextColor(Color.rgb(101,103,107));searchBox.setTextSize(14.5f);searchBox.setTextColor(TEXT);android.graphics.drawable.Drawable searchGlyph=getDrawable(R.drawable.ic_msg_search);if(searchGlyph!=null){searchGlyph=searchGlyph.mutate();searchGlyph.setTint(Color.rgb(101,103,107));searchGlyph.setBounds(0,0,dp(17),dp(17));searchBox.setCompoundDrawables(searchGlyph,null,null,null);searchBox.setCompoundDrawablePadding(dp(8));}searchBox.setPadding(dp(12),0,dp(12),0);searchBox.setBackground(bg(LIGHT,18));LinearLayout.LayoutParams sl=new LinearLayout.LayoutParams(-1,dp(34));sl.setMargins(dp(12),dp(5),dp(12),dp(4));page.addView(searchBox,sl);list=new ListView(this);list.setDivider(null);list.setSelector(android.R.color.transparent);list.setVerticalScrollBarEnabled(false);list.setPadding(dp(8),dp(2),dp(8),dp(90));list.setClipToPadding(false);page.addView(list,new LinearLayout.LayoutParams(-1,0,1));attachInboxSearchSpinner();inboxAdapter=new InboxAdapter();list.setAdapter(inboxAdapter);list.setOnItemClickListener((p,v,pos,id)->{if(pos<filteredInbox.size())openConversation(filteredInbox.get(pos));});
+        ImageButton fab=icon(R.drawable.ic_msg_plus,54,Color.WHITE);fab.setPadding(dp(14),dp(14),dp(14),dp(14));fab.setBackground(bg(BLUE,30));FrameLayout.LayoutParams fp=new FrameLayout.LayoutParams(dp(54),dp(54),Gravity.END|Gravity.BOTTOM);fp.setMargins(0,0,dp(18),dp(22));root.addView(fab,fp);plus.setOnClickListener(v->showContacts());fab.setOnClickListener(v->showContacts());search.setOnClickListener(v->showInboxSearchPage(false));wireInboxSearchBox(searchBox);loadCachedInbox();refreshInbox();connectSocket();}
+    private void attachInboxSearchSpinner(){
+        inboxSearchSpinner=new OlderMessagesSpinner(this);
+        inboxSearchSpinner.setVisibility(View.INVISIBLE);
+        FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(dp(38),dp(38),Gravity.CENTER);
+        params.topMargin=dp(42);
+        root.addView(inboxSearchSpinner,params);
+    }
+    private void setInboxSearchLoading(boolean visible){
+        if(inboxSearchSpinner==null)return;
+        if(visible)inboxSearchSpinner.start();
+        else inboxSearchSpinner.stop();
+    }
+    private void wireInboxSearchBox(EditText field){field.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int b,int c){String query=s.toString();inboxMessageSearchQuery=query.trim().toLowerCase(Locale.ROOT);inboxMessageSearchMatches.clear();inboxMessageSearchResults.clear();filterInbox(query);if(inboxSearchTask!=null)main.removeCallbacks(inboxSearchTask);int request=++inboxSearchRequest;if(query.trim().isEmpty()){setInboxSearchLoading(false);return;}loadCachedMessageSearch(query);setInboxSearchLoading(true);inboxSearchTask=()->searchAllConversationMessagesV2(query,request);main.postDelayed(inboxSearchTask,70);}public void afterTextChanged(Editable e){}});}
+    private void showInboxSearchPage(boolean restore){
+        inboxDedicatedSearch=true;
+        showingInboxSearchPage=true;
+        activeConversation=null;
+        replyTo=null;
+        if(!restore){
+            conversationOpenedFromInboxSearch=false;
+            pendingSearchTargetMessageId="";
+            inboxSearchScrollPosition=0;
+            inboxMessageSearchQuery="";
+            inboxMessageSearchMatches.clear();
+            inboxMessageSearchResults.clear();
+        }
+        getWindow().setStatusBarColor(Color.WHITE);
+        getWindow().setNavigationBarColor(Color.WHITE);
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+        root.removeAllViews();
+        LinearLayout page=new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setBackgroundColor(Color.WHITE);
+        root.addView(page,new FrameLayout.LayoutParams(-1,-1));
+        LinearLayout head=new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.setPadding(dp(8),0,dp(12),0);
+        page.addView(head,new LinearLayout.LayoutParams(-1,dp(56)));
+        ImageButton back=icon(R.drawable.ic_msg_back,40,TEXT);
+        head.addView(back);
+        back.setOnClickListener(v->showInbox(false));
+        TextView title=text("Search",20,TEXT,Typeface.BOLD);
+        head.addView(title,new LinearLayout.LayoutParams(0,-1,1));
+        searchBox=new EditText(this);
+        searchBox.setSingleLine(true);
+        searchBox.setHint("Search");
+        searchBox.setHintTextColor(SUB);
+        searchBox.setTextColor(TEXT);
+        searchBox.setTextSize(14.5f);
+        android.graphics.drawable.Drawable glyph=getDrawable(R.drawable.ic_msg_search);
+        if(glyph!=null){
+            glyph=glyph.mutate();
+            glyph.setTint(SUB);
+            glyph.setBounds(0,0,dp(17),dp(17));
+            searchBox.setCompoundDrawables(glyph,null,null,null);
+            searchBox.setCompoundDrawablePadding(dp(8));
+        }
+        searchBox.setPadding(dp(12),0,dp(12),0);
+        searchBox.setBackground(bg(LIGHT,18));
+        if(restore&&!inboxMessageSearchQuery.isEmpty()){
+            searchBox.setText(inboxMessageSearchQuery);
+            searchBox.setSelection(searchBox.length());
+        }
+        LinearLayout.LayoutParams searchParams=new LinearLayout.LayoutParams(-1,dp(34));
+        searchParams.setMargins(dp(12),dp(3),dp(12),dp(6));
+        page.addView(searchBox,searchParams);
+        list=new ListView(this);
+        list.setDivider(null);
+        list.setSelector(android.R.color.transparent);
+        list.setVerticalScrollBarEnabled(false);
+        list.setPadding(dp(8),dp(2),dp(8),dp(18));
+        list.setClipToPadding(false);
+        page.addView(list,new LinearLayout.LayoutParams(-1,0,1));
+        attachInboxSearchSpinner();
+        inboxAdapter=new InboxAdapter();
+        list.setAdapter(inboxAdapter);
+        list.setOnItemClickListener((p,v,pos,id)->{
+            if(pos<filteredInbox.size())openConversation(filteredInbox.get(pos));
+        });
+        wireInboxSearchBox(searchBox);
+        if(restore){
+            filterInbox(inboxMessageSearchQuery);
+            list.post(()->list.setSelection(Math.min(inboxSearchScrollPosition,Math.max(0,list.getCount()-1))));
+        }else{
+            loadCachedInbox();
+            refreshInbox();
+            searchBox.requestFocus();
+            main.postDelayed(()->{
+                InputMethodManager imm=(InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
+                if(imm!=null)imm.showSoftInput(searchBox,InputMethodManager.SHOW_IMPLICIT);
+            },120);
+        }
+    }
+    private void leaveActiveConversation(){
+        setSearchTargetLoading(false);
+        if(conversationOpenedFromInboxSearch){
+            conversationOpenedFromInboxSearch=false;
+            pendingSearchTargetMessageId="";
+            showInboxSearchPage(true);
+        }else{
+            showInbox(false);
+        }
+    }
     private void loadCachedInbox(){String raw=cache.get("inbox");if(raw==null)return;try{applyInbox(new JSONObject(raw).optJSONArray("conversations"));}catch(Exception ignored){}}
-    private void refreshInbox(){api.get("/api/messaging/inbox?limit=30",(json,error)->main.post(()->{if(error!=null){if(!api.hasSession())showLogin();return;}cache.put("inbox",json.toString());applyInbox(json.optJSONArray("conversations"));}));}
-    private void applyInbox(JSONArray arr){if(arr==null)return;inbox.clear();for(int i=0;i<arr.length();i++){JSONObject o=arr.optJSONObject(i);if(o!=null)inbox.add(o);}filterInbox(searchBox==null?"":searchBox.getText().toString());}
+    private void refreshInbox(){if(refreshingInbox){inboxRefreshQueued=true;return;}refreshingInbox=true;fetchInboxPage("",new ArrayList<>(),0);}
+    private void fetchInboxPage(String cursor,List<JSONObject> collected,int page){String path="/api/messaging/inbox?limit=50"+(cursor==null||cursor.isEmpty()?"":"&cursor="+Uri.encode(cursor));api.get(path,(json,error)->main.post(()->{if(error!=null){finishInboxRefresh();if(!api.hasSession())showLogin();return;}JSONArray batch=json.optJSONArray("conversations");if(batch!=null)for(int i=0;i<batch.length();i++){JSONObject conversation=batch.optJSONObject(i);if(conversation!=null)collected.add(conversation);}if(page==0&&batch!=null){applyInbox(batch);cacheInboxNow();}String next=json.optString("nextCursor","");if(!next.isEmpty()&&!next.equals(cursor)&&page<99){fetchInboxPage(next,collected,page+1);return;}JSONArray all=new JSONArray();for(JSONObject conversation:collected)all.put(conversation);applyInbox(all);cacheInboxNow();finishInboxRefresh();}));}
+    private void finishInboxRefresh(){refreshingInbox=false;if(inboxRefreshQueued){inboxRefreshQueued=false;refreshInbox();}}
+    private String conversationIdentityKey(JSONObject c){
+        if(c==null)return"";
+        if(!"group".equals(c.optString("type"))){
+            JSONObject other=firstOther(c);
+            String userId=other==null?"":other.optString("id");
+            if(!userId.isEmpty())return"direct:"+userId;
+        }
+        String id=c.optString("id",c.optString("conversationId",""));
+        return id.isEmpty()?"unknown:"+c.toString():"conversation:"+id;
+    }
+    private boolean conversationArchived(JSONObject c){
+        return c!=null&&(c.optBoolean("archived")||c.optBoolean("isArchived")||c.optBoolean("hidden"));
+    }
+    private void applyInbox(JSONArray arr){
+        if(arr==null)return;
+        List<JSONObject> localSnapshot=new ArrayList<>(inbox);
+        inbox.clear();
+        Set<String> seen=new HashSet<>();
+        for(int i=0;i<arr.length();i++){
+            JSONObject conversation=arr.optJSONObject(i);
+            if(conversation==null||conversationArchived(conversation))continue;
+            String conversationId=conversation.optString("id");
+            JSONObject last=conversation.optJSONObject("lastMessage");
+            if(conversationDeletionCutoff(conversationId)>0L&&(last==null||!messageAfterDeletion(conversationId,last)))continue;
+            String key=conversationIdentityKey(conversation);
+            if(!seen.add(key))continue;
+            inbox.add(conversation);
+        }
+        for(int i=localSnapshot.size()-1;i>=0;i--){
+            JSONObject local=localSnapshot.get(i);
+            String cid=local.optString("id");
+            JSONObject last=local.optJSONObject("lastMessage");
+            String key=conversationIdentityKey(local);
+            boolean restored=conversationRestoreStamp(cid)>0L&&last!=null;
+            boolean recreatedAfterDelete=conversationDeletionCutoff(cid)>0L&&last!=null&&messageAfterDeletion(cid,last);
+            if((restored||recreatedAfterDelete)&&seen.add(key))inbox.add(0,local);
+        }
+        filterInbox(searchBox==null?"":searchBox.getText().toString());
+        openPendingNotificationConversation();
+    }
+    private void openPendingNotificationConversation(){
+        if(pendingNotificationConversationId==null||pendingNotificationConversationId.isEmpty())return;
+        for(JSONObject conversation:inbox){
+            if(pendingNotificationConversationId.equals(conversation.optString("id"))){
+                String opened=pendingNotificationConversationId;
+                pendingNotificationConversationId="";
+                NotificationManager manager=(NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE);
+                if(manager!=null)manager.cancel(opened.hashCode());
+                openConversation(conversation);
+                return;
+            }
+        }
+    }
+    private void cacheInboxNow(){
+        try{cache.put("inbox",new JSONObject().put("conversations",new JSONArray(inbox)).toString());}catch(Exception ignored){}
+    }
+    private long conversationDeletionCutoff(String conversationId){
+        if(conversationId==null||conversationId.isEmpty())return 0L;
+        return getSharedPreferences("messenger_deleted_threads",MODE_PRIVATE).getLong(conversationId,0L);
+    }
+    private long conversationRestoreStamp(String conversationId){
+        if(conversationId==null||conversationId.isEmpty())return 0L;
+        return getSharedPreferences("messenger_restored_threads",MODE_PRIVATE).getLong(conversationId,0L);
+    }
+    private void markConversationRestored(String conversationId){
+        if(conversationId==null||conversationId.isEmpty())return;
+        getSharedPreferences("messenger_restored_threads",MODE_PRIVATE).edit().putLong(conversationId,System.currentTimeMillis()).apply();
+    }
+    private void rememberConversationDeletion(JSONObject conversation){
+        if(conversation==null)return;
+        String id=conversation.optString("id");
+        if(id.isEmpty())return;
+        getSharedPreferences("messenger_deleted_threads",MODE_PRIVATE).edit().putLong(id,System.currentTimeMillis()).apply();
+        getSharedPreferences("messenger_restored_threads",MODE_PRIVATE).edit().remove(id).apply();
+        cache.remove("messages:"+id);
+    }
+    private boolean messageAfterDeletion(String conversationId,JSONObject message){
+        long cutoff=conversationDeletionCutoff(conversationId);
+        if(cutoff<=0L||message==null||message.optBoolean("pending"))return true;
+        Date created=parseDate(message.optString("createdAt"));
+        return created!=null&&created.getTime()>cutoff;
+    }
+    private void restoreActiveConversationToInbox(JSONObject lastMessage){
+        if(activeConversation==null)return;
+        String cid=activeConversation.optString("id");
+        if(cid.isEmpty())return;
+        try{
+            activeConversation.put("archived",false);
+            activeConversation.put("isArchived",false);
+            activeConversation.put("hidden",false);
+            if(lastMessage!=null)activeConversation.put("lastMessage",lastMessage);
+            String identity=conversationIdentityKey(activeConversation);
+            for(int i=inbox.size()-1;i>=0;i--){
+                if(identity.equals(conversationIdentityKey(inbox.get(i))))inbox.remove(i);
+            }
+            inbox.add(0,activeConversation);
+            markConversationRestored(cid);
+            cacheInboxNow();
+            filterInbox(searchBox==null?"":searchBox.getText().toString());
+            api.patch("/api/messaging/conversations/"+cid+"/settings",new JSONObject().put("archived",false),(json,error)->{});
+        }catch(Exception ignored){}
+    }
 
     private void markConversationReadLocally(String cid){
         if(cid==null||cid.isEmpty())return;
@@ -323,7 +544,73 @@ public class MainActivity extends Activity {
 
         }catch(Exception ignored){}
     }
-    private void filterInbox(String q){filteredInbox.clear();String n=q==null?"":q.toLowerCase(Locale.ROOT).trim();for(JSONObject c:inbox){String name=c.optString("name").toLowerCase(Locale.ROOT),preview=c.optJSONObject("lastMessage")==null?"":c.optJSONObject("lastMessage").optString("body").toLowerCase(Locale.ROOT);if(n.isEmpty()||name.contains(n)||preview.contains(n))filteredInbox.add(c);}if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();}
+    private boolean conversationIsPinned(JSONObject c){return c!=null&&(c.optBoolean("pinned")||c.optBoolean("isPinned"));}
+    private String conversationSearchText(JSONObject c){StringBuilder value=new StringBuilder(c.optString("name",""));JSONObject last=c.optJSONObject("lastMessage");if(last!=null&&!"system".equals(last.optString("type")))value.append(' ').append(last.optString("body",""));JSONArray participants=c.optJSONArray("participants");if(participants!=null)for(int i=0;i<participants.length();i++){JSONObject person=participants.optJSONObject(i);if(person!=null)value.append(' ').append(person.optString("name","")).append(' ').append(person.optString("username",""));}return value.toString().toLowerCase(Locale.ROOT);}
+    private void filterInbox(String q){filteredInbox.clear();String n=q==null?"":q.toLowerCase(Locale.ROOT).trim();boolean includeMessageMatches=!n.isEmpty()&&n.equals(inboxMessageSearchQuery);for(JSONObject c:inbox)if(n.isEmpty()||conversationSearchText(c).contains(n)||(includeMessageMatches&&inboxMessageSearchMatches.contains(c.optString("id"))))filteredInbox.add(c);filteredInbox.sort((a,b)->Boolean.compare(conversationIsPinned(b),conversationIsPinned(a)));if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();}
+    private String messageSearchCacheKey(String query){return"message-search:"+(query==null?"":query.trim().toLowerCase(Locale.ROOT));}
+    private boolean loadCachedMessageSearch(String query){
+        String wanted=query==null?"":query.trim();
+        if(wanted.isEmpty())return false;
+        String raw=cache.get(messageSearchCacheKey(wanted));
+        if(raw==null||raw.isEmpty())return false;
+        try{
+            JSONArray results=new JSONObject(raw).optJSONArray("results");
+            if(results==null)return false;
+            Set<String> matches=new HashSet<>();
+            List<JSONObject> found=new ArrayList<>();
+            for(int i=0;i<results.length();i++){
+                JSONObject message=results.optJSONObject(i);
+                if(message==null||"system".equals(message.optString("type")))continue;
+                String cid=message.optString("conversationId",message.optString("conversation_id",""));
+                if(cid.isEmpty()||!messageAfterDeletion(cid,message))continue;
+                matches.add(cid);
+                found.add(message);
+            }
+            inboxMessageSearchMatches.clear();
+            inboxMessageSearchMatches.addAll(matches);
+            inboxMessageSearchResults.clear();
+            inboxMessageSearchResults.addAll(found);
+            filterInbox(wanted);
+            return true;
+        }catch(Exception ignored){return false;}
+    }
+    private void searchAllConversationMessagesV2(String query,int request){
+        String wanted=query==null?"":query.trim();
+        if(wanted.isEmpty()){setInboxSearchLoading(false);return;}
+        api.get("/api/messaging/search?q="+Uri.encode(wanted),(json,error)->main.post(()->{
+            if(request!=inboxSearchRequest)return;
+            if(searchBox==null||!wanted.equals(searchBox.getText().toString().trim()))return;
+            setInboxSearchLoading(false);
+            if(error!=null)return;
+            Set<String> matches=new HashSet<>();
+            List<JSONObject> found=new ArrayList<>();
+            JSONArray results=json.optJSONArray("results");
+            if(results==null)results=json.optJSONArray("messages");
+            if(results!=null)for(int i=0;i<results.length();i++){
+                JSONObject result=results.optJSONObject(i);
+                if(result==null)continue;
+                JSONObject message=result.optJSONObject("message");
+                if(message==null)message=result;
+                if("system".equals(message.optString("type")))continue;
+                JSONObject conversation=result.optJSONObject("conversation");
+                String id=message.optString("conversationId",message.optString("conversation_id",message.optString("threadId","")));
+                if(id.isEmpty())id=result.optString("conversationId",result.optString("conversation_id",""));
+                if(id.isEmpty()&&conversation!=null)id=conversation.optString("id",conversation.optString("conversationId",""));
+                if(id.isEmpty()||!messageAfterDeletion(id,message))continue;
+                try{if(message.optString("conversationId").isEmpty())message.put("conversationId",id);}catch(Exception ignored){}
+                matches.add(id);
+                found.add(message);
+            }
+            inboxMessageSearchQuery=wanted.toLowerCase(Locale.ROOT);
+            inboxMessageSearchMatches.clear();
+            inboxMessageSearchMatches.addAll(matches);
+            inboxMessageSearchResults.clear();
+            inboxMessageSearchResults.addAll(found);
+            try{cache.put(messageSearchCacheKey(wanted),new JSONObject().put("results",new JSONArray(found)).toString());}catch(Exception ignored){}
+            filterInbox(wanted);
+        }));
+    }
+    private void searchAllConversationMessages(String query,int request){String wanted=query==null?"":query.trim();if(wanted.isEmpty())return;api.get("/api/messaging/search?q="+Uri.encode(wanted),(json,error)->main.post(()->{if(request!=inboxSearchRequest||searchBox==null||!wanted.equals(searchBox.getText().toString().trim())||error!=null)return;Set<String> matchingConversationIds=new HashSet<>();List<JSONObject> returnedConversations=new ArrayList<>();JSONArray conversations=json.optJSONArray("conversations");if(conversations!=null)for(int i=0;i<conversations.length();i++){JSONObject conversation=conversations.optJSONObject(i);if(conversation!=null){returnedConversations.add(conversation);String id=conversation.optString("id",conversation.optString("conversationId",""));if(!id.isEmpty())matchingConversationIds.add(id);}}JSONArray results=json.optJSONArray("results");if(results==null)results=json.optJSONArray("messages");if(results!=null)for(int i=0;i<results.length();i++){JSONObject result=results.optJSONObject(i);if(result==null)continue;JSONObject message=result.optJSONObject("message");if(message==null)message=result;JSONObject conversation=result.optJSONObject("conversation");String id=message.optString("conversationId",message.optString("threadId",""));if(id.isEmpty()&&conversation!=null)id=conversation.optString("id",conversation.optString("conversationId",""));if(!id.isEmpty())matchingConversationIds.add(id);if(conversation!=null)returnedConversations.add(conversation);}String normalized=wanted.toLowerCase(Locale.ROOT);filteredInbox.clear();Set<String> added=new HashSet<>();for(JSONObject conversation:inbox){String id=conversation.optString("id");if(conversationSearchText(conversation).contains(normalized)||matchingConversationIds.contains(id)){filteredInbox.add(conversation);added.add(id);}}for(JSONObject conversation:returnedConversations){String id=conversation.optString("id",conversation.optString("conversationId",""));if(!id.isEmpty()&&!added.contains(id)){filteredInbox.add(conversation);added.add(id);}}filteredInbox.sort((a,b)->Boolean.compare(conversationIsPinned(b),conversationIsPinned(a)));if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();}));}
 
     private void updateInboxFromIncomingMessage(String cid,JSONObject m){
         if(cid==null||cid.isEmpty()||m==null)return;
@@ -342,9 +629,15 @@ public class MainActivity extends Activity {
                 }
             }
 
-            // Unknown/new conversation:
-            // let refreshInbox() obtain its full metadata.
+            // A locally deleted direct thread may not be in the inbox yet.
+            // Reuse the active thread metadata so its first new message restores it.
+            if(conversation==null&&activeConversation!=null&&cid.equals(activeConversation.optString("id"))){
+                conversation=activeConversation;
+            }
             if(conversation==null)return;
+            conversation.put("archived",false);
+            conversation.put("isArchived",false);
+            conversation.put("hidden",false);
 
             JSONObject last=new JSONObject();
 
@@ -374,11 +667,13 @@ public class MainActivity extends Activity {
                 );
             }
 
-            // Move newest conversation to top immediately.
-            if(oldIndex>0){
-                inbox.remove(oldIndex);
-                inbox.add(0,conversation);
+            // Keep only one row for this direct/group identity and move it to the top.
+            String identity=conversationIdentityKey(conversation);
+            for(int i=inbox.size()-1;i>=0;i--){
+                JSONObject existing=inbox.get(i);
+                if(existing==conversation||identity.equals(conversationIdentityKey(existing)))inbox.remove(i);
             }
+            inbox.add(0,conversation);
 
             // Persist the instantly updated inbox.
             String raw=cache.get("inbox");
@@ -406,23 +701,27 @@ public class MainActivity extends Activity {
         }catch(Exception ignored){}
     }
 
-    private void openConversation(JSONObject c){activeConversation=c;replyTo=null;messages.clear();composerHasText=false;typingStateSent=false;
-        boolean instagramTheme="instagram".equals(activeTheme());
-        if(instagramTheme){
-            getWindow().setStatusBarColor(Color.BLACK);
-            getWindow().setNavigationBarColor(Color.BLACK);
-            getWindow().getDecorView().setSystemUiVisibility(0);
-        }
-        root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackground(themeConversationBackground());root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(6),0,dp(6),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(49)));ImageButton back=icon(R.drawable.ic_msg_back,35,instagramTheme?Color.WHITE:TEXT);head.addView(back);back.setOnClickListener(v->showInbox(false));View avatar=buildConversationAvatar(c,31);LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(dp(31),dp(31));ap.leftMargin=dp(1);head.addView(avatar,ap);LinearLayout names=new LinearLayout(this);names.setOrientation(LinearLayout.VERTICAL);names.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams np=new LinearLayout.LayoutParams(0,-1,1);np.leftMargin=dp(7);head.addView(names,np);TextView name=text(c.optString("name","Conversation"),14,instagramTheme?Color.WHITE:TEXT,Typeface.BOLD);names.addView(name,new LinearLayout.LayoutParams(-1,dp(24)));TextView status=text(conversationStatus(c),10,instagramTheme?Color.rgb(142,142,142):SUB,Typeface.NORMAL);names.addView(status,new LinearLayout.LayoutParams(-1,dp(17)));ImageButton info=icon(R.drawable.ic_msg_info,35,instagramTheme?Color.WHITE:TEXT);head.addView(info);info.setOnClickListener(v->showInfo());View divider=new View(this);divider.setBackgroundColor(instagramTheme?Color.BLACK:DIV);page.addView(divider,new LinearLayout.LayoutParams(-1,dp(1)));
+    private void openConversation(JSONObject c){activeConversation=c;showingInboxSearchPage=false;searchTargetSpinner=null;directConversationIntro=null;beforeCursor="";replyTo=null;editingMessage=null;clearConversationNotification(c==null?"":c.optString("id"));messages.clear();socketMessageBatch.clear();main.removeCallbacks(flushSocketMessages);socketMessageBatchConversationId="";composerHasText=false;typingStateSent=false;conversationInitialScrollPending=true;
+        int headerColor=themeHeaderColor();
+        applyConversationSystemBars();
+        root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackground(themeConversationBackground());root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(6),0,dp(6),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(49)));ImageButton back=icon(R.drawable.ic_msg_back,35,headerColor);head.addView(back);back.setOnClickListener(v->leaveActiveConversation());View avatar=buildConversationAvatar(c,31);LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(dp(31),dp(31));ap.leftMargin=dp(1);head.addView(avatar,ap);LinearLayout names=new LinearLayout(this);names.setOrientation(LinearLayout.VERTICAL);names.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams np=new LinearLayout.LayoutParams(0,-1,1);np.leftMargin=dp(7);head.addView(names,np);TextView name=text(c.optString("name","Conversation"),14,headerColor,Typeface.BOLD);names.addView(name,new LinearLayout.LayoutParams(-1,dp(24)));TextView status=text(conversationStatus(c),10,themeHeaderSubColor(),Typeface.NORMAL);names.addView(status,new LinearLayout.LayoutParams(-1,dp(17)));ImageButton info=icon(R.drawable.ic_msg_info,35,headerColor);head.addView(info);info.setOnClickListener(v->showInfo());
         FrameLayout messageArea=new FrameLayout(this);page.addView(messageArea,new LinearLayout.LayoutParams(-1,0,1));
         list=new ListView(this);
         list.setDivider(null);
         list.setSelector(android.R.color.transparent);
         list.setTranscriptMode(ListView.TRANSCRIPT_MODE_NORMAL);
-        list.setPadding(0,dp(12),0,dp(26));
+        list.setFriction(android.view.ViewConfiguration.getScrollFriction()*3f);
+        list.setPadding(0,dp(12),0,dp(5));
         list.setClipToPadding(false);
-        list.setBackground(themeConversationBackground());
+        list.setBackgroundColor(Color.TRANSPARENT);
         messageArea.addView(list,new FrameLayout.LayoutParams(-1,-1));
+
+        if(conversationOpenedFromInboxSearch){
+            searchTargetSpinner=new OlderMessagesSpinner(this);
+            FrameLayout.LayoutParams targetLoaderParams=new FrameLayout.LayoutParams(dp(38),dp(38),Gravity.CENTER);
+            messageArea.addView(searchTargetSpinner,targetLoaderParams);
+            searchTargetSpinner.start();
+        }
 
         // Older-message loader is a real ListView header row, never an overlay.
         FrameLayout loaderRow=new FrameLayout(this);
@@ -441,12 +740,14 @@ public class MainActivity extends Activity {
         loaderRow.addView(olderMessagesSpinner,spinnerLp);
 
         android.widget.AbsListView.LayoutParams loaderRowLp=
-            new android.widget.AbsListView.LayoutParams(-1,dp(46));
+            new android.widget.AbsListView.LayoutParams(-1,0);
         loaderRow.setLayoutParams(loaderRowLp);
         list.addHeaderView(loaderRow,null,false);
 
         if("group".equals(c.optString("type"))){
             list.addHeaderView(buildGroupConversationIntro(c),null,false);
+        }else{
+            directConversationIntro=buildDirectConversationIntro(c);directConversationIntro.setVisibility(View.GONE);list.addHeaderView(directConversationIntro,null,false);
         }
 
         messageAdapter=new MessageAdapter();
@@ -479,16 +780,41 @@ public class MainActivity extends Activity {
                 int visibleItemCount,
                 int totalItemCount
             ){
-                // Never start a page request during a fling/drag.
-                // That was causing the viewport to jump between batches.
+                prefetchConversationWindow(firstVisibleItem,visibleItemCount);
             }
         });
         wireConversationTimeRevealGesture();
         typingView=text("",13,Color.rgb(138,141,145),Typeface.NORMAL);typingView.setPadding(dp(14),0,dp(8),0);typingView.setBackgroundColor(Color.TRANSPARENT);typingView.setVisibility(View.GONE);FrameLayout.LayoutParams tvp=new FrameLayout.LayoutParams(-2,dp(21),Gravity.START|Gravity.BOTTOM);tvp.leftMargin=dp(4);tvp.bottomMargin=dp(2);messageArea.addView(typingView,tvp);
-        replyBar=new LinearLayout(this);replyBar.setGravity(Gravity.CENTER_VERTICAL);replyBar.setPadding(dp(15),dp(2),dp(8),dp(2));replyBar.setBackgroundColor(Color.WHITE);replyBar.setVisibility(View.GONE);page.addView(replyBar,new LinearLayout.LayoutParams(-1,dp(52)));
-        buildComposer(page);loadCachedMessages(c.optString("id"));refreshMessages(c.optString("id"));markRead();}
+        replyBar=new LinearLayout(this);replyBar.setGravity(Gravity.CENTER_VERTICAL);replyBar.setPadding(dp(15),dp(2),dp(8),dp(2));replyBar.setBackgroundColor(themeReplyBackground());replyBar.setVisibility(View.GONE);page.addView(replyBar,new LinearLayout.LayoutParams(-1,dp(52)));
+        if(conversationBlockedByMe(c)){TextView blocked=text("You blocked this contact",13,themeReplyText(),Typeface.NORMAL);blocked.setGravity(Gravity.CENTER);page.addView(blocked,new LinearLayout.LayoutParams(-1,dp(30)));}
+        if(conversationBlockedByOther(c)||conversationBlockedByMe(c))buildBlockedComposer(page);else buildComposer(page);loadCachedMessages(c.optString("id"));refreshMessages(c.optString("id"));markRead();}
 
     private View buildGroupConversationIntro(JSONObject c){LinearLayout intro=new LinearLayout(this);intro.setOrientation(LinearLayout.VERTICAL);intro.setGravity(Gravity.CENTER_HORIZONTAL);intro.setPadding(dp(12),dp(26),dp(12),dp(26));View avatar=buildConversationAvatar(c,92);intro.addView(avatar,new LinearLayout.LayoutParams(dp(92),dp(92)));TextView title=text(c.optString("name","Group chat"),20,TEXT,Typeface.BOLD);title.setGravity(Gravity.CENTER);LinearLayout.LayoutParams tp=new LinearLayout.LayoutParams(-1,dp(42));tp.topMargin=dp(12);intro.addView(title,tp);TextView change=text("Change name and image",14,BLUE,Typeface.BOLD);change.setGravity(Gravity.CENTER);intro.addView(change,new LinearLayout.LayoutParams(-1,dp(35)));change.setOnClickListener(v->beginGroupEditor(c));if(c.optBoolean("isOwner")){TextView owner=text("You created this group",12,Color.rgb(138,141,145),Typeface.NORMAL);owner.setGravity(Gravity.CENTER);LinearLayout.LayoutParams op=new LinearLayout.LayoutParams(-1,dp(36));op.topMargin=dp(6);intro.addView(owner,op);}String who=c.optBoolean("namedByIsSelf")?"You":c.optString("namedByName","Someone");TextView named=text(who+" named the group “"+c.optString("name","Group chat")+"”.",12,Color.rgb(138,141,145),Typeface.NORMAL);named.setGravity(Gravity.CENTER);LinearLayout.LayoutParams np=new LinearLayout.LayoutParams(-1,dp(44));np.topMargin=dp(4);intro.addView(named,np);return intro;}
+    private String normalizedBeforeCursor(JSONObject page){if(page==null)return"";String cursor=page.optString("nextBefore","");return"null".equalsIgnoreCase(cursor)||"undefined".equalsIgnoreCase(cursor)?"":cursor;}
+    private void syncDirectConversationIntro(){if(directConversationIntro==null)return;boolean show=beforeCursor==null||beforeCursor.isEmpty();directConversationIntro.setVisibility(show?View.VISIBLE:View.GONE);directConversationIntro.requestLayout();ViewParent parent=directConversationIntro.getParent();if(parent instanceof View)((View)parent).requestLayout();if(list!=null){list.requestLayout();list.invalidate();}}
+    private View buildDirectConversationIntro(JSONObject c){JSONObject person=firstOther(c);String display=person==null?c.optString("name","Facebook user"):person.optString("name",c.optString("name","Facebook user")),username=person==null?"":person.optString("username","");int primary=themeHeaderColor(),secondary=themeHeaderSubColor(),accent=themeAccent();LinearLayout intro=new LinearLayout(this);intro.setOrientation(LinearLayout.VERTICAL);intro.setGravity(Gravity.CENTER_HORIZONTAL);intro.setPadding(dp(12),dp(8),dp(12),dp(22));View avatar=buildConversationAvatar(c,104);intro.addView(avatar,new LinearLayout.LayoutParams(dp(104),dp(104)));TextView title=text(display,21,primary,Typeface.BOLD);title.setGravity(Gravity.CENTER);LinearLayout.LayoutParams titleLp=new LinearLayout.LayoutParams(-1,dp(34));titleLp.topMargin=dp(12);intro.addView(title,titleLp);if(!username.isEmpty()){TextView handle=text(username,15,secondary,Typeface.NORMAL);handle.setGravity(Gravity.CENTER);intro.addView(handle,new LinearLayout.LayoutParams(-1,dp(24)));}TextView profile=text("View profile",13.5f,readableOn(accent),Typeface.BOLD);profile.setGravity(Gravity.CENTER);profile.setBackground(bg(accent,9));LinearLayout.LayoutParams profileLp=new LinearLayout.LayoutParams(dp(116),dp(32));profileLp.topMargin=dp(9);intro.addView(profile,profileLp);profile.setClickable(true);profile.setFocusable(true);profile.setOnClickListener(v->openProfileInApp(person));return intro;}
+    private void openProfileInApp(JSONObject person){
+        if(person==null){toast("Profile isn't available.");return;}
+        String userId=person.optString("id",person.optString("userId",""));
+        if(userId.isEmpty()){toast("Profile isn't available.");return;}
+        final Dialog dialog=new Dialog(this,android.R.style.Theme_Material_Light_NoActionBar_Fullscreen);
+        final FrameLayout browserRoot=new FrameLayout(this);browserRoot.setBackgroundColor(Color.WHITE);
+        final android.webkit.WebView browser=new android.webkit.WebView(this);browser.setBackgroundColor(Color.WHITE);
+        android.webkit.WebSettings settings=browser.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);settings.setDatabaseEnabled(true);settings.setLoadsImagesAutomatically(true);settings.setMediaPlaybackRequiresUserGesture(false);
+        android.webkit.CookieManager cookies=android.webkit.CookieManager.getInstance();cookies.setAcceptCookie(true);if(Build.VERSION.SDK_INT>=21)cookies.setAcceptThirdPartyCookies(browser,true);String session=getSharedPreferences("messenger_native_auth",MODE_PRIVATE).getString("cookie","");if(!session.isEmpty()){cookies.setCookie(api.absolute("/"),session);cookies.flush();}
+        browserRoot.addView(browser,new FrameLayout.LayoutParams(-1,-1));
+        final ProgressBar loading=new ProgressBar(this);browserRoot.addView(loading,new FrameLayout.LayoutParams(dp(42),dp(42),Gravity.CENTER));
+        final boolean[] profileOpened={false};final String quotedId=JSONObject.quote(userId);
+        browser.setWebViewClient(new android.webkit.WebViewClient(){
+            @Override public void onPageStarted(android.webkit.WebView view,String url,Bitmap icon){loading.setVisibility(View.VISIBLE);}
+            @Override public void onPageFinished(android.webkit.WebView view,String url){loading.setVisibility(View.GONE);if(profileOpened[0])return;profileOpened[0]=true;String script="(function(){var id="+quotedId+",tries=0,t=setInterval(function(){if(typeof window.__facebookOpenUserProfile==='function'){clearInterval(t);window.__facebookOpenUserProfile(id);}else if(++tries>120)clearInterval(t);},50);})();";view.evaluateJavascript(script,null);}
+            @Override public boolean shouldOverrideUrlLoading(android.webkit.WebView view,android.webkit.WebResourceRequest request){String scheme=request.getUrl().getScheme();return!("http".equalsIgnoreCase(scheme)||"https".equalsIgnoreCase(scheme));}
+            @Override public boolean shouldOverrideUrlLoading(android.webkit.WebView view,String url){String scheme=Uri.parse(url).getScheme();return!("http".equalsIgnoreCase(scheme)||"https".equalsIgnoreCase(scheme));}
+        });
+        dialog.setOnKeyListener((d,key,event)->{if(key==android.view.KeyEvent.KEYCODE_BACK&&event.getAction()==android.view.KeyEvent.ACTION_UP){if(browser.canGoBack())browser.goBack();else dialog.dismiss();return true;}return false;});
+        dialog.setOnDismissListener(d->{browser.stopLoading();browser.loadUrl("about:blank");browser.destroy();});
+        dialog.setContentView(browserRoot);dialog.show();Window window=dialog.getWindow();if(window!=null){window.setLayout(-1,-1);window.setStatusBarColor(Color.WHITE);window.setNavigationBarColor(Color.WHITE);int flags=Build.VERSION.SDK_INT>=26?View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR:View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;window.getDecorView().setSystemUiVisibility(flags);}browser.loadUrl(api.absolute("/app"));
+    }
     private void beginGroupEditor(JSONObject c){groupEditConversation=c;groupEditImageData="";groupEditEmoji="";groupEditColor="#3da9ef";groupEditDraftName=c==null?"":c.optString("name");showGroupEditor(c);}
     private void showGroupEditor(JSONObject c){
         if(c==null||!"group".equals(c.optString("type")))return;groupEditConversation=c;
@@ -557,11 +883,19 @@ public class MainActivity extends Activity {
         buildInstagramComposer(page);
     }
 
+    private boolean conversationBlockedByMe(JSONObject c){return c!=null&&(c.optBoolean("blockedByMe")||c.optBoolean("iBlocked")||c.optBoolean("blocked_by_me"));}
+    private boolean conversationBlockedByOther(JSONObject c){return c!=null&&(c.optBoolean("blockedByOther")||c.optBoolean("isBlockedByOther")||c.optBoolean("blockedMe")||c.optBoolean("blockedByThem")||c.optBoolean("blocked_by_other"));}
+    private void buildBlockedComposer(LinearLayout page){
+        composer=null;messageInput=null;sendButton=null;micButton=null;
+        TextView notice=text("You can't message this person",14,Color.rgb(255,48,64),Typeface.NORMAL);notice.setGravity(Gravity.CENTER);notice.setBackgroundColor(Color.TRANSPARENT);
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,dp(52));lp.setMargins(dp(10),0,dp(10),dp(5));page.addView(notice,lp);
+    }
+
     private void buildInstagramComposer(LinearLayout page){
         composer=new LinearLayout(this);
         composer.setGravity(Gravity.CENTER_VERTICAL);
         composer.setPadding(dp(7),dp(4),dp(7),dp(4));
-        composer.setBackgroundColor(Color.TRANSPARENT);
+        composer.setBackground(null);
         LinearLayout.LayoutParams outerLp=new LinearLayout.LayoutParams(-1,dp(58));
         outerLp.setMargins(dp(3),dp(2),dp(3),dp(4));
         page.addView(composer,outerLp);
@@ -569,20 +903,21 @@ public class MainActivity extends Activity {
         LinearLayout pill=new LinearLayout(this);
         pill.setGravity(Gravity.CENTER_VERTICAL);
         pill.setPadding(dp(5),0,dp(4),0);
-        pill.setBackground(bg(Color.rgb(38,38,38),28));
+        int composerBg=themeReplyBackground(),composerInk=readableOn(composerBg),cameraBg=themeAccent(),cameraInk=readableOn(cameraBg);
+        pill.setBackground(bg(composerBg,28));
         composer.addView(pill,new LinearLayout.LayoutParams(-1,dp(52)));
 
-        ImageButton camera=icon(R.drawable.ic_instagram_camera,42,Color.WHITE);
-        camera.clearColorFilter();
-        camera.setPadding(0,0,0,0);
-        camera.setBackgroundColor(Color.TRANSPARENT);
-        camera.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        ImageButton camera=icon(R.drawable.ic_instagram_camera_glyph,42,cameraInk);
+        camera.setColorFilter(cameraInk);
+        camera.setPadding(dp(9),dp(9),dp(9),dp(9));
+        camera.setBackground(bg(cameraBg,21));
+        camera.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         pill.addView(camera,new LinearLayout.LayoutParams(dp(42),dp(42)));
 
         messageInput=new EditText(this);
         messageInput.setHint("Message...");
-        messageInput.setHintTextColor(Color.rgb(142,142,142));
-        messageInput.setTextColor(Color.WHITE);
+        messageInput.setHintTextColor(themeReplyText());
+        messageInput.setTextColor(composerInk);
         messageInput.setTextSize(15);
         messageInput.setSingleLine(false);
         messageInput.setMaxLines(4);
@@ -604,12 +939,13 @@ public class MainActivity extends Activity {
         pill.setClickable(true);
         pill.setOnClickListener(v->closePickersAndOpenKeyboard());
 
-        ImageButton mic=icon(R.drawable.ic_instagram_mic,30,Color.WHITE);
-        ImageButton gallery=icon(R.drawable.ic_instagram_gallery,30,Color.WHITE);
-        ImageButton sticker=icon(R.drawable.ic_instagram_sticker,30,Color.WHITE);
-        ImageButton plus=icon(R.drawable.ic_instagram_plus,30,Color.WHITE);
+        int composerActionInk=themeReplyText();
+        ImageButton mic=icon(R.drawable.ic_instagram_mic,30,composerActionInk);
+        ImageButton gallery=icon(R.drawable.ic_instagram_gallery,30,composerActionInk);
+        ImageButton sticker=icon(R.drawable.ic_instagram_sticker,30,composerActionInk);
+        ImageButton plus=icon(R.drawable.ic_instagram_plus,30,composerActionInk);
         for(ImageButton b:new ImageButton[]{mic,gallery,sticker,plus}){
-            b.clearColorFilter();
+            b.setColorFilter(composerActionInk);
             b.setBackgroundColor(Color.TRANSPARENT);
             b.setScaleType(ImageView.ScaleType.FIT_CENTER);
             b.setPadding(dp(4),dp(4),dp(4),dp(4));
@@ -619,10 +955,10 @@ public class MainActivity extends Activity {
             pill.addView(b,bp);
         }
 
-        sendButton=icon(R.drawable.msg_send_enabled,44,Color.WHITE);
+        sendButton=icon(R.drawable.msg_send_enabled,44,readableOn(themeAccent()));
         sendButton.setImageResource(R.drawable.msg_send_enabled);
-        sendButton.setColorFilter(Color.WHITE);
-        sendButton.setBackground(bg(Color.rgb(98,55,255),22));
+        sendButton.setColorFilter(readableOn(themeAccent()));
+        sendButton.setBackground(bg(themeAccent(),22));
         sendButton.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         sendButton.setPadding(dp(8),dp(8),dp(8),dp(8));
         sendButton.setVisibility(View.GONE);
@@ -661,12 +997,26 @@ public class MainActivity extends Activity {
         composerHasText=false;
     }
 
-    private void syncComposerAction(){boolean has=messageInput!=null&&composerHasText;if(sendButton!=null){sendButton.setVisibility(has?View.VISIBLE:View.GONE);sendButton.setImageResource(R.drawable.msg_send_enabled);sendButton.setColorFilter(Color.WHITE);sendButton.setBackground(bg(Color.rgb(98,55,255),19));}if(micButton!=null){micButton.setColorFilter(themeAccent());micButton.setVisibility(has?View.GONE:View.VISIBLE);}}
+    private void syncComposerAction(){boolean has=messageInput!=null&&composerHasText;if(sendButton!=null){sendButton.setVisibility(has?View.VISIBLE:View.GONE);sendButton.setImageResource(R.drawable.msg_send_enabled);sendButton.setColorFilter(readableOn(themeAccent()));sendButton.setBackground(bg(themeAccent(),19));}if(micButton!=null){micButton.setColorFilter(themeReplyText());micButton.setVisibility(has?View.GONE:View.VISIBLE);}}
 
-    private void loadCachedMessages(String cid){String raw=cache.get("messages:"+cid);if(raw==null)return;try{applyMessages(new JSONObject(raw).optJSONArray("messages"),false);}catch(Exception ignored){}}
-    private void refreshMessages(String cid){if(refreshingMessages)return;refreshingMessages=true;api.get("/api/messaging/conversations/"+cid+"/messages?limit=80",(json,error)->main.post(()->{refreshingMessages=false;if(error!=null)return;beforeCursor=json.optString("nextBefore","");cache.put("messages:"+cid,json.toString());applyMessages(json.optJSONArray("messages"),true);if(activeConversation!=null&&activeConversation.optString("id").equals(cid))markRead();}));}
-    private void applyMessages(JSONArray arr,boolean fromNetwork){if(arr==null)return;messages.clear();for(int i=0;i<arr.length();i++){JSONObject m=arr.optJSONObject(i);if(m!=null&&!m.optBoolean("deleted"))messages.add(m);}if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();if(list!=null)list.post(()->list.setSelection(Math.max(0,messageAdapter.getCount()-1)));}}
-    private void cacheMessagesNow(){if(activeConversation==null)return;try{cache.put("messages:"+activeConversation.optString("id"),new JSONObject().put("messages",new JSONArray(messages)).toString());}catch(Exception ignored){}}
+    private void loadCachedMessages(String cid){String raw=cache.get("messages:"+cid);if(raw==null)return;try{JSONObject snapshot=new JSONObject(raw);JSONArray cachedMessages=snapshot.optJSONArray("messages");if(snapshot.has("nextBefore"))beforeCursor=normalizedBeforeCursor(snapshot);else if(cachedMessages!=null&&cachedMessages.length()<80)beforeCursor="";syncDirectConversationIntro();applyMessages(cachedMessages,false);}catch(Exception ignored){}}
+    private void refreshMessages(String cid){if(refreshingMessages)return;refreshingMessages=true;api.get("/api/messaging/conversations/"+cid+"/messages?limit=80",(json,error)->main.post(()->{refreshingMessages=false;if(error!=null)return;beforeCursor=normalizedBeforeCursor(json);syncDirectConversationIntro();cache.put("messages:"+cid,json.toString());applyMessages(json.optJSONArray("messages"),true);if(activeConversation!=null&&activeConversation.optString("id").equals(cid))markRead();}));}
+    private String firstAttachmentName(JSONObject message){JSONArray a=message==null?null:message.optJSONArray("attachments");JSONObject item=a!=null&&a.length()>0?a.optJSONObject(0):null;return item==null?"":item.optString("name","").replaceFirst("^__vm[12]__","").replaceFirst("^__batch_[A-Za-z0-9-]+__","");}
+    private JSONObject findPreviousMessage(List<JSONObject> previous,JSONObject incoming){if(incoming==null)return null;String id=incoming.optString("id"),client=incoming.optString("clientId");for(JSONObject old:previous){if(!id.isEmpty()&&id.equals(old.optString("id")))return old;if(!client.isEmpty()&&client.equals(old.optString("clientId")))return old;}if(isMine(incoming)){String incomingName=firstAttachmentName(incoming);for(int i=previous.size()-1;i>=0;i--){JSONObject old=previous.get(i);if(!old.optBoolean("pending")||!isMine(old))continue;String oldName=firstAttachmentName(old);if(!incomingName.isEmpty()&&incomingName.equals(oldName))return old;}JSONObject only=null;int candidates=0;String incomingType=incoming.optString("type");for(int i=previous.size()-1;i>=0;i--){JSONObject old=previous.get(i);if(old.optBoolean("pending")&&isMine(old)&&incomingType.equals(old.optString("type"))){only=old;candidates++;}}if(candidates==1)return only;}return null;}
+    private void preserveLocalMediaPreview(JSONObject oldMessage,JSONObject merged){if(oldMessage==null||merged==null)return;JSONArray oldAttachments=oldMessage.optJSONArray("attachments"),newAttachments=merged.optJSONArray("attachments");JSONObject oldAttachment=oldAttachments!=null&&oldAttachments.length()>0?oldAttachments.optJSONObject(0):null,newAttachment=newAttachments!=null&&newAttachments.length()>0?newAttachments.optJSONObject(0):null;if(oldAttachment==null||newAttachment==null)return;String local=oldAttachment.optString("localPreviewUrl",oldAttachment.optString("url",""));if(local.startsWith("file:"))try{newAttachment.put("localPreviewUrl",local);if(newAttachment.optInt("width",0)<=0&&oldAttachment.optInt("width",0)>0)newAttachment.put("width",oldAttachment.optInt("width"));if(newAttachment.optInt("height",0)<=0&&oldAttachment.optInt("height",0)>0)newAttachment.put("height",oldAttachment.optInt("height"));if(newAttachment.optString("mime","").isEmpty())newAttachment.put("mime",oldAttachment.optString("mime"));if(newAttachment.optString("name","").isEmpty())newAttachment.put("name",oldAttachment.optString("name"));}catch(Exception ignored){}}
+    private String temporaryVideoLocalUrl(String url){if(url==null||url.isEmpty())return"";String remembered=temporaryVideoFiles.get(url);if(remembered!=null){String path=Uri.parse(remembered).getPath();if(path!=null&&new File(path).exists())return remembered;}File cached=new File(getCacheDir(),"temporary-view-"+Integer.toHexString(url.hashCode())+".video");if(cached.exists()&&cached.length()>0){String local=Uri.fromFile(cached).toString();temporaryVideoFiles.put(url,local);return local;}return"";}
+    private void preloadTemporaryVideo(JSONObject attachment,Runnable ready){if(attachment==null)return;String url=attachment.optString("url","");if(url.isEmpty())return;String local=temporaryVideoLocalUrl(url);if(!local.isEmpty()){try{attachment.put("localPreloadedUrl",local);}catch(Exception ignored){}if(ready!=null)ready.run();return;}if(ready!=null)temporaryVideoWaiters.computeIfAbsent(url,k->new ArrayList<>()).add(ready);if(temporaryVideoLoading.contains(url))return;temporaryVideoLoading.add(url);temporaryMediaExecutor.execute(()->{String result="";try{byte[] bytes=api.getBytesSync(url);if(bytes!=null&&bytes.length>0){File cached=new File(getCacheDir(),"temporary-view-"+Integer.toHexString(url.hashCode())+".video");try(FileOutputStream out=new FileOutputStream(cached)){out.write(bytes);}result=Uri.fromFile(cached).toString();}}catch(Exception ignored){}String loaded=result;main.post(()->{temporaryVideoLoading.remove(url);List<Runnable> waiters=temporaryVideoWaiters.remove(url);if(!loaded.isEmpty()){temporaryVideoFiles.put(url,loaded);try{attachment.put("localPreloadedUrl",loaded);}catch(Exception ignored){}}if(waiters!=null)for(Runnable callback:waiters)callback.run();});});}
+    private Bitmap extractVideoThumbnail(String source){MediaMetadataRetriever retriever=new MediaMetadataRetriever();try{if(source.startsWith("file:")||source.startsWith("content:"))retriever.setDataSource(this,Uri.parse(source));else retriever.setDataSource(api.absolute(source),api.mediaHeaders());Bitmap frame=retriever.getFrameAtTime(0,MediaMetadataRetriever.OPTION_CLOSEST_SYNC);if(frame==null)frame=retriever.getFrameAtTime(500000L,MediaMetadataRetriever.OPTION_CLOSEST_SYNC);return frame;}catch(Exception ignored){return null;}finally{try{retriever.release();}catch(Exception ignored){}}}
+    private File videoThumbnailFile(String key){return new File(getCacheDir(),"video-thumb-"+Integer.toHexString(key.hashCode())+".jpg");}
+    private void startVideoThumbnailLoad(String key){videoThumbnailExecutor.execute(()->{Bitmap frame=null;File disk=videoThumbnailFile(key);try{if(disk.exists()&&disk.length()>0)frame=BitmapFactory.decodeFile(disk.getAbsolutePath());if(frame==null){if(disk.exists())disk.delete();frame=extractVideoThumbnail(key);}if(frame!=null)try(FileOutputStream out=new FileOutputStream(disk)){frame.compress(Bitmap.CompressFormat.JPEG,82,out);}}catch(Exception ignored){}Bitmap result=frame;main.post(()->{List<ImageView> waiters;synchronized(videoThumbnailCache){videoThumbnailLoading.remove(key);waiters=videoThumbnailWaiters.remove(key);if(result!=null)videoThumbnailCache.put(key,result);}if(result!=null&&waiters!=null){String tag="video-thumb:"+key;for(ImageView image:waiters)if(tag.equals(image.getTag()))image.setImageBitmap(result);}});});}
+    private void loadVideoThumbnail(String source,ImageView target){if(source==null||source.isEmpty()||target==null)return;String key=source.startsWith("file:")||source.startsWith("content:")?source:api.absolute(source),tag="video-thumb:"+key;target.setTag(tag);target.setBackground(themeConversationBackground());synchronized(videoThumbnailCache){Bitmap cached=videoThumbnailCache.get(key);if(cached!=null){target.setImageBitmap(cached);return;}videoThumbnailWaiters.computeIfAbsent(key,k->new ArrayList<>()).add(target);if(videoThumbnailLoading.contains(key))return;videoThumbnailLoading.add(key);}startVideoThumbnailLoad(key);}
+    private void prefetchVideoThumbnail(String source){if(source==null||source.isEmpty())return;String key=source.startsWith("file:")||source.startsWith("content:")?source:api.absolute(source);synchronized(videoThumbnailCache){if(videoThumbnailCache.containsKey(key)||videoThumbnailLoading.contains(key))return;videoThumbnailLoading.add(key);}startVideoThumbnailLoad(key);}
+    private void prefetchTemporaryMedia(){if(images==null)return;for(JSONObject message:messages){if(isMine(message))continue;JSONArray attachments=message.optJSONArray("attachments");JSONObject attachment=attachments!=null&&attachments.length()>0?attachments.optJSONObject(0):null;if(attachment==null||mediaViewMode(message,attachment)<=0)continue;String type=actualMediaType(message.optString("type"),attachment);if("image".equals(type))images.prefetch(attachment.optString("url"));else if("video".equals(type))preloadTemporaryVideo(attachment,null);}}
+    private void prefetchConversationWindow(int firstVisibleItem,int visibleItemCount){if(messageAdapter==null||messages.isEmpty())return;int headers=list==null?0:list.getHeaderViewsCount();int firstRow=Math.max(0,firstVisibleItem-headers-2),lastRow=Math.min(messageAdapter.getCount()-1,firstVisibleItem-headers+visibleItemCount+2);for(int row=firstRow;row<=lastRow;row++){int start=messageAdapter.messageIndexForRow(row),end=messageAdapter.messageEndForRow(row);for(int i=start;i<=end&&i>=0&&i<messages.size();i++)prefetchMessageThumbnail(messages.get(i));}}
+    private void prefetchConversationTail(){int start=Math.max(0,messages.size()-8);for(int i=messages.size()-1;i>=start;i--)prefetchMessageThumbnail(messages.get(i));}
+    private void prefetchMessageThumbnail(JSONObject message){if(message==null)return;JSONArray attachments=message.optJSONArray("attachments");JSONObject attachment=attachments!=null&&attachments.length()>0?attachments.optJSONObject(0):null;if(attachment==null||mediaViewMode(message,attachment)>0)return;String type=actualMediaType(message.optString("type"),attachment),url=displayMediaUrl(attachment);if("image".equals(type)){if(isStickerMessage(message))stickers.prefetch(url);else{int width=Math.min(dp(180),(int)(getResources().getDisplayMetrics().widthPixels*.52f));images.prefetch(url,width,stableMediaHeight(attachment,width,false));}}else if("video".equals(type))prefetchVideoThumbnail(url);}
+    private void applyMessages(JSONArray arr,boolean fromNetwork){if(arr==null)return;boolean keepBottom=conversationInitialScrollPending||isConversationAtBottom();String cid=activeConversation==null?"":activeConversation.optString("id");List<JSONObject> previous=new ArrayList<>(messages),next=new ArrayList<>();Set<String> matched=new HashSet<>();for(int i=0;i<arr.length();i++){JSONObject incoming=arr.optJSONObject(i);if(incoming==null||incoming.optBoolean("deleted")||!messageAfterDeletion(cid,incoming))continue;JSONObject old=findPreviousMessage(previous,incoming),merged=old==null?incoming:mergeMessage(old,incoming);preserveLocalMediaPreview(old,merged);next.add(merged);if(old!=null)matched.add(old.optString("id")+"|"+old.optString("clientId"));}if(fromNetwork){long now=System.currentTimeMillis();for(JSONObject old:previous){String key=old.optString("id")+"|"+old.optString("clientId");if(matched.contains(key)||old.optBoolean("deleted"))continue;if(old.optBoolean("pending")||old.optLong("optimisticRetainUntil",0)>now)next.add(old);}}messages.clear();messages.addAll(next);prefetchTemporaryMedia();prefetchConversationTail();if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();if(keepBottom)scrollToAbsoluteBottom();}conversationInitialScrollPending=false;}
+    private void cacheMessagesNow(){if(activeConversation==null)return;try{cache.put("messages:"+activeConversation.optString("id"),new JSONObject().put("messages",new JSONArray(messages)).put("nextBefore",beforeCursor==null?"":beforeCursor).toString());}catch(Exception ignored){}}
 
     private void cacheIncomingMessage(String cid,JSONObject incoming,boolean allowAppend){
         if(cid==null||cid.isEmpty()||incoming==null)return;
@@ -733,23 +1083,12 @@ public class MainActivity extends Activity {
     private boolean isKeyboardVisible(){try{Rect r=new Rect();root.getWindowVisibleDisplayFrame(r);return root.getRootView().getHeight()-r.bottom>dp(120);}catch(Exception e){return false;}}
     private void keepKeyboardStateAfterSend(boolean wasVisible){if(messageInput==null)return;if(wasVisible){messageInput.requestFocus();}else{messageInput.clearFocus();InputMethodManager imm=(InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);if(imm!=null)imm.hideSoftInputFromWindow(messageInput.getWindowToken(),0);}}
 
+    private boolean isConversationAtBottom(){if(list==null||list.getCount()==0)return true;return list.getLastVisiblePosition()>=list.getCount()-2;}
+    private void scheduleMessageRefresh(boolean keepBottom){scheduledMessageRefreshKeepsBottom|=keepBottom;main.removeCallbacks(messageRefresh);main.postDelayed(messageRefresh,90);}
     private void scrollToAbsoluteBottom(){
         if(list==null||messageAdapter==null||messageAdapter.getCount()==0)return;
-
-        int last=messageAdapter.getCount()-1;
-        list.setSelection(last);
-
-        list.post(()->{
-            if(list!=null&&messageAdapter!=null&&messageAdapter.getCount()>0){
-                list.setSelection(messageAdapter.getCount()-1);
-            }
-        });
-
-        main.postDelayed(()->{
-            if(list!=null&&messageAdapter!=null&&messageAdapter.getCount()>0){
-                list.setSelection(messageAdapter.getCount()-1);
-            }
-        },32);
+        main.removeCallbacks(bottomAnchor);
+        main.postDelayed(bottomAnchor,24);
     }
 
     private boolean isPendingClient(String clientId){
@@ -774,7 +1113,7 @@ public class MainActivity extends Activity {
                 JSONObject confirmed=json.optJSONObject("message");
                 if(confirmed!=null){
                     if(reply!=null&&confirmed.optJSONObject("reply")==null){
-                        try{confirmed.put("reply",new JSONObject().put("id",reply.optString("id")).put("body",reply.optString("body")).put("type",reply.optString("type","text")).put("senderName",senderName(reply)));}catch(Exception ignored){}
+                        try{confirmed.put("reply",replySnapshot(reply));}catch(Exception ignored){}
                     }
                     replaceOptimistic(client,confirmed);
                     cacheMessagesNow();
@@ -791,11 +1130,13 @@ public class MainActivity extends Activity {
         stickerLastConversations.remove(activeConversation.optString("id"));
         String body=messageInput.getText().toString().trim();
         if(body.isEmpty())return;
+        if(editingMessage!=null){submitEditedMessage(body);return;}
         boolean keyboardWasVisible=isKeyboardVisible();
         String cid=activeConversation.optString("id"),client=UUID.randomUUID().toString();
         JSONObject reply=replyTo;
         JSONObject temp=buildOptimisticText(body,client,reply);
         messages.add(temp);
+        restoreActiveConversationToInbox(temp);
         if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();scrollToAbsoluteBottom();}
         cacheMessagesNow();
         messageInput.setText("");
@@ -803,14 +1144,16 @@ public class MainActivity extends Activity {
         keepKeyboardStateAfterSend(keyboardWasVisible);
         sendPendingTextRequest(cid,client,body,reply,0);
     }
-    private JSONObject buildOptimisticText(String body,String client,JSONObject reply){JSONObject temp=new JSONObject();try{temp.put("id","tmp-"+System.nanoTime());temp.put("clientId",client);temp.put("conversationId",activeConversation==null?"":activeConversation.optString("id"));temp.put("senderId",selfId);temp.put("type","text");temp.put("body",body);temp.put("createdAt",new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX",Locale.US).format(new Date()));temp.put("status","sending");temp.put("pending",true);temp.put("sender",new JSONObject().put("id",selfId).put("name","You").put("isSelf",true));temp.put("attachments",new JSONArray());temp.put("reactions",new JSONArray());if(reply!=null)temp.put("reply",new JSONObject().put("id",reply.optString("id")).put("body",reply.optString("body")).put("type",reply.optString("type","text")).put("senderName",senderName(reply)));}catch(Exception ignored){}return temp;}
-    private void replaceOptimistic(String clientId,JSONObject server){for(int i=0;i<messages.size();i++){JSONObject x=messages.get(i);if(clientId.equals(x.optString("clientId"))){messages.set(i,mergeMessage(x,server));try{messages.get(i).put("pending",false);}catch(Exception ignored){}if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();if(list!=null)list.invalidateViews();}return;}}upsertMessage(server);}
+    private boolean isVisualMediaMessage(JSONObject message){if(message==null)return false;JSONArray attachments=message.optJSONArray("attachments");JSONObject attachment=attachments!=null&&attachments.length()>0?attachments.optJSONObject(0):null;String type=actualMediaType(message.optString("type"),attachment);return"image".equals(type)||"video".equals(type)||message.optBoolean("sticker");}
+    private void hidePendingIndicator(String clientId){if(list==null||clientId==null||clientId.isEmpty())return;View pending=list.findViewWithTag("pending-send-"+clientId);if(pending!=null)pending.setVisibility(View.GONE);}
+    private JSONObject buildOptimisticText(String body,String client,JSONObject reply){JSONObject temp=new JSONObject();try{temp.put("id","tmp-"+System.nanoTime());temp.put("clientId",client);temp.put("conversationId",activeConversation==null?"":activeConversation.optString("id"));temp.put("senderId",selfId);temp.put("type","text");temp.put("body",body);temp.put("createdAt",new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX",Locale.US).format(new Date()));temp.put("status","sending");temp.put("pending",true);temp.put("sender",new JSONObject().put("id",selfId).put("name","You").put("isSelf",true));temp.put("attachments",new JSONArray());temp.put("reactions",new JSONArray());if(reply!=null)temp.put("reply",replySnapshot(reply));}catch(Exception ignored){}return temp;}
+    private void replaceOptimistic(String clientId,JSONObject server){boolean keepBottom=isConversationAtBottom();for(int i=0;i<messages.size();i++){JSONObject x=messages.get(i);if(clientId.equals(x.optString("clientId"))){boolean visual=isVisualMediaMessage(x);JSONObject merged=mergeMessage(x,server);preserveLocalMediaPreview(x,merged);messages.set(i,merged);try{messages.get(i).put("pending",false).put("optimisticRetainUntil",System.currentTimeMillis()+30000L);}catch(Exception ignored){}if(visual)hidePendingIndicator(clientId);else scheduleMessageRefresh(keepBottom);return;}}upsertMessage(server);}
     private void markOptimisticFailed(String clientId){for(JSONObject x:messages)if(clientId.equals(x.optString("clientId")))try{x.put("pending",false).put("failed",true).put("status","failed");}catch(Exception ignored){}if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();}
-    private void upsertMessage(JSONObject m){String id=m.optString("id"),client=m.optString("clientId");for(int i=0;i<messages.size();i++){JSONObject old=messages.get(i);if(id.equals(old.optString("id"))||(!client.isEmpty()&&client.equals(old.optString("clientId")))){messages.set(i,mergeMessage(old,m));try{messages.get(i).put("pending",false);}catch(Exception ignored){}if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();if(list!=null)list.invalidateViews();}return;}}messages.add(m);if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();if(list!=null){list.invalidateViews();list.setSelection(messageAdapter.getCount()-1);}}}
+    private void upsertMessage(JSONObject m){boolean keepBottom=isConversationAtBottom(),visualConfirmation=false;JSONObject old=findPreviousMessage(messages,m);if(old!=null){visualConfirmation=old.optBoolean("pending")&&isVisualMediaMessage(old);int index=messages.indexOf(old);JSONObject merged=mergeMessage(old,m);preserveLocalMediaPreview(old,merged);messages.set(index,merged);try{messages.get(index).put("pending",false).put("optimisticRetainUntil",System.currentTimeMillis()+30000L);}catch(Exception ignored){}if(visualConfirmation)hidePendingIndicator(old.optString("clientId"));}else messages.add(m);prefetchTemporaryMedia();if(!visualConfirmation)scheduleMessageRefresh(keepBottom);}
     private long parseLong(String s){try{return Long.parseLong(s);}catch(Exception e){return 0;}}
     private void vibrateSafe(long ms){try{Vibrator v=(Vibrator)getSystemService(Context.VIBRATOR_SERVICE);if(v==null||!v.hasVibrator())return;long duration=Math.max(42,ms);if(Build.VERSION.SDK_INT>=26)v.vibrate(VibrationEffect.createOneShot(duration,225));else v.vibrate(duration);}catch(Exception ignored){}}
 
-    private void setReply(JSONObject m){replyTo=m;if(replyBar==null)return;replyBar.removeAllViews();
+    private void setReply(JSONObject m){if(m!=null&&editingMessage!=null){editingMessage=null;if(messageInput!=null)messageInput.setText("");}replyTo=m;if(replyBar==null)return;replyBar.removeAllViews();
         if(m==null){
             replyBar.animate().cancel();
             replyBar.setAlpha(1f);
@@ -830,8 +1173,11 @@ public class MainActivity extends Activity {
             .setInterpolator(new DecelerateInterpolator())
             .start();
 
-        LinearLayout copy=new LinearLayout(this);copy.setOrientation(LinearLayout.VERTICAL);copy.setGravity(Gravity.TOP);copy.setPadding(0,0,0,0);replyBar.addView(copy,new LinearLayout.LayoutParams(0,-1,1));JSONObject rs=m.optJSONObject("sender");TextView small=text("Replying to "+(rs==null?"message":rs.optString("name","message")),11.5f,Color.rgb(138,141,145),Typeface.NORMAL);small.setSingleLine(true);copy.addView(small,new LinearLayout.LayoutParams(-1,dp(17)));TextView pv=text(replyPreview(m),13.5f,TEXT,Typeface.NORMAL);pv.setSingleLine(true);pv.setEllipsize(TextUtils.TruncateAt.END);copy.addView(pv,new LinearLayout.LayoutParams(-1,dp(22)));ImageButton x=icon(R.drawable.ic_msg_close,30,Color.rgb(138,141,145));replyBar.addView(x);x.setOnClickListener(v->setReply(null));}
-    private String replyPreview(JSONObject m){String body=m==null?"":m.optString("body").replaceFirst("^[🎤📷🎥🎬]\\s*","").trim();if(!body.isEmpty())return body;String t=m==null?"":m.optString("type");if("audio".equals(t))return"Voice message";if("image".equals(t))return"Photo";if("video".equals(t))return"Video";if("file".equals(t))return"File";if("shared_reel".equals(t))return"Reel";if("shared_post".equals(t))return"Post";return"Message";}
+        int replyBackground=themeReplyBackground(),replyMuted=themeReplyText(),replyInk=readableOn(replyBackground);
+        replyBar.setBackgroundColor(replyBackground);
+        LinearLayout copy=new LinearLayout(this);copy.setOrientation(LinearLayout.VERTICAL);copy.setGravity(Gravity.TOP);copy.setPadding(0,0,0,0);replyBar.addView(copy,new LinearLayout.LayoutParams(0,-1,1));TextView small=text("Replying to "+senderName(m),11.5f,replyMuted,Typeface.NORMAL);small.setSingleLine(true);copy.addView(small,new LinearLayout.LayoutParams(-1,dp(17)));TextView pv=text(replyPreview(m),13.5f,replyInk,Typeface.NORMAL);pv.setSingleLine(true);pv.setEllipsize(TextUtils.TruncateAt.END);copy.addView(pv,new LinearLayout.LayoutParams(-1,dp(22)));ImageButton x=icon(R.drawable.ic_msg_close,30,replyMuted);replyBar.addView(x);x.setOnClickListener(v->setReply(null));}
+    private String replyPreview(JSONObject m){if(isStickerMessage(m))return"Sticker";String body=m==null?"":m.optString("body").replaceFirst("^[🎤📷🎥🎬]\\s*","").trim();if(!body.isEmpty())return body;String t=m==null?"":m.optString("type");if("sticker".equals(t))return"Sticker";if("audio".equals(t))return"Voice message";if("image".equals(t))return"Photo";if("video".equals(t))return"Video";if("file".equals(t))return"File";if("shared_reel".equals(t))return"Reel";if("shared_post".equals(t))return"Post";return"Message";}
+    private JSONObject replySnapshot(JSONObject reply){if(reply==null)return null;try{return new JSONObject().put("id",reply.optString("id")).put("body",reply.optString("body")).put("type",isStickerMessage(reply)?"sticker":reply.optString("type","text")).put("sticker",isStickerMessage(reply)).put("senderName",senderName(reply));}catch(Exception ignored){return null;}}
 
     private ImageButton actionIconButton(int drawable){ImageButton b=new ImageButton(this);b.setImageResource(drawable);b.setColorFilter(Color.WHITE);b.setScaleType(ImageView.ScaleType.CENTER);b.setPadding(dp(7),dp(7),dp(7),dp(7));b.setBackgroundColor(Color.TRANSPARENT);return b;}
     private LinearLayout actionRow(String label,int drawable,boolean danger){
@@ -957,6 +1303,13 @@ reactionsCard.animate().cancel();
 
         
     }
+    private String reactionMessageKey(JSONObject m){if(m==null)return"";String id=m.optString("id");return id.isEmpty()?m.optString("clientId"):id;}
+    private void renderReactionBadge(LinearLayout stack,JSONObject m,boolean mine){
+        if(stack==null||m==null)return;View previous=stack.findViewWithTag("message-reaction-badge");if(previous!=null&&previous.getParent()==stack)stack.removeView(previous);JSONArray reactions=m.optJSONArray("reactions");if(reactions==null||reactions.length()==0)return;
+        StringBuilder value=new StringBuilder();Set<String> shown=new HashSet<>();for(int i=0;i<reactions.length()&&shown.size()<2;i++){JSONObject reaction=reactions.optJSONObject(i);String emoji=reaction==null?"":reaction.optString("emoji");if(!emoji.isEmpty()&&shown.add(emoji))value.append(emoji);}
+        if(reactions.length()>1)value.append("  ").append(reactions.length());TextView badge=text(value.toString(),12,Color.WHITE,Typeface.NORMAL);badge.setTag("message-reaction-badge");badge.setGravity(Gravity.CENTER);badge.setPadding(reactions.length()==1?0:dp(6),0,reactions.length()==1?0:dp(6),0);badge.setBackground(bg(Color.rgb(34,32,35),11));badge.setElevation(0f);LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(reactions.length()==1?dp(22):-2,dp(22));params.gravity=mine?Gravity.END:Gravity.START;params.topMargin=-dp(4);stack.addView(badge,params);badge.setOnClickListener(v->showReactionDetails(m));
+    }
+    private void refreshVisibleReactionBadge(JSONObject m){if(list==null||m==null)return;String key=reactionMessageKey(m);if(key.isEmpty())return;View target=list.findViewWithTag("message-reaction-stack-"+key);if(target instanceof LinearLayout)renderReactionBadge((LinearLayout)target,m,isMine(m));}
     private void react(JSONObject m,String emoji){
         if(m==null)return;
 
@@ -994,10 +1347,8 @@ reactionsCard.animate().cancel();
             m.put("reactions",next);
         }catch(Exception ignored){}
 
-        if(messageAdapter!=null){
-            messageAdapter.notifyDataSetChanged();
-            if(list!=null)list.invalidateViews();
-        }
+        String reactionKey=reactionMessageKey(m);if(!reactionKey.isEmpty())pendingLocalReactionIds.add(reactionKey);
+        refreshVisibleReactionBadge(m);
         cacheMessagesNow();
 
         final JSONArray rollback=before;
@@ -1008,11 +1359,9 @@ reactionsCard.animate().cancel();
                 new JSONObject().put("emoji",emoji==null?"":emoji),
                 (json,error)->main.post(()->{
                     if(error!=null){
+                        pendingLocalReactionIds.remove(reactionKey);
                         try{m.put("reactions",rollback);}catch(Exception ignored){}
-                        if(messageAdapter!=null){
-                            messageAdapter.notifyDataSetChanged();
-                            if(list!=null)list.invalidateViews();
-                        }
+                        refreshVisibleReactionBadge(m);
                         cacheMessagesNow();
                         toast(error.getMessage());
                         return;
@@ -1021,17 +1370,17 @@ reactionsCard.animate().cancel();
                     JSONObject n=json.optJSONObject("message");
                     if(n!=null){
                         JSONObject merged=mergeMessage(m,n);
-                        upsertMessage(merged);
+                        JSONObject current=findPreviousMessage(messages,merged);if(current!=null)messages.set(messages.indexOf(current),merged);
+                        refreshVisibleReactionBadge(merged);
                         cacheMessagesNow();
                     }
+                    main.postDelayed(()->pendingLocalReactionIds.remove(reactionKey),3000);
                 })
             );
         }catch(Exception e){
+            pendingLocalReactionIds.remove(reactionKey);
             try{m.put("reactions",rollback);}catch(Exception ignored){}
-            if(messageAdapter!=null){
-                messageAdapter.notifyDataSetChanged();
-                if(list!=null)list.invalidateViews();
-            }
+            refreshVisibleReactionBadge(m);
             cacheMessagesNow();
             toast(e.getMessage());
         }
@@ -1113,7 +1462,29 @@ reactionsCard.animate().cancel();
         overlay.setOnClickListener(v->{if(v==overlay)d.dismiss();});d.setContentView(overlay);d.show();Window w=d.getWindow();if(w!=null){w.setBackgroundDrawableResource(android.R.color.transparent);w.setDimAmount(0f);w.setLayout(-1,-1);}
     }
     private void forwardMessagePicker(JSONObject m){api.get("/api/messaging/contacts?q=",(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONArray ar=json.optJSONArray("contacts");if(ar==null||ar.length()==0){toast("No people found.");return;}String[] names=new String[ar.length()];for(int i=0;i<ar.length();i++)names[i]=ar.optJSONObject(i).optString("name","Facebook user");new AlertDialog.Builder(this).setTitle("Forward message").setItems(names,(dd,w)->{JSONObject c=ar.optJSONObject(w);try{api.post("/api/messaging/conversations",new JSONObject().put("type","direct").put("userId",c.optString("id")),(cj,ce)->main.post(()->{if(ce!=null){toast(ce.getMessage());return;}JSONObject conv=cj.optJSONObject("conversation");if(conv==null)return;try{api.post("/api/messaging/messages/"+m.optString("id")+"/forward",new JSONObject().put("conversationId",conv.optString("id")),(fj,fe)->main.post(()->toast(fe==null?"Message forwarded":fe.getMessage())));}catch(Exception ex){toast(ex.getMessage());}}));}catch(Exception ex){toast(ex.getMessage());}}).show();}));}
-    private void editMessage(JSONObject m){EditText input=new EditText(this);input.setText(m.optString("body"));input.setSelection(input.length());new AlertDialog.Builder(this).setTitle("Edit message").setView(input).setNegativeButton("Cancel",null).setPositiveButton("Save",(d,w)->{String b=input.getText().toString().trim();if(b.isEmpty())return;try{api.patch("/api/messaging/messages/"+m.optString("id"),new JSONObject().put("body",b),(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONObject n=json.optJSONObject("message");if(n!=null){upsertMessage(n);cacheMessagesNow();}}));}catch(Exception e){toast(e.getMessage());}}).show();}
+    private void editMessage(JSONObject m){
+        if(m==null||messageInput==null)return;
+        editingMessage=m;
+        setReply(null);
+        messageInput.setText(m.optString("body"));
+        messageInput.setSelection(messageInput.length());
+        closePickersAndOpenKeyboard();
+    }
+    private void submitEditedMessage(String body){
+        JSONObject target=editingMessage;
+        if(target==null||body==null||body.trim().isEmpty())return;
+        String previous=target.optString("body"),previousEdited=target.optString("editedAt");
+        try{target.put("body",body.trim()).put("editedAt",new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX",Locale.US).format(new Date()));}catch(Exception ignored){}
+        editingMessage=null;
+        messageInput.setText("");
+        if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();
+        cacheMessagesNow();
+        syncConversationNotification(target.optString("conversationId",activeConversation==null?"":activeConversation.optString("id")),target,false);
+        try{api.patch("/api/messaging/messages/"+target.optString("id"),new JSONObject().put("body",body.trim()),(json,error)->main.post(()->{
+            if(error!=null){try{target.put("body",previous).put("editedAt",previousEdited);}catch(Exception ignored){}editingMessage=target;if(messageInput!=null){messageInput.setText(body.trim());messageInput.setSelection(messageInput.length());}if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();cacheMessagesNow();toast(error.getMessage());return;}
+            JSONObject updated=json.optJSONObject("message");if(updated!=null){upsertMessage(updated);cacheMessagesNow();syncConversationNotification(updated.optString("conversationId",activeConversation==null?"":activeConversation.optString("id")),updated,false);}
+        }));}catch(Exception error){try{target.put("body",previous).put("editedAt",previousEdited);}catch(Exception ignored){}editingMessage=target;if(messageInput!=null){messageInput.setText(body.trim());messageInput.setSelection(messageInput.length());}if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();cacheMessagesNow();toast(error.getMessage());}
+    }
     private void deleteMessage(JSONObject m,boolean everyone){api.delete("/api/messaging/messages/"+m.optString("id")+"?scope="+(everyone?"everyone":"me"),(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}if(everyone&&json.optJSONObject("message")!=null)upsertMessage(json.optJSONObject("message"));else messages.removeIf(x->x.optString("id").equals(m.optString("id")));messageAdapter.notifyDataSetChanged();cacheMessagesNow();}));}
 
     interface EmojiConsumer{void accept(String emoji);}
@@ -1141,7 +1512,7 @@ reactionsCard.animate().cancel();
             if(replyBar!=null)replyBar.setTranslationY(0);
             if(list!=null){
                 list.setTranslationY(0);
-                list.setPadding(dp(10),dp(12),dp(10),dp(26));
+                list.setPadding(0,dp(12),0,dp(5));
             }
         }
 
@@ -1214,10 +1585,10 @@ reactionsCard.animate().cancel();
         host.setTranslationY(sheetH);stickerBridge.setTranslationY(sheetH);composer.setTranslationY(0);if(replyBar!=null)replyBar.setTranslationY(0);if(list!=null){applyConversationPickerInset(sheetH);list.post(()->list.setSelection(Math.max(0,list.getCount()-1)));}host.animate().translationY(0).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();stickerBridge.animate().translationY(0).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();applyConversationPickerInset(sheetH);applyConversationPickerInset(sheetH);composer.animate().translationY(-sheetH).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null&&replyBar.getVisibility()==View.VISIBLE)replyBar.animate().translationY(-sheetH).setDuration(330).setInterpolator(new DecelerateInterpolator()).start();
         loader.load("");
     }
-    private void dismissMessengerStickerPicker(View host){if(host==null||root==null)return;View bridge=root.findViewWithTag("messenger-sticker-bridge");int h=Math.max(host.getHeight(),dp(360));host.animate().translationY(h).setDuration(220).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(()->{if(host.getParent()==root)root.removeView(host);}).start();if(bridge!=null)bridge.animate().translationY(h).setDuration(220).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(()->{if(bridge.getParent()==root)root.removeView(bridge);}).start();if(composer!=null)composer.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null)replyBar.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.setPadding(dp(10),dp(12),dp(10),dp(26));}
+    private void dismissMessengerStickerPicker(View host){if(host==null||root==null)return;View bridge=root.findViewWithTag("messenger-sticker-bridge");int h=Math.max(host.getHeight(),dp(360));host.animate().translationY(h).setDuration(220).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(()->{if(host.getParent()==root)root.removeView(host);}).start();if(bridge!=null)bridge.animate().translationY(h).setDuration(220).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(()->{if(bridge.getParent()==root)root.removeView(bridge);}).start();if(composer!=null)composer.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(replyBar!=null)replyBar.animate().translationY(0).setDuration(220).setInterpolator(new DecelerateInterpolator()).start();if(list!=null)list.setPadding(0,dp(12),0,dp(5));}
 
-    private JSONObject buildOptimisticSticker(String url,String client,JSONObject reply){JSONObject temp=new JSONObject();try{temp.put("id","tmp-"+System.nanoTime());temp.put("clientId",client);temp.put("conversationId",activeConversation==null?"":activeConversation.optString("id"));temp.put("senderId",selfId);temp.put("type","image");temp.put("body","");temp.put("createdAt",new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX",Locale.US).format(new Date()));temp.put("status","sending");temp.put("pending",true);temp.put("sticker",true);temp.put("sender",new JSONObject().put("id",selfId).put("name","You").put("isSelf",true));temp.put("attachments",new JSONArray().put(new JSONObject().put("url",url).put("mime","image/gif").put("name","sticker.gif").put("sticker",true)));temp.put("reactions",new JSONArray());if(reply!=null)temp.put("reply",new JSONObject().put("id",reply.optString("id")).put("body",reply.optString("body")).put("type",reply.optString("type","text")).put("senderName",senderName(reply)));}catch(Exception ignored){}return temp;}
-    private void sendStickerFromUrl(String url){if(activeConversation==null||url==null||url.isEmpty())return;final String cid=activeConversation.optString("id"),client="sticker-native-"+UUID.randomUUID();stickerLastConversations.add(cid);final JSONObject replyObj=replyTo;final String reply=replyObj==null?"":replyObj.optString("id");JSONObject temp=buildOptimisticSticker(url,client,replyObj);messages.add(temp);if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();scrollToAbsoluteBottom();}cacheMessagesNow();if(replyObj!=null)setReply(null);new Thread(()->{try{byte[] bytes=stickers.getCachedOrFetch(url);if(bytes==null||bytes.length==0)throw new Exception("Could not load sticker.");api.upload("/api/messaging/conversations/"+cid+"/attachment",bytes,"sticker-"+System.currentTimeMillis()+".gif","image/gif","",client,reply,(json,error)->main.post(()->{if(error!=null){markOptimisticFailed(client);toast(error.getMessage());return;}JSONObject m=json.optJSONObject("message");if(m!=null){try{m.put("sticker",true);}catch(Exception ignored){}stickerLastConversations.add(cid);replaceOptimistic(client,m);cacheMessagesNow();refreshInbox();}}));}catch(Exception ex){main.post(()->{markOptimisticFailed(client);toast(ex.getMessage());});}}).start();}
+    private JSONObject buildOptimisticSticker(String url,String client,JSONObject reply){JSONObject temp=new JSONObject();try{temp.put("id","tmp-"+System.nanoTime());temp.put("clientId",client);temp.put("conversationId",activeConversation==null?"":activeConversation.optString("id"));temp.put("senderId",selfId);temp.put("type","image");temp.put("body","");temp.put("createdAt",new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX",Locale.US).format(new Date()));temp.put("status","sending");temp.put("pending",true);temp.put("sticker",true);temp.put("sender",new JSONObject().put("id",selfId).put("name","You").put("isSelf",true));temp.put("attachments",new JSONArray().put(new JSONObject().put("url",url).put("mime","image/gif").put("name","sticker.gif").put("sticker",true)));temp.put("reactions",new JSONArray());if(reply!=null)temp.put("reply",replySnapshot(reply));}catch(Exception ignored){}return temp;}
+    private void sendStickerFromUrl(String url){if(activeConversation==null||url==null||url.isEmpty())return;final String cid=activeConversation.optString("id"),client="sticker-native-"+UUID.randomUUID();stickerLastConversations.add(cid);final JSONObject replyObj=replyTo;final String reply=replyObj==null?"":replyObj.optString("id");JSONObject temp=buildOptimisticSticker(url,client,replyObj);messages.add(temp);restoreActiveConversationToInbox(temp);if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();scrollToAbsoluteBottom();}cacheMessagesNow();if(replyObj!=null)setReply(null);new Thread(()->{try{byte[] bytes=stickers.getCachedOrFetch(url);if(bytes==null||bytes.length==0)throw new Exception("Could not load sticker.");api.upload("/api/messaging/conversations/"+cid+"/attachment",bytes,"sticker-"+System.currentTimeMillis()+".gif","image/gif","",client,reply,(json,error)->main.post(()->{if(error!=null){markOptimisticFailed(client);toast(error.getMessage());return;}JSONObject m=json.optJSONObject("message");if(m!=null){try{m.put("sticker",true);}catch(Exception ignored){}stickerLastConversations.add(cid);replaceOptimistic(client,m);cacheMessagesNow();refreshInbox();}}));}catch(Exception ex){main.post(()->{markOptimisticFailed(client);toast(ex.getMessage());});}}).start();}
 
 
     private void closePickersOnly(){
@@ -1244,7 +1615,7 @@ reactionsCard.animate().cancel();
         if(list!=null){
             list.animate().cancel();
             list.setTranslationY(0f);
-            list.setPadding(dp(10),dp(12),dp(10),dp(26));
+            list.setPadding(0,dp(12),0,dp(5));
         }
     }
 
@@ -1281,6 +1652,11 @@ reactionsCard.animate().cancel();
         showMessageCamera();
     }
 
+    private int currentDisplayDegrees(){int rotation=getWindowManager().getDefaultDisplay().getRotation();if(rotation==android.view.Surface.ROTATION_90)return 90;if(rotation==android.view.Surface.ROTATION_180)return 180;if(rotation==android.view.Surface.ROTATION_270)return 270;return 0;}
+    private int cameraPreviewOrientation(android.hardware.Camera.CameraInfo info){int degrees=currentDisplayDegrees();if(info.facing==android.hardware.Camera.CameraInfo.CAMERA_FACING_FRONT){int result=(info.orientation+degrees)%360;return(360-result)%360;}return(info.orientation-degrees+360)%360;}
+    private int cameraJpegOrientation(android.hardware.Camera.CameraInfo info){int degrees=currentDisplayDegrees();return info.facing==android.hardware.Camera.CameraInfo.CAMERA_FACING_FRONT?(info.orientation+degrees)%360:(info.orientation-degrees+360)%360;}
+    private byte[] normalizeCapturedJpeg(byte[] jpeg){if(jpeg==null||jpeg.length==0)return jpeg;try{ExifInterface exif=new ExifInterface(new ByteArrayInputStream(jpeg));int orientation=exif.getAttributeInt(ExifInterface.TAG_ORIENTATION,ExifInterface.ORIENTATION_NORMAL);if(orientation==ExifInterface.ORIENTATION_NORMAL||orientation==ExifInterface.ORIENTATION_UNDEFINED)return jpeg;Bitmap source=BitmapFactory.decodeByteArray(jpeg,0,jpeg.length);if(source==null)return jpeg;Matrix matrix=new Matrix();if(orientation==ExifInterface.ORIENTATION_FLIP_HORIZONTAL)matrix.setScale(-1f,1f);else if(orientation==ExifInterface.ORIENTATION_ROTATE_180)matrix.setRotate(180f);else if(orientation==ExifInterface.ORIENTATION_FLIP_VERTICAL)matrix.setScale(1f,-1f);else if(orientation==ExifInterface.ORIENTATION_TRANSPOSE){matrix.setRotate(90f);matrix.postScale(-1f,1f);}else if(orientation==ExifInterface.ORIENTATION_ROTATE_90)matrix.setRotate(90f);else if(orientation==ExifInterface.ORIENTATION_TRANSVERSE){matrix.setRotate(-90f);matrix.postScale(-1f,1f);}else if(orientation==ExifInterface.ORIENTATION_ROTATE_270)matrix.setRotate(-90f);Bitmap fixed=Bitmap.createBitmap(source,0,0,source.getWidth(),source.getHeight(),matrix,true);ByteArrayOutputStream out=new ByteArrayOutputStream();fixed.compress(Bitmap.CompressFormat.JPEG,95,out);if(fixed!=source)fixed.recycle();source.recycle();return out.toByteArray();}catch(Exception ignored){return jpeg;}}
+
     private void showMessageCamera(){
         final Dialog d=new Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen);
         FrameLayout page=new FrameLayout(this);
@@ -1315,9 +1691,13 @@ reactionsCard.animate().cancel();
                     android.hardware.Camera.getCameraInfo(i,info);
                     if(info.facing==facing[0]){id=i;break;}
                 }
+                android.hardware.Camera.getCameraInfo(id,info);
                 cam[0]=android.hardware.Camera.open(id);
                 cam[0].setPreviewDisplay(surface.getHolder());
-                cam[0].setDisplayOrientation(90);
+                cam[0].setDisplayOrientation(cameraPreviewOrientation(info));
+                android.hardware.Camera.Parameters initial=cam[0].getParameters();
+                initial.setRotation(cameraJpegOrientation(info));
+                cam[0].setParameters(initial);
                 cam[0].startPreview();
             }catch(Exception e){
                 toast("Camera unavailable.");
@@ -1431,7 +1811,7 @@ reactionsCard.animate().cancel();
                 if(cam[0]==null)return;
                 cam[0].takePicture(null,null,(data,c)->{
                     if(data==null)return;
-                    byte[] bytes=data.clone();
+                    byte[] bytes=normalizeCapturedJpeg(data.clone());
                     d.dismiss();
                     main.post(()->showCapturedMediaPreview(bytes,this::showMessageCamera));
                 });
@@ -1483,15 +1863,19 @@ reactionsCard.animate().cancel();
     }
 
     private void makePreviewTransformable(final View target){
-        final float[] x={0},y={0},dist={0}; final boolean[] scale={false};
+        final float[] x={0},y={0},dist={0},downX={0},downY={0};
+        final boolean[] scale={false},moved={false};
+        target.setClickable(true);
         target.setOnTouchListener((v,e)->{
             switch(e.getActionMasked()){
                 case MotionEvent.ACTION_DOWN:
-                    x[0]=e.getRawX();y[0]=e.getRawY();scale[0]=false;v.bringToFront();return true;
+                    x[0]=downX[0]=e.getRawX();
+                    y[0]=downY[0]=e.getRawY();
+                    scale[0]=false;moved[0]=false;v.bringToFront();return true;
                 case MotionEvent.ACTION_POINTER_DOWN:
                     if(e.getPointerCount()>=2){
                         float dx=e.getX(0)-e.getX(1),dy=e.getY(0)-e.getY(1);
-                        dist[0]=(float)Math.sqrt(dx*dx+dy*dy);scale[0]=true;
+                        dist[0]=(float)Math.sqrt(dx*dx+dy*dy);scale[0]=true;moved[0]=true;
                     }return true;
                 case MotionEvent.ACTION_MOVE:
                     if(e.getPointerCount()>=2){
@@ -1501,17 +1885,24 @@ reactionsCard.animate().cancel();
                             float f=d/dist[0],n=Math.max(.35f,Math.min(4f,v.getScaleX()*f));
                             v.setScaleX(n);v.setScaleY(n);
                         }
-                        dist[0]=d;scale[0]=true;
+                        dist[0]=d;scale[0]=true;moved[0]=true;
                     }else if(!scale[0]){
                         float nx=e.getRawX(),ny=e.getRawY();
-                        v.setTranslationX(v.getTranslationX()+nx-x[0]);
-                        v.setTranslationY(v.getTranslationY()+ny-y[0]);
+                        float dx=nx-x[0],dy=ny-y[0];
+                        if(Math.abs(nx-downX[0])>dp(4)||Math.abs(ny-downY[0])>dp(4))moved[0]=true;
+                        v.setTranslationX(v.getTranslationX()+dx);
+                        v.setTranslationY(v.getTranslationY()+dy);
                         x[0]=nx;y[0]=ny;
                     }return true;
                 case MotionEvent.ACTION_POINTER_UP:scale[0]=false;return true;
                 case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:scale[0]=false;dist[0]=0;return true;
-            }return true;
+                    scale[0]=false;dist[0]=0;
+                    if(!moved[0])v.performClick();
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    scale[0]=false;dist[0]=0;return true;
+            }
+            return true;
         });
     }
 
@@ -1527,24 +1918,21 @@ reactionsCard.animate().cancel();
 
     private Typeface previewTextTypeface(int styleIndex){
         switch(styleIndex){
-            case 1: return Typeface.SERIF;
-            case 2: return Typeface.create(Typeface.SANS_SERIF,Typeface.ITALIC);
-            case 3: return Typeface.MONOSPACE;
-            case 4: return Typeface.create(Typeface.SANS_SERIF,Typeface.BOLD);
-            case 5: return Typeface.DEFAULT_BOLD;
-            case 6: return Typeface.create("sans-serif-condensed",Typeface.NORMAL);
-            case 7: return Typeface.create("sans-serif-black",Typeface.NORMAL);
+            case 1: return Typeface.create(Typeface.SERIF,Typeface.NORMAL);
+            case 2: return Typeface.create("cursive",Typeface.ITALIC);
+            case 3: return Typeface.create(Typeface.MONOSPACE,Typeface.NORMAL);
+            case 4: return Typeface.create("sans-serif-black",Typeface.BOLD);
+            case 5: return Typeface.create("sans-serif-condensed",Typeface.NORMAL);
             default: return Typeface.create(Typeface.SANS_SERIF,Typeface.BOLD);
         }
     }
 
     private float previewTextSize(int styleIndex){
         switch(styleIndex){
-            case 2: return 34f;
-            case 4: return 38f;
-            case 5: return 32f;
-            case 7: return 30f;
-            default: return 36f;
+            case 2:return 38f;
+            case 4:return 38f;
+            case 5:return 34f;
+            default:return 36f;
         }
     }
 
@@ -1626,6 +2014,11 @@ reactionsCard.animate().cancel();
         input.setMinLines(1);
         input.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
         input.setSingleLine(false);
+        if(previewTextPrefill!=null&&!previewTextPrefill.isEmpty()){
+            input.setText(previewTextPrefill);
+            input.setSelection(input.length());
+            previewTextPrefill="";
+        }
         FrameLayout.LayoutParams ilp=new FrameLayout.LayoutParams(-1,-2,Gravity.CENTER);
         ilp.leftMargin=dp(46);
         ilp.rightMargin=dp(46);
@@ -1676,17 +2069,16 @@ reactionsCard.animate().cancel();
             Color.rgb(255,73,120),Color.rgb(255,147,41),Color.rgb(255,214,51),Color.rgb(0,189,255),
             Color.rgb(52,235,183),Color.rgb(255,0,0),Color.rgb(255,255,255)
         };
+        final java.util.ArrayList<View> colorDots=new java.util.ArrayList<>();
         for(int c:palette){
             View dot=new View(this);
-            GradientDrawable g=new GradientDrawable();
-            g.setShape(GradientDrawable.OVAL);
-            g.setColor(c);
-            g.setStroke(dp(1),Color.WHITE);
-            dot.setBackground(g);
+            dot.setTag(c);
+            styleColorSwatch(dot,c,c==textColor[0]);
             LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(38),dp(38));
             lp.leftMargin=dp(6);lp.rightMargin=dp(6);
             colorRow.addView(dot,lp);
-            dot.setOnClickListener(v->{textColor[0]=c;applyPreviewTextStyle(input,styleIndex[0],textColor[0],boxed[0],align[0]);});
+            colorDots.add(dot);
+            dot.setOnClickListener(v->{textColor[0]=c;for(View swatch:colorDots)styleColorSwatch(swatch,(Integer)swatch.getTag(),swatch==v);applyPreviewTextStyle(input,styleIndex[0],textColor[0],boxed[0],align[0]);});
         }
 
         final HorizontalScrollView stylesScroll=new HorizontalScrollView(this);
@@ -1699,11 +2091,11 @@ reactionsCard.animate().cancel();
         styleLp.topMargin=dp(6);
         bottom.addView(stylesScroll,styleLp);
 
-        final String[] styles={"Modern","Classic","Signature","Editor","Poster","Bubble","Deco","Squeeze"};
+        final String[] styles={"Modern","Classic","Signature","Editor","Poster","Deco"};
         final java.util.ArrayList<TextView> chips=new java.util.ArrayList<>();
         for(int i=0;i<styles.length;i++){
             TextView chip=buildTextStyleChip(styles[i]);
-            if(i==0) chip.setTypeface(Typeface.DEFAULT_BOLD);
+            chip.setTypeface(previewTextTypeface(i));
             LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-2,dp(42));
             cp.leftMargin=dp(4);cp.rightMargin=dp(4);
             styleRow.addView(chip,cp);
@@ -1736,11 +2128,11 @@ reactionsCard.animate().cancel();
         ctrlAa.setBackground(bg(Color.rgb(98,92,106),12));
         controls.addView(ctrlAa,new LinearLayout.LayoutParams(dp(72),dp(42)));
 
-        TextView ctrlColor=text("◉",24,Color.WHITE,Typeface.NORMAL);ctrlColor.setGravity(Gravity.CENTER);
+        TextView ctrlColor=text("",18,Color.WHITE,Typeface.NORMAL);ctrlColor.setGravity(Gravity.CENTER);
         GradientDrawable colorBg=new GradientDrawable(GradientDrawable.Orientation.BL_TR,new int[]{Color.RED,Color.YELLOW,Color.GREEN,Color.CYAN,Color.BLUE,Color.MAGENTA});
-        colorBg.setCornerRadius(dp(21));
+        colorBg.setCornerRadius(dp(15));
         ctrlColor.setBackground(colorBg);
-        LinearLayout.LayoutParams c1=new LinearLayout.LayoutParams(dp(42),dp(42));c1.leftMargin=dp(8);
+        LinearLayout.LayoutParams c1=new LinearLayout.LayoutParams(dp(30),dp(30));c1.leftMargin=dp(10);c1.rightMargin=dp(6);
         controls.addView(ctrlColor,c1);
 
         TextView ctrlAlign=text("☰",22,Color.WHITE,Typeface.NORMAL);ctrlAlign.setGravity(Gravity.CENTER);
@@ -1784,41 +2176,43 @@ reactionsCard.animate().cancel();
         });
 
         done.setOnClickListener(v->{
-            Bitmap out=Bitmap.createBitmap(baseBmp.getWidth(),baseBmp.getHeight(),Bitmap.Config.ARGB_8888);
-            Canvas c=new Canvas(out);
-            c.drawBitmap(baseBmp,0,0,null);
-            String value=input.getText().toString();
-            if(value!=null && !value.trim().isEmpty()){
-                android.text.TextPaint tp=input.getPaint();
-                tp.setColor(textColor[0]);
-                tp.setTextSize(input.getTextSize());
-                tp.setTypeface(previewTextTypeface(styleIndex[0]));
-                tp.setAntiAlias(true);
-                tp.setTextAlign(align[0]==2?Paint.Align.RIGHT:(align[0]==1?Paint.Align.LEFT:Paint.Align.CENTER));
-                android.text.StaticLayout layout=new android.text.StaticLayout(value,tp,out.getWidth()-dp(80),android.text.Layout.Alignment.ALIGN_CENTER,1.0f,0f,false);
-                float tx=out.getWidth()/2f;
-                float ty=(out.getHeight()-layout.getHeight())/2f;
-                c.save();
-                if(align[0]==1) tx=dp(40);
-                if(align[0]==2) tx=out.getWidth()-dp(40);
-                c.translate(tx,ty);
-                if(boxed[0]){
-                    Paint boxPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
-                    boxPaint.setColor(Color.argb(175,0,0,0));
-                    android.graphics.RectF rf=new android.graphics.RectF(-dp(14),-dp(10),layout.getWidth()+dp(14),layout.getHeight()+dp(10));
-                    if(align[0]==0) rf.offset(-layout.getWidth()/2f,0);
-                    else if(align[0]==2) rf.offset(-layout.getWidth(),0);
-                    c.drawRoundRect(rf,dp(18),dp(18),boxPaint);
-                }
-                if(align[0]==0) c.translate(-layout.getWidth()/2f,0);
-                else if(align[0]==2) c.translate(-layout.getWidth(),0);
-                layout.draw(c);
-                c.restore();
+            String value=input.getText().toString().trim();
+            if(value.isEmpty()){
+                d.dismiss();
+                return;
             }
-            ByteArrayOutputStream bos=new ByteArrayOutputStream();
-            out.compress(Bitmap.CompressFormat.JPEG,95,bos);
+
+            final TextView placed=text(
+                value,
+                input.getTextSize()/getResources().getDisplayMetrics().scaledDensity,
+                textColor[0],
+                Typeface.BOLD
+            );
+            placed.setTextColor(textColor[0]);
+            placed.setTypeface(previewTextTypeface(styleIndex[0]));
+            placed.setGravity(input.getGravity());
+            placed.setPadding(dp(8),dp(4),dp(8),dp(4));
+            placed.setShadowLayer(dp(3),0,dp(1),Color.argb(170,0,0,0));
+
+            if(boxed[0]){
+                placed.setBackground(bg(Color.argb(175,0,0,0),18));
+            }else{
+                placed.setBackgroundColor(Color.TRANSPARENT);
+            }
+
+            composition.addView(
+                placed,
+                new FrameLayout.LayoutParams(-2,-2,Gravity.CENTER)
+            );
+
+            placed.setOnClickListener(clickedView->{
+                previewTextPrefill=placed.getText().toString();
+                composition.removeView(placed);
+                showCapturedTextEditor(composition,backDestination);
+            });
+            makePreviewTransformable(placed);
+
             d.dismiss();
-            showCapturedMediaPreview(bos.toByteArray(),backDestination);
         });
 
         d.setContentView(page);
@@ -1950,10 +2344,10 @@ reactionsCard.animate().cancel();
         LinearLayout tools=new LinearLayout(this);
         tools.setGravity(Gravity.CENTER);
 
-        ImageButton penBrush=icon(R.drawable.ic_draw_tool_brush,34,Color.WHITE);penBrush.setBackground(bg(Color.argb(70,255,255,255),19));
-        ImageButton penHi=icon(R.drawable.ic_draw_tool_highlighter,34,Color.WHITE);penHi.setBackgroundColor(Color.TRANSPARENT);
-        ImageButton penMarker=icon(R.drawable.ic_draw_tool_marker,34,Color.WHITE);penMarker.setBackgroundColor(Color.TRANSPARENT);
-        ImageButton penErase=icon(R.drawable.ic_draw_tool_eraser,34,Color.WHITE);penErase.setBackgroundColor(Color.TRANSPARENT);
+        ImageButton penBrush=icon(R.drawable.ic_draw_pen_brush_ref,36,Color.WHITE);penBrush.clearColorFilter();penBrush.setBackgroundColor(Color.TRANSPARENT);
+        ImageButton penHi=icon(R.drawable.ic_draw_pen_spray_ref,36,Color.WHITE);penHi.clearColorFilter();penHi.setBackgroundColor(Color.TRANSPARENT);
+        ImageButton penMarker=icon(R.drawable.ic_draw_pen_marker_ref,36,Color.WHITE);penMarker.clearColorFilter();penMarker.setBackgroundColor(Color.TRANSPARENT);
+        ImageButton penErase=icon(R.drawable.ic_draw_pen_eraser_ref,36,Color.WHITE);penErase.clearColorFilter();penErase.setBackgroundColor(Color.TRANSPARENT);
 
         LinearLayout.LayoutParams ib=new LinearLayout.LayoutParams(dp(38),dp(38));
         tools.addView(penBrush,ib);
@@ -1982,16 +2376,14 @@ reactionsCard.animate().cancel();
         undo.setOnClickListener(v->drawView.undo());
 
         done.setOnClickListener(v->{
-            Bitmap out=Bitmap.createBitmap(baseBmp.getWidth(),baseBmp.getHeight(),Bitmap.Config.ARGB_8888);
-            Canvas c=new Canvas(out);
-            c.drawBitmap(baseBmp,0,0,null);
-            Bitmap strokes=Bitmap.createBitmap(drawView.getWidth(),drawView.getHeight(),Bitmap.Config.ARGB_8888);
-            drawView.draw(new Canvas(strokes));
-            c.drawBitmap(strokes,null,new Rect(0,0,out.getWidth(),out.getHeight()),null);
-            ByteArrayOutputStream bos=new ByteArrayOutputStream();
-            out.compress(Bitmap.CompressFormat.JPEG,95,bos);
+            Bitmap strokes=drawView.exportBitmap();
+            if(strokes!=null){
+                ImageView layer=new ImageView(this);
+                layer.setScaleType(ImageView.ScaleType.FIT_XY);
+                layer.setImageBitmap(strokes);
+                composition.addView(layer,new FrameLayout.LayoutParams(-1,-1));
+            }
             d.dismiss();
-            showCapturedMediaPreview(bos.toByteArray(),backDestination);
         });
 
         HorizontalScrollView colorsScroll=new HorizontalScrollView(this);
@@ -2002,58 +2394,72 @@ reactionsCard.animate().cancel();
         colorsScroll.addView(colors,new HorizontalScrollView.LayoutParams(-2,-1));
 
         int[] palette={
-            Color.WHITE,Color.BLACK,Color.rgb(190,0,205),Color.rgb(135,88,255),Color.rgb(110,74,242),Color.rgb(194,225,255),
-            Color.rgb(25,196,29),Color.rgb(72,219,33),Color.rgb(166,231,45),Color.rgb(198,233,70),
-            Color.rgb(255,49,89),Color.rgb(255,95,95),Color.rgb(255,139,30),Color.rgb(255,184,43),Color.rgb(255,221,44),
-            Color.rgb(0,189,255),Color.rgb(52,235,183),Color.rgb(0,115,255)
+            Color.WHITE,Color.BLACK,0xff8e8e93,0xffaeaeb2,
+            0xffbf5af2,0xffaf52de,0xffff2d55,0xffff375f,0xffff453a,
+            0xffff6961,0xffff7a00,0xffff9f0a,0xffffd60a,0xffffe66d,
+            0xffaeea00,0xff32d74b,0xff30d158,0xff00c7be,0xff64d2ff,
+            0xff0a84ff,0xff007aff,0xff5e5ce6,0xff5856d6,0xffc7d8ff
         };
+        final java.util.ArrayList<View> drawColorDots=new java.util.ArrayList<>();
         for(int color:palette){
             View dot=new View(this);
-            GradientDrawable g=new GradientDrawable();
-            g.setShape(GradientDrawable.OVAL);
-            g.setColor(color);
-            g.setStroke(dp(1),Color.WHITE);
-            dot.setBackground(g);
+            dot.setTag(color);
+            styleColorSwatch(dot,color,color==Color.WHITE);
             LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(34),dp(34));
             lp.leftMargin=dp(6);lp.rightMargin=dp(6);
             colors.addView(dot,lp);
-            dot.setOnClickListener(v->drawView.setDrawColor(color));
+            drawColorDots.add(dot);
+            dot.setOnClickListener(v->{drawView.setDrawColor(color);for(View swatch:drawColorDots)styleColorSwatch(swatch,(Integer)swatch.getTag(),swatch==v);});
         }
 
         FrameLayout.LayoutParams colorsLp=new FrameLayout.LayoutParams(-1,dp(54),Gravity.BOTTOM);
         colorsLp.leftMargin=dp(52);colorsLp.rightMargin=dp(8);colorsLp.bottomMargin=dp(24);
         page.addView(colorsScroll,colorsLp);
 
+        FrameLayout sliderTouch=new FrameLayout(this);
+        sliderTouch.setBackgroundColor(Color.TRANSPARENT);
+        FrameLayout.LayoutParams sliderLp=
+            new FrameLayout.LayoutParams(dp(56),dp(306),Gravity.START|Gravity.CENTER_VERTICAL);
+        page.addView(sliderTouch,sliderLp);
+
         View track=new View(this);
-        GradientDrawable trackBg=new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,new int[]{Color.WHITE,Color.WHITE,Color.rgb(180,180,180),Color.rgb(105,105,105)});
-        trackBg.setCornerRadius(dp(8));
+        GradientDrawable trackBg=new GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            new int[]{Color.WHITE,Color.WHITE,Color.rgb(180,180,180),Color.rgb(105,105,105)}
+        );
+        trackBg.setCornerRadius(dp(4));
         track.setBackground(trackBg);
-        FrameLayout.LayoutParams trackLp=new FrameLayout.LayoutParams(dp(8),dp(286),Gravity.START|Gravity.CENTER_VERTICAL);
-        trackLp.leftMargin=dp(24);
-        page.addView(track,trackLp);
+        sliderTouch.addView(
+            track,
+            new FrameLayout.LayoutParams(dp(5),dp(286),Gravity.CENTER)
+        );
 
         View knob=new View(this);
         GradientDrawable knobBg=new GradientDrawable();
         knobBg.setShape(GradientDrawable.OVAL);
         knobBg.setColor(Color.WHITE);
         knob.setBackground(knobBg);
-        FrameLayout.LayoutParams knobLp=new FrameLayout.LayoutParams(dp(22),dp(22),Gravity.START|Gravity.CENTER_VERTICAL);
-        knobLp.leftMargin=dp(17);
-        page.addView(knob,knobLp);
+        sliderTouch.addView(
+            knob,
+            new FrameLayout.LayoutParams(dp(22),dp(22),Gravity.CENTER)
+        );
 
-        knob.setOnTouchListener((v,e)->{
-            if(e.getActionMasked()==MotionEvent.ACTION_DOWN||e.getActionMasked()==MotionEvent.ACTION_MOVE){
-                float center=page.getHeight()/2f;
+        View.OnTouchListener sliderListener=(v,e)->{
+            if(e.getActionMasked()==MotionEvent.ACTION_DOWN||
+               e.getActionMasked()==MotionEvent.ACTION_MOVE){
+                float center=sliderTouch.getHeight()/2f;
                 float min=center-dp(143),max=center+dp(143);
-                float yy=Math.max(min,Math.min(max,e.getRawY()));
-                v.setTranslationY(yy-center);
+                float yy=Math.max(min,Math.min(max,e.getY()));
+                knob.setTranslationY(yy-center);
                 float progress=(yy-min)/Math.max(1f,max-min);
                 float width=dp(20)-(progress*dp(17));
                 drawView.setStrokeWidth(Math.max(dp(2),width));
                 return true;
             }
             return true;
-        });
+        };
+        sliderTouch.setOnTouchListener(sliderListener);
+        knob.setOnTouchListener(sliderListener);
 
         d.setContentView(page);
         d.show();
@@ -2061,18 +2467,21 @@ reactionsCard.animate().cancel();
         if(w!=null){w.setLayout(-1,-1);w.setStatusBarColor(Color.BLACK);w.setNavigationBarColor(Color.BLACK);}    
     }
 
+    private void showDiscardPhotoConfirmation(final Dialog preview,final Runnable discardAction){final Dialog confirm=new Dialog(this);confirm.requestWindowFeature(Window.FEATURE_NO_TITLE);FrameLayout overlay=new FrameLayout(this);overlay.setBackgroundColor(Color.argb(100,0,0,0));LinearLayout card=new LinearLayout(this);card.setOrientation(LinearLayout.VERTICAL);card.setGravity(Gravity.CENTER_HORIZONTAL);card.setBackground(bg(Color.rgb(30,35,39),16));FrameLayout.LayoutParams cardLp=new FrameLayout.LayoutParams(dp(270),-2,Gravity.CENTER);overlay.addView(card,cardLp);TextView title=text("Discard photo?",18,Color.WHITE,Typeface.BOLD);title.setGravity(Gravity.CENTER);LinearLayout.LayoutParams titleLp=new LinearLayout.LayoutParams(-1,dp(44));titleLp.topMargin=dp(15);card.addView(title,titleLp);TextView body=text("If you go back now, you\nwill lose your photo.",16,Color.WHITE,Typeface.NORMAL);body.setGravity(Gravity.CENTER);body.setLineSpacing(0,1.03f);LinearLayout.LayoutParams bodyLp=new LinearLayout.LayoutParams(-1,dp(72));bodyLp.leftMargin=dp(15);bodyLp.rightMargin=dp(15);bodyLp.bottomMargin=dp(5);card.addView(body,bodyLp);View firstLine=new View(this);firstLine.setBackgroundColor(Color.rgb(49,54,58));card.addView(firstLine,new LinearLayout.LayoutParams(-1,dp(1)));TextView discard=text("Discard",17,Color.rgb(255,38,58),Typeface.BOLD);discard.setGravity(Gravity.CENTER);card.addView(discard,new LinearLayout.LayoutParams(-1,dp(52)));View secondLine=new View(this);secondLine.setBackgroundColor(Color.rgb(49,54,58));card.addView(secondLine,new LinearLayout.LayoutParams(-1,dp(1)));TextView keep=text("Keep editing",17,Color.WHITE,Typeface.NORMAL);keep.setGravity(Gravity.CENTER);card.addView(keep,new LinearLayout.LayoutParams(-1,dp(52)));discard.setOnClickListener(v->{confirm.dismiss();if(discardAction!=null)discardAction.run();});keep.setOnClickListener(v->confirm.dismiss());overlay.setOnClickListener(v->{if(v==overlay)confirm.dismiss();});confirm.setContentView(overlay);confirm.show();Window window=confirm.getWindow();if(window!=null){window.setBackgroundDrawableResource(android.R.color.transparent);window.setDimAmount(0);window.setLayout(-1,-1);}}
+
     private void showCapturedMediaPreview(final byte[] bytes,final Runnable backDestination){
         if(bytes==null||bytes.length==0)return;
         final Dialog d=new Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen);
         FrameLayout page=new FrameLayout(this);page.setBackgroundColor(Color.BLACK);
         FrameLayout composition=new FrameLayout(this);composition.setBackgroundColor(Color.BLACK);composition.setClipChildren(false);
-        ImageView photo=new ImageView(this);photo.setScaleType(ImageView.ScaleType.CENTER_CROP);photo.setImageBitmap(BitmapFactory.decodeByteArray(bytes,0,bytes.length));
+        ImageView photo=new ImageView(this);photo.setScaleType(ImageView.ScaleType.FIT_CENTER);photo.setImageBitmap(BitmapFactory.decodeByteArray(bytes,0,bytes.length));
         composition.addView(photo,new FrameLayout.LayoutParams(-1,-1));
         FrameLayout.LayoutParams cp0=new FrameLayout.LayoutParams(-1,-1);cp0.topMargin=dp(46);cp0.bottomMargin=dp(110);page.addView(composition,cp0);
 
         ImageButton back=icon(R.drawable.ic_camera_back_ref,46,Color.WHITE);back.setBackgroundColor(Color.TRANSPARENT);
         FrameLayout.LayoutParams bp=new FrameLayout.LayoutParams(dp(46),dp(46),Gravity.TOP|Gravity.START);bp.leftMargin=dp(10);bp.topMargin=dp(58);page.addView(back,bp);
-        back.setOnClickListener(v->{if(backDestination!=null)backDestination.run();main.postDelayed(d::dismiss,140);});
+        Runnable requestDiscard=()->showDiscardPhotoConfirmation(d,()->{if(backDestination!=null)backDestination.run();main.postDelayed(d::dismiss,140);});
+        back.setOnClickListener(v->requestDiscard.run());
 
         LinearLayout tools=new LinearLayout(this);tools.setOrientation(LinearLayout.VERTICAL);tools.setGravity(Gravity.CENTER_HORIZONTAL);
         TextView aa=text("Aa",20,Color.WHITE,Typeface.NORMAL);aa.setGravity(Gravity.CENTER);aa.setBackground(bg(Color.rgb(36,37,41),20));
@@ -2097,7 +2506,7 @@ reactionsCard.animate().cancel();
         }catch(Exception e){toast("Couldn't save photo.");}});
 
         int[] mode={2};TextView view=text("View twice",14,Color.WHITE,Typeface.BOLD);view.setGravity(Gravity.CENTER_VERTICAL);setCapturedViewModeButton(view,2);
-        view.setPadding(dp(22),0,dp(18),0);view.setCompoundDrawablePadding(dp(10));
+        view.setPadding(dp(31),0,dp(12),0);view.setCompoundDrawablePadding(dp(7));
         view.setBackground(bg(Color.rgb(34,35,39),22));FrameLayout.LayoutParams vp=new FrameLayout.LayoutParams(dp(166),dp(46),Gravity.BOTTOM|Gravity.START);
         vp.leftMargin=dp(14);vp.bottomMargin=dp(18);page.addView(view,vp);view.setOnClickListener(v->showCapturedViewModeMenu(view,mode));
 
@@ -2106,9 +2515,23 @@ reactionsCard.animate().cancel();
         send.addView(avatar,new LinearLayout.LayoutParams(dp(30),dp(30)));TextView st=text("Send",15,Color.rgb(35,35,35),Typeface.BOLD);st.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams stp=new LinearLayout.LayoutParams(-2,dp(40));stp.leftMargin=dp(6);send.addView(st,stp);
         FrameLayout.LayoutParams sendp=new FrameLayout.LayoutParams(dp(112),dp(46),Gravity.BOTTOM|Gravity.END);sendp.rightMargin=dp(14);sendp.bottomMargin=dp(18);page.addView(send,sendp);
-        send.setOnClickListener(v->{byte[] rendered=renderCapturedComposition(composition);if(rendered==null)return;d.dismiss();
-            uploadAttachment(rendered,"camera-"+System.currentTimeMillis()+".jpg","image/jpeg");});
+        final boolean[] captureSending={false};
+        send.setOnClickListener(v->{
+            if(captureSending[0])return;
+            byte[] rendered=renderCapturedComposition(composition);
+            if(rendered==null)return;
+            captureSending[0]=true;
+            send.setEnabled(false);
+            d.dismiss();
+            uploadAttachment(
+                rendered,
+                "camera-"+System.currentTimeMillis()+".jpg",
+                "image/jpeg",
+                mode[0]
+            );
+        });
 
+        d.setOnKeyListener((dialog,keyCode,event)->{if(keyCode==android.view.KeyEvent.KEYCODE_BACK&&event.getAction()==android.view.KeyEvent.ACTION_UP){requestDiscard.run();return true;}return false;});
         d.setContentView(page);d.show();Window w=d.getWindow();if(w!=null){w.setLayout(-1,-1);w.setStatusBarColor(Color.BLACK);w.setNavigationBarColor(Color.BLACK);}
     }
 
@@ -2147,7 +2570,8 @@ reactionsCard.animate().cancel();
                         ?R.drawable.ic_camera_view_twice_ref
                         :R.drawable.ic_camera_view_unlimited_ref
             );
-            icon.setPadding(dp(10),dp(10),dp(10),dp(10));
+            icon.setPadding(dp(value==0?7:10),dp(value==0?7:10),dp(value==0?7:10),dp(value==0?7:10));
+            icon.setTranslationX(value==0?dp(5):0);
             icon.setTranslationY(dp(2));
             row.addView(icon,new LinearLayout.LayoutParams(dp(44),dp(62)));
 
@@ -2183,15 +2607,17 @@ reactionsCard.animate().cancel();
 
     private void setCapturedViewModeButton(TextView button,int value){
         if(button==null)return;
+        if(value==0&&"media-picker-mode-button".equals(button.getTag())){button.setCompoundDrawables(null,null,null,null);button.setCompoundDrawablePadding(0);button.setText("Unlimited views");return;}
         int drawable=value==1
             ?R.drawable.ic_camera_view_once_ref
             :value==2
                 ?R.drawable.ic_camera_view_twice_ref
                 :R.drawable.ic_camera_view_unlimited_ref;
         android.graphics.drawable.Drawable icon=getDrawable(drawable);
-        if(icon!=null)icon.setBounds(0,0,dp(19),dp(19));
+        if(value==0&&icon!=null)icon=new android.graphics.drawable.InsetDrawable(icon,dp(3),dp(1),0,0);
+        if(icon!=null)icon.setBounds(0,0,dp(value==0?23:19),dp(value==0?23:19));
         button.setCompoundDrawables(icon,null,null,null);
-        button.setCompoundDrawablePadding(0);
+        button.setCompoundDrawablePadding(dp(6));
         button.setText(value==1?"View once":value==2?"View twice":"Unlimited");
     }
 
@@ -2439,7 +2865,7 @@ reactionsCard.animate().cancel();
 
     private boolean hasInstagramMediaPermission(){
         if(Build.VERSION.SDK_INT>=33){
-            return checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES)==PackageManager.PERMISSION_GRANTED ||
+            return checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES)==PackageManager.PERMISSION_GRANTED &&
                    checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO)==PackageManager.PERMISSION_GRANTED;
         }
         return checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE)==PackageManager.PERMISSION_GRANTED;
@@ -2482,7 +2908,7 @@ reactionsCard.animate().cancel();
         }
 
         // Keep normal conversation padding only.
-        list.setPadding(dp(10),dp(12),dp(10),dp(26));
+        list.setPadding(0,dp(12),0,dp(5));
         list.setClipToPadding(true);
 
         // Move the entire conversation by exactly the same distance
@@ -2513,7 +2939,7 @@ reactionsCard.animate().cancel();
             if(replyBar!=null)replyBar.setTranslationY(0);
             if(list!=null){
                 list.setTranslationY(0);
-                list.setPadding(dp(10),dp(12),dp(10),dp(26));
+                list.setPadding(0,dp(12),0,dp(5));
             }
         }
 
@@ -2641,6 +3067,7 @@ reactionsCard.animate().cancel();
 
         final List<Uri> selectedUris=new ArrayList<>();
         final List<Boolean> selectedVideos=new ArrayList<>();
+        final int[] selectedViewMode={0};
 
         LinearLayout selectedBar=new LinearLayout(this);
         selectedBar.setGravity(Gravity.CENTER_VERTICAL);
@@ -2662,6 +3089,17 @@ reactionsCard.animate().cancel();
             selectedScroll,
             new LinearLayout.LayoutParams(0,dp(58),1)
         );
+
+        TextView selectedMode=text("Unlimited views",12.5f,Color.WHITE,Typeface.BOLD);
+        selectedMode.setGravity(Gravity.CENTER);
+        selectedMode.setPadding(dp(8),0,dp(8),0);
+        selectedMode.setBackground(bg(Color.rgb(58,58,62),17));
+        selectedMode.setTag("media-picker-mode-button");
+        setCapturedViewModeButton(selectedMode,0);
+        LinearLayout.LayoutParams selectedModeLp=new LinearLayout.LayoutParams(dp(124),dp(34));
+        selectedModeLp.leftMargin=dp(4);
+        selectedBar.addView(selectedMode,selectedModeLp);
+        selectedMode.setOnClickListener(v->showCapturedViewModeMenu(selectedMode,selectedViewMode));
 
         ImageButton sendSelected=icon(R.drawable.msg_send_enabled,28,Color.WHITE);
         sendSelected.setImageResource(R.drawable.msg_send_enabled);
@@ -2739,38 +3177,29 @@ reactionsCard.animate().cancel();
 
             final List<Uri> sendUris=new ArrayList<>(selectedUris);
             final List<Boolean> sendVideos=new ArrayList<>(selectedVideos);
+            final int sendViewMode=selectedViewMode[0];
+            final String mediaBatchPrefix=sendUris.size()>1?"__batch_"+UUID.randomUUID()+"__":"";
 
             selectedUris.clear();
             selectedVideos.clear();
             renderSelectedHolder[0].run();
 
-            for(int si=0;si<sendUris.size();si++){
-                final Uri sendUri=sendUris.get(si);
-                final boolean sendVideo=sendVideos.get(si);
-
-                new Thread(()->{
-                    try{
-                        String name=queryName(sendUri);
-                        String mime=getContentResolver().getType(sendUri);
-                        byte[] bytes=readAll(
-                            getContentResolver().openInputStream(sendUri)
-                        );
-
-                        if(bytes.length>27*1024*1024){
-                            main.post(()->toast("File is too large."));
-                            return;
-                        }
-
-                        main.post(()->uploadAttachment(
-                            bytes,
-                            name,
-                            mime==null?(sendVideo?"video/mp4":"image/jpeg"):mime
-                        ));
-                    }catch(Exception ex){
-                        main.post(()->toast(ex.getMessage()));
-                    }
-                }).start();
-            }
+            new Thread(()->{
+                List<byte[]> batchBytes=new ArrayList<>();
+                List<String> batchNames=new ArrayList<>(),batchMimes=new ArrayList<>();
+                for(int si=0;si<sendUris.size();si++)try{
+                    Uri sendUri=sendUris.get(si);boolean sendVideo=sendVideos.get(si);
+                    String name=mediaBatchPrefix+queryName(sendUri),mime=getContentResolver().getType(sendUri);
+                    byte[] bytes=readAll(getContentResolver().openInputStream(sendUri));
+                    long maxBytes=sendVideo?180L*1024L*1024L:27L*1024L*1024L;if(bytes.length>maxBytes){main.post(()->toast(sendVideo?"Video is too large.":"File is too large."));continue;}
+                    if(sendVideo){final byte[] videoBytes=bytes;final String videoName=name;main.post(()->compressAndUploadVideo(sendUri,videoBytes,videoName,sendViewMode,false));continue;}
+                    batchBytes.add(bytes);batchNames.add(name);batchMimes.add(mime==null?(sendVideo?"video/mp4":"image/jpeg"):mime);
+                }catch(Exception ex){main.post(()->toast(ex.getMessage()));}
+                main.post(()->{
+                    for(int i=0;i<batchBytes.size();i++)uploadAttachment(batchBytes.get(i),batchNames.get(i),batchMimes.get(i),sendViewMode,true);
+                    if(!batchBytes.isEmpty()){if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();scrollToAbsoluteBottom();}cacheMessagesNow();}
+                });
+            }).start();
 
             dismissInstagramMediaPicker(host);
         });
@@ -3262,7 +3691,7 @@ reactionsCard.animate().cancel();
                     tile.setOnClickListener(v->{
                         if(fullScreenPicker&&previewOrigin>0){
                             if(video){
-                                previewSelectedMedia(uri,true);
+                                openPickedVideoAsCaptured(uri,previewOrigin,host);
                             }else{
                                 openPickedPhotoAsCaptured(uri,previewOrigin,host);
                             }
@@ -3302,6 +3731,30 @@ reactionsCard.animate().cancel();
             }catch(Exception e){
                 main.post(()->toast(e.getMessage()));
             }
+        }).start();
+    }
+
+    private void openPickedVideoAsCaptured(final Uri uri,final int previewOrigin,final View host){
+        if(uri==null)return;
+        new Thread(()->{
+            try{
+                final byte[] bytes=readAll(getContentResolver().openInputStream(uri));
+                if(bytes.length==0)throw new Exception("Could not read this video.");
+                if(bytes.length>180L*1024L*1024L)throw new Exception("Video is too large.");
+                String resolvedName=queryName(uri),resolvedMime=getContentResolver().getType(uri);
+                final String name=resolvedName==null||resolvedName.trim().isEmpty()?"video-"+System.currentTimeMillis()+".mp4":resolvedName;
+                final String mime=resolvedMime==null||!resolvedMime.toLowerCase(Locale.ROOT).startsWith("video/")?"video/mp4":resolvedMime;
+                main.post(()->{
+                    closeInstagramMediaPickerImmediately(host);
+                    final Dialog dialog=new Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+                    FrameLayout page=new FrameLayout(this);page.setBackgroundColor(Color.BLACK);
+                    VideoView video=new VideoView(this);video.setVideoURI(uri);video.setOnPreparedListener(mp->{mp.setLooping(true);video.start();});page.addView(video,new FrameLayout.LayoutParams(-1,-1));
+                    ImageButton back=icon(R.drawable.ic_msg_back,42,Color.WHITE);FrameLayout.LayoutParams backLp=new FrameLayout.LayoutParams(dp(42),dp(42),Gravity.TOP|Gravity.START);backLp.leftMargin=dp(9);backLp.topMargin=dp(10);page.addView(back,backLp);back.setOnClickListener(v->{dialog.dismiss();if(previewOrigin==2)showMessageTextCreate();else showMessageCamera();});
+                    int[] mode={2};TextView view=text("View twice",14,Color.WHITE,Typeface.BOLD);view.setGravity(Gravity.CENTER_VERTICAL);setCapturedViewModeButton(view,2);view.setPadding(dp(31),0,dp(12),0);view.setCompoundDrawablePadding(dp(7));view.setBackground(bg(Color.rgb(34,35,39),22));FrameLayout.LayoutParams viewLp=new FrameLayout.LayoutParams(dp(166),dp(46),Gravity.BOTTOM|Gravity.START);viewLp.leftMargin=dp(14);viewLp.bottomMargin=dp(18);page.addView(view,viewLp);view.setOnClickListener(v->showCapturedViewModeMenu(view,mode));
+                    LinearLayout send=new LinearLayout(this);send.setGravity(Gravity.CENTER);send.setBackground(bg(Color.WHITE,23));TextView sendText=text("Send",15,Color.rgb(35,35,35),Typeface.BOLD);sendText.setGravity(Gravity.CENTER);send.addView(sendText,new LinearLayout.LayoutParams(-1,-1));FrameLayout.LayoutParams sendLp=new FrameLayout.LayoutParams(dp(104),dp(46),Gravity.BOTTOM|Gravity.END);sendLp.rightMargin=dp(14);sendLp.bottomMargin=dp(18);page.addView(send,sendLp);send.setOnClickListener(v->{send.setEnabled(false);dialog.dismiss();compressAndUploadVideo(uri,bytes,name,mode[0],false);});
+                    dialog.setOnDismissListener(x->{try{video.stopPlayback();}catch(Exception ignored){}});dialog.setContentView(page);dialog.show();Window window=dialog.getWindow();if(window!=null){window.setLayout(-1,-1);window.setStatusBarColor(Color.BLACK);window.setNavigationBarColor(Color.BLACK);}
+                });
+            }catch(Exception error){main.post(()->toast(error.getMessage()));}
         }).start();
     }
 
@@ -3503,10 +3956,55 @@ reactionsCard.animate().cancel();
     }
 
     private void pickAttachment(){Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("*/*");i.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"image/*","video/*","audio/*","application/pdf","text/plain","application/zip"});startActivityForResult(i,PICK_FILE);}
-    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){super.onActivityResult(requestCode,resultCode,data);if(resultCode!=RESULT_OK||data==null||data.getData()==null)return;Uri uri=data.getData();if(requestCode==PICK_GROUP_IMAGE){try{byte[] bytes=readAll(getContentResolver().openInputStream(uri));Bitmap src=BitmapFactory.decodeByteArray(bytes,0,bytes.length);if(src==null)throw new Exception("Could not read this image.");int side=Math.min(src.getWidth(),src.getHeight()),sx=(src.getWidth()-side)/2,sy=(src.getHeight()-side)/2;Bitmap crop=Bitmap.createBitmap(src,sx,sy,side,side);Bitmap small=Bitmap.createScaledBitmap(crop,240,240,true);ByteArrayOutputStream out=new ByteArrayOutputStream();small.compress(Bitmap.CompressFormat.JPEG,72,out);groupEditImageData="data:image/jpeg;base64,"+Base64.encodeToString(out.toByteArray(),Base64.NO_WRAP);groupEditEmoji="";if(groupEditConversation!=null)showGroupEditor(groupEditConversation);}catch(Exception e){toast(e.getMessage());}return;}if(requestCode!=PICK_FILE)return;try{String name=queryName(uri),mime=getContentResolver().getType(uri);byte[] bytes=readAll(getContentResolver().openInputStream(uri));if(bytes.length>27*1024*1024){toast("File is too large.");return;}uploadAttachment(bytes,name,mime==null?"application/octet-stream":mime);}catch(Exception e){toast(e.getMessage());}}
+    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){super.onActivityResult(requestCode,resultCode,data);if(resultCode!=RESULT_OK||data==null||data.getData()==null)return;Uri uri=data.getData();if(requestCode==PICK_GROUP_IMAGE){try{byte[] bytes=readAll(getContentResolver().openInputStream(uri));Bitmap src=BitmapFactory.decodeByteArray(bytes,0,bytes.length);if(src==null)throw new Exception("Could not read this image.");int side=Math.min(src.getWidth(),src.getHeight()),sx=(src.getWidth()-side)/2,sy=(src.getHeight()-side)/2;Bitmap crop=Bitmap.createBitmap(src,sx,sy,side,side);Bitmap small=Bitmap.createScaledBitmap(crop,240,240,true);ByteArrayOutputStream out=new ByteArrayOutputStream();small.compress(Bitmap.CompressFormat.JPEG,72,out);groupEditImageData="data:image/jpeg;base64,"+Base64.encodeToString(out.toByteArray(),Base64.NO_WRAP);groupEditEmoji="";if(groupEditConversation!=null)showGroupEditor(groupEditConversation);}catch(Exception e){toast(e.getMessage());}return;}if(requestCode!=PICK_FILE)return;try{String name=queryName(uri),mime=getContentResolver().getType(uri);byte[] bytes=readAll(getContentResolver().openInputStream(uri));boolean video=mime!=null&&mime.toLowerCase(Locale.ROOT).startsWith("video/");long maxBytes=video?180L*1024L*1024L:27L*1024L*1024L;if(bytes.length>maxBytes){toast(video?"Video is too large.":"File is too large.");return;}if(video)compressAndUploadVideo(uri,bytes,name,0,false);else uploadAttachment(bytes,name,mime==null?"application/octet-stream":mime);}catch(Exception e){toast(e.getMessage());}}
     private String queryName(Uri u){String name="attachment";try(android.database.Cursor c=getContentResolver().query(u,new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){if(c!=null&&c.moveToFirst())name=c.getString(0);}catch(Exception ignored){}return name==null?"attachment":name;}
     private byte[] readAll(InputStream in)throws Exception{try(in;ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[32768];int n;while((n=in.read(b))>0)out.write(b,0,n);return out.toByteArray();}}
-    private void uploadAttachment(byte[] bytes,String name,String mime){if(activeConversation==null)return;String cid=activeConversation.optString("id"),client="native-"+UUID.randomUUID();String reply=replyTo==null?"":replyTo.optString("id");setReply(null);api.upload("/api/messaging/conversations/"+cid+"/attachment",bytes,name,mime,"",client,reply,(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONObject m=json.optJSONObject("message");if(m!=null){upsertMessage(m);cacheMessagesNow();refreshInbox();}}));}
+    private void uploadAttachment(byte[] bytes,String name,String mime){uploadAttachment(bytes,name,mime,0);}
+    private String markedMediaName(String name,int viewMode){String clean=name==null||name.trim().isEmpty()?"attachment":name.trim();clean=clean.replaceFirst("^__vm[12]__","");return viewMode==1?"__vm1__"+clean:viewMode==2?"__vm2__"+clean:clean;}
+    private JSONObject buildOptimisticMedia(byte[] bytes,String storedName,String mime,String client,JSONObject reply,int viewMode){JSONObject temp=new JSONObject();try{String type=mime!=null&&mime.toLowerCase(Locale.ROOT).startsWith("video/")?"video":mime!=null&&mime.toLowerCase(Locale.ROOT).startsWith("image/")?"image":"file";File local=new File(getCacheDir(),"pending-"+client+"-"+storedName.replaceAll("[^A-Za-z0-9._-]","_"));try(FileOutputStream out=new FileOutputStream(local)){out.write(bytes);}JSONObject attachment=new JSONObject().put("url",Uri.fromFile(local).toString()).put("localPreviewUrl",Uri.fromFile(local).toString()).put("name",storedName).put("mime",mime==null?"application/octet-stream":mime).put("size",bytes.length).put("viewMode",viewMode).put("mediaViewMode",viewMode);if("image".equals(type)){BitmapFactory.Options bounds=new BitmapFactory.Options();bounds.inJustDecodeBounds=true;BitmapFactory.decodeByteArray(bytes,0,bytes.length,bounds);if(bounds.outWidth>0&&bounds.outHeight>0)attachment.put("width",bounds.outWidth).put("height",bounds.outHeight);}temp.put("id","tmp-"+System.nanoTime()).put("clientId",client).put("conversationId",activeConversation==null?"":activeConversation.optString("id")).put("senderId",selfId).put("type",type).put("body","").put("createdAt",new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX",Locale.US).format(new Date())).put("status","sending").put("pending",true).put("optimisticRetainUntil",System.currentTimeMillis()+30000L).put("viewMode",viewMode).put("mediaViewMode",viewMode).put("sender",new JSONObject().put("id",selfId).put("name","You").put("isSelf",true)).put("attachments",new JSONArray().put(attachment)).put("reactions",new JSONArray());if(reply!=null)temp.put("reply",replySnapshot(reply));}catch(Exception e){return null;}return temp;}
+    private void uploadAttachment(byte[] bytes,String name,String mime,int viewMode){uploadAttachment(bytes,name,mime,viewMode,false);}
+    private final class PendingAttachmentUpload{
+        final String cid,client,storedName,mime,reply;final int mode;final JSONObject optimistic;
+        PendingAttachmentUpload(String cid,String client,String storedName,String mime,String reply,int mode,JSONObject optimistic){this.cid=cid;this.client=client;this.storedName=storedName;this.mime=mime;this.reply=reply;this.mode=mode;this.optimistic=optimistic;}
+    }
+    private PendingAttachmentUpload beginAttachmentUpload(byte[] previewBytes,String name,String mime,int viewMode,boolean deferVisualRefresh){
+        if(activeConversation==null||previewBytes==null||previewBytes.length==0)return null;int actualMode=Math.max(0,Math.min(2,viewMode));String cid=activeConversation.optString("id"),client="native-"+UUID.randomUUID(),storedName=markedMediaName(name,actualMode);JSONObject replyObj=replyTo;String reply=replyObj==null?"":replyObj.optString("id");JSONObject optimistic=buildOptimisticMedia(previewBytes,storedName,mime,client,replyObj,actualMode);
+        if(optimistic!=null){messages.add(optimistic);restoreActiveConversationToInbox(optimistic);if(!deferVisualRefresh){if(messageAdapter!=null){messageAdapter.notifyDataSetChanged();scrollToAbsoluteBottom();}cacheMessagesNow();}}setReply(null);return new PendingAttachmentUpload(cid,client,storedName,mime,reply,actualMode,optimistic);
+    }
+    private void transmitAttachment(PendingAttachmentUpload pending,byte[] bytes,String uploadMime){
+        if(pending==null||bytes==null||bytes.length==0)return;api.upload("/api/messaging/conversations/"+pending.cid+"/attachment",bytes,pending.storedName,uploadMime,"",pending.client,pending.reply,pending.mode,(json,error)->main.post(()->{if(error!=null){if(pending.optimistic!=null)markOptimisticFailed(pending.client);toast(error.getMessage());cacheMessagesNow();return;}JSONObject m=json.optJSONObject("message");if(m!=null){try{m.put("viewMode",pending.mode).put("mediaViewMode",pending.mode);JSONArray serverAttachments=m.optJSONArray("attachments");if(serverAttachments!=null&&serverAttachments.length()>0){JSONObject serverAttachment=serverAttachments.optJSONObject(0);if(serverAttachment!=null){serverAttachment.put("viewMode",pending.mode).put("mediaViewMode",pending.mode);if(serverAttachment.optString("name").isEmpty())serverAttachment.put("name",pending.storedName);}}}catch(Exception ignored){}replaceOptimistic(pending.client,m);cacheMessagesNow();refreshInbox();}}));
+    }
+    private void uploadAttachment(byte[] bytes,String name,String mime,int viewMode,boolean deferVisualRefresh){PendingAttachmentUpload pending=beginAttachmentUpload(bytes,name,mime,viewMode,deferVisualRefresh);transmitAttachment(pending,bytes,mime);}
+
+    private int targetVideoBitrate(Uri uri){
+        long durationMs=0;MediaMetadataRetriever retriever=new MediaMetadataRetriever();try{retriever.setDataSource(this,uri);durationMs=parseLong(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION));}catch(Exception ignored){}finally{try{retriever.release();}catch(Exception ignored){}}
+        if(durationMs<=0)return 1500000;double seconds=Math.max(1d,durationMs/1000d);long target=(long)((12d*1024d*1024d*8d)/seconds)-128000L;return(int)Math.max(400000L,Math.min(2500000L,target));
+    }
+    private void failPreparedVideo(PendingAttachmentUpload pending){if(pending!=null&&pending.optimistic!=null)markOptimisticFailed(pending.client);cacheMessagesNow();toast("Could not prepare this video. Please try again.");}
+    @androidx.annotation.OptIn(markerClass=androidx.media3.common.util.UnstableApi.class)
+    private void compressAndUploadVideo(Uri uri,byte[] previewBytes,String name,int viewMode,boolean deferVisualRefresh){
+        if(uri==null||previewBytes==null||previewBytes.length==0)return;String originalName=name==null||name.trim().isEmpty()?"video.mp4":name.trim();String originalMime=getContentResolver().getType(uri);if(originalMime==null||!originalMime.toLowerCase(Locale.ROOT).startsWith("video/"))originalMime="video/mp4";
+        String uploadName=originalName.replaceFirst("(?i)\\.[a-z0-9]{1,6}$","")+".mp4";PendingAttachmentUpload pending=beginAttachmentUpload(previewBytes,uploadName,"video/mp4",viewMode,deferVisualRefresh);if(pending==null)return;
+        File output=new File(getCacheDir(),"video-upload-"+UUID.randomUUID()+".mp4");if(output.exists())output.delete();
+        startVideoTransform(uri,pending,output,targetVideoBitrate(uri),previewBytes.length>45L*1024L*1024L,0);
+    }
+    @androidx.annotation.OptIn(markerClass=androidx.media3.common.util.UnstableApi.class)
+    private void startVideoTransform(Uri uri,PendingAttachmentUpload pending,File output,int bitrate,boolean resize,int sizeAttempt){
+        try{
+            if(output.exists())output.delete();
+            androidx.media3.transformer.Transformer.Builder transformerBuilder=new androidx.media3.transformer.Transformer.Builder(this);
+            if(resize||sizeAttempt>0){androidx.media3.transformer.VideoEncoderSettings settings=new androidx.media3.transformer.VideoEncoderSettings.Builder().setBitrate(bitrate).build();androidx.media3.transformer.DefaultEncoderFactory encoders=new androidx.media3.transformer.DefaultEncoderFactory.Builder(this).setRequestedVideoEncoderSettings(settings).build();transformerBuilder.setEncoderFactory(encoders);}
+            final androidx.media3.transformer.Transformer[] running={null};
+            androidx.media3.transformer.Transformer.Listener listener=new androidx.media3.transformer.Transformer.Listener(){
+                @Override public void onCompleted(androidx.media3.transformer.Composition composition,androidx.media3.transformer.ExportResult result){androidx.media3.transformer.Transformer transformer=running[0];if(transformer!=null)activeVideoTransformers.remove(transformer);temporaryMediaExecutor.execute(()->{try{byte[] compressed=readAll(new FileInputStream(output));output.delete();if(compressed.length==0)throw new Exception("Empty export");if(compressed.length>45L*1024L*1024L&&sizeAttempt<2&&bitrate>400000){int nextBitrate=(int)Math.max(400000L,Math.min(bitrate-100000L,(long)(bitrate*(36d*1024d*1024d/compressed.length))));main.post(()->startVideoTransform(uri,pending,output,nextBitrate,true,sizeAttempt+1));return;}if(compressed.length>48L*1024L*1024L)throw new Exception("Export exceeds server limit");main.post(()->transmitAttachment(pending,compressed,"video/mp4"));}catch(Exception error){output.delete();main.post(()->failPreparedVideo(pending));}});}
+                @Override public void onError(androidx.media3.transformer.Composition composition,androidx.media3.transformer.ExportResult result,androidx.media3.transformer.ExportException error){androidx.media3.transformer.Transformer transformer=running[0];if(transformer!=null)activeVideoTransformers.remove(transformer);output.delete();if(!resize&&sizeAttempt==0)startVideoTransform(uri,pending,output,bitrate,true,1);else failPreparedVideo(pending);}
+            };
+            androidx.media3.transformer.Transformer transformer=transformerBuilder.setVideoMimeType(androidx.media3.common.MimeTypes.VIDEO_H264).setAudioMimeType(androidx.media3.common.MimeTypes.AUDIO_AAC).addListener(listener).build();
+            androidx.media3.transformer.EditedMediaItem.Builder editedBuilder=new androidx.media3.transformer.EditedMediaItem.Builder(androidx.media3.common.MediaItem.fromUri(uri));
+            if(resize){androidx.media3.transformer.Effects effects=new androidx.media3.transformer.Effects(java.util.Collections.emptyList(),java.util.Collections.singletonList(androidx.media3.effect.Presentation.createForHeight(720)));editedBuilder.setEffects(effects);}
+            androidx.media3.transformer.EditedMediaItem edited=editedBuilder.build();running[0]=transformer;activeVideoTransformers.add(transformer);transformer.start(edited,output.getAbsolutePath());
+        }catch(Exception error){output.delete();if(!resize&&sizeAttempt==0)startVideoTransform(uri,pending,output,bitrate,true,1);else failPreparedVideo(pending);}
+    }
 
     private boolean isFingerOver(View target,float rawX,float rawY,int extraDp){if(target==null||target.getVisibility()!=View.VISIBLE)return false;int[] loc=new int[2];target.getLocationOnScreen(loc);float ex=dp(extraDp);return rawX>=loc[0]-ex&&rawX<=loc[0]+target.getWidth()+ex&&rawY>=loc[1]-ex&&rawY<=loc[1]+target.getHeight()+ex;}
     private void syncRecordGestureUi(float rawX,float rawY){
@@ -3581,7 +4079,58 @@ reactionsCard.animate().cancel();
         }
     }
 
-    private void showContacts(){root.removeAllViews();activeConversation=null;LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(8),0,dp(8),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(56)));ImageButton back=icon(R.drawable.ic_msg_back,40,TEXT);head.addView(back);back.setOnClickListener(v->showInbox(false));TextView t=text("New message",20,TEXT,Typeface.BOLD);head.addView(t,new LinearLayout.LayoutParams(0,-1,1));EditText q=new EditText(this);q.setHint("Search people");q.setSingleLine(true);q.setBackground(bg(LIGHT,22));q.setPadding(dp(15),0,dp(15),0);LinearLayout.LayoutParams qp=new LinearLayout.LayoutParams(-1,dp(40));qp.setMargins(dp(12),dp(8),dp(12),dp(5));page.addView(q,qp);ListView contacts=new ListView(this);contacts.setDivider(null);page.addView(contacts,new LinearLayout.LayoutParams(-1,0,1));final List<JSONObject> data=new ArrayList<>();BaseAdapter a=new BaseAdapter(){public int getCount(){return data.size();}public Object getItem(int p){return data.get(p);}public long getItemId(int p){return p;}public View getView(int p,View cv,ViewGroup parent){JSONObject c=data.get(p);LinearLayout r=new LinearLayout(MainActivity.this);r.setGravity(Gravity.CENTER_VERTICAL);r.setPadding(dp(12),dp(6),dp(12),dp(6));View av=buildUserAvatar(c.optString("avatar"),c.optString("name"),48);r.addView(av,new LinearLayout.LayoutParams(dp(48),dp(48)));TextView n=text(c.optString("name"),15,TEXT,Typeface.BOLD);LinearLayout.LayoutParams nl=new LinearLayout.LayoutParams(0,dp(60),1);nl.leftMargin=dp(10);r.addView(n,nl);return r;}};contacts.setAdapter(a);Runnable load=()->api.get("/api/messaging/contacts?q="+Uri.encode(q.getText().toString()),(json,error)->main.post(()->{if(error!=null)return;data.clear();JSONArray ar=json.optJSONArray("contacts");if(ar!=null)for(int i=0;i<ar.length();i++){JSONObject o=ar.optJSONObject(i);if(o!=null)data.add(o);}a.notifyDataSetChanged();}));load.run();q.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int b,int c){main.removeCallbacks(load);main.postDelayed(load,250);}public void afterTextChanged(Editable e){}});contacts.setOnItemClickListener((p,v,pos,id)->{JSONObject c=data.get(pos);try{api.post("/api/messaging/conversations",new JSONObject().put("type","direct").put("userId",c.optString("id")),(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONObject conv=json.optJSONObject("conversation");if(conv!=null)openConversation(conv);}));}catch(Exception e){toast(e.getMessage());}});}
+    private void showContacts(){
+        root.removeAllViews();activeConversation=null;
+        LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));
+        LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(8),0,dp(8),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(56)));
+        ImageButton back=icon(R.drawable.ic_msg_back,40,TEXT);head.addView(back);back.setOnClickListener(v->showInbox(false));
+        TextView t=text("New message",20,TEXT,Typeface.BOLD);head.addView(t,new LinearLayout.LayoutParams(0,-1,1));
+        EditText q=new EditText(this);q.setHint("Search people");q.setSingleLine(true);q.setTextSize(15);q.setBackground(bg(LIGHT,18));q.setPadding(dp(14),0,dp(14),0);
+        LinearLayout.LayoutParams qp=new LinearLayout.LayoutParams(-1,dp(34));qp.setMargins(dp(12),dp(6),dp(12),dp(4));page.addView(q,qp);
+        ListView contacts=new ListView(this);contacts.setDivider(null);page.addView(contacts,new LinearLayout.LayoutParams(-1,0,1));
+        final List<JSONObject> data=new ArrayList<>();
+        BaseAdapter a=new BaseAdapter(){
+            public int getCount(){return data.size();}
+            public Object getItem(int p){return data.get(p);}
+            public long getItemId(int p){return p;}
+            public View getView(int p,View cv,ViewGroup parent){
+                JSONObject c=data.get(p);LinearLayout r=new LinearLayout(MainActivity.this);r.setGravity(Gravity.CENTER_VERTICAL);r.setPadding(dp(12),dp(6),dp(12),dp(6));
+                View av=buildUserAvatar(c.optString("avatar"),c.optString("name"),48);r.addView(av,new LinearLayout.LayoutParams(dp(48),dp(48)));
+                TextView n=text(c.optString("name"),15,TEXT,Typeface.BOLD);keepNameBesideAvatar(n);
+                LinearLayout.LayoutParams nl=new LinearLayout.LayoutParams(0,dp(60),1);nl.leftMargin=dp(10);r.addView(n,nl);return r;
+            }
+        };
+        contacts.setAdapter(a);
+        class ContactLoader{
+            int request=0;
+            void apply(JSONArray contactsArray){
+                data.clear();
+                if(contactsArray!=null)for(int i=0;i<contactsArray.length();i++){
+                    JSONObject person=contactsArray.optJSONObject(i);
+                    if(person!=null)data.add(person);
+                }
+                a.notifyDataSetChanged();
+            }
+            void load(String value){
+                String query=value==null?"":value.trim();
+                int current=++request;
+                String key="contacts:"+query.toLowerCase(Locale.ROOT);
+                String cached=cache.get(key);
+                if(cached!=null&&!cached.isEmpty())try{apply(new JSONObject(cached).optJSONArray("contacts"));}catch(Exception ignored){}
+                api.get("/api/messaging/contacts?q="+Uri.encode(query),(json,error)->main.post(()->{
+                    if(current!=request||!query.equals(q.getText().toString().trim())||error!=null)return;
+                    JSONArray people=json.optJSONArray("contacts");
+                    try{cache.put(key,new JSONObject().put("contacts",people==null?new JSONArray():people).toString());}catch(Exception ignored){}
+                    apply(people);
+                }));
+            }
+        }
+        ContactLoader loader=new ContactLoader();
+        final Runnable[] contactTask={null};
+        loader.load("");
+        q.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int b,int c){if(contactTask[0]!=null)main.removeCallbacks(contactTask[0]);String value=s.toString();contactTask[0]=()->loader.load(value);main.postDelayed(contactTask[0],80);}public void afterTextChanged(Editable e){}});
+        contacts.setOnItemClickListener((p,v,pos,id)->{JSONObject c=data.get(pos);try{api.post("/api/messaging/conversations",new JSONObject().put("type","direct").put("userId",c.optString("id")),(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONObject conv=json.optJSONObject("conversation");if(conv!=null)openConversation(conv);}));}catch(Exception e){toast(e.getMessage());}});
+    }
 
     private void showInfo(){
         if(activeConversation==null)return;JSONObject c=activeConversation;root.removeAllViews();
@@ -3590,8 +4139,8 @@ reactionsCard.animate().cancel();
         ScrollView sc=new ScrollView(this);page.addView(sc,new LinearLayout.LayoutParams(-1,0,1));LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(0,dp(12),0,dp(24));sc.addView(body,new ScrollView.LayoutParams(-1,-2));
         View av=buildConversationAvatar(c,84);LinearLayout.LayoutParams avp=new LinearLayout.LayoutParams(dp(84),dp(84));avp.gravity=Gravity.CENTER_HORIZONTAL;body.addView(av,avp);TextView name=text(c.optString("name"),22,Color.rgb(245,245,247),Typeface.NORMAL);name.setGravity(Gravity.CENTER);LinearLayout.LayoutParams nlp=new LinearLayout.LayoutParams(-1,dp(47));nlp.topMargin=dp(12);body.addView(name,nlp);
         LinearLayout quick=new LinearLayout(this);quick.setGravity(Gravity.CENTER);quick.setPadding(dp(13),0,dp(13),dp(19));body.addView(quick,new LinearLayout.LayoutParams(-1,dp(76)));
-        boolean isGroup="group".equals(c.optString("type"));String[] ql={isGroup?"Add":"Profile","Search",c.optString("mutedUntil").isEmpty()?"Mute":"Unmute","Options"};int[] qi={isGroup?R.drawable.ic_info_add:R.drawable.ic_info_profile,R.drawable.ic_info_search,R.drawable.ic_info_mute,R.drawable.ic_info_more};
-        for(int i=0;i<4;i++){LinearLayout q=new LinearLayout(this);q.setOrientation(LinearLayout.VERTICAL);q.setGravity(Gravity.CENTER);q.setClickable(true);q.setMinimumWidth(dp(68));q.setMinimumHeight(dp(70));int iconSize=i==3?46:31;ImageButton ib=icon(qi[i],iconSize,Color.WHITE);ib.setPadding(i==3?dp(2):0,i==3?dp(2):0,i==3?dp(2):0,i==3?dp(2):0);ib.setTranslationY(dp(8));ib.setClickable(false);LinearLayout.LayoutParams ibp=new LinearLayout.LayoutParams(dp(iconSize),dp(36));ibp.gravity=Gravity.CENTER_HORIZONTAL;q.addView(ib,ibp);TextView qt=text(ql[i],12,Color.WHITE,Typeface.NORMAL);qt.setGravity(Gravity.CENTER);LinearLayout.LayoutParams qtp=new LinearLayout.LayoutParams(-1,dp(28));q.addView(qt,qtp);quick.addView(q,new LinearLayout.LayoutParams(0,-1,1));final int ix=i;q.setOnClickListener(v->{if(ix==0&&isGroup)showAddPeopleToGroup(c);else if(ix==1)showConversationSearch(c);else if(ix==2)toggleMute(c);else if(ix==3)showInfoOptions(c,q);});}
+        boolean isGroup="group".equals(c.optString("type"));String[] ql={isGroup?"Add":"Profile","Search",conversationIsMuted(c)?"Unmute":"Mute","Options"};int[] qi={isGroup?R.drawable.ic_info_add:R.drawable.ic_info_profile,R.drawable.ic_info_search,R.drawable.ic_info_mute,R.drawable.ic_info_more};
+        for(int i=0;i<4;i++){LinearLayout q=new LinearLayout(this);q.setOrientation(LinearLayout.VERTICAL);q.setGravity(Gravity.CENTER);q.setClickable(true);q.setMinimumWidth(dp(68));q.setMinimumHeight(dp(70));int iconSize=i==3?46:31;ImageButton ib=icon(qi[i],iconSize,Color.WHITE);ib.setPadding(i==3?dp(2):0,i==3?dp(2):0,i==3?dp(2):0,i==3?dp(2):0);ib.setTranslationY(dp(8));ib.setClickable(false);LinearLayout.LayoutParams ibp=new LinearLayout.LayoutParams(dp(iconSize),dp(36));ibp.gravity=Gravity.CENTER_HORIZONTAL;q.addView(ib,ibp);TextView qt=text(ql[i],12,Color.WHITE,Typeface.NORMAL);qt.setGravity(Gravity.CENTER);LinearLayout.LayoutParams qtp=new LinearLayout.LayoutParams(-1,dp(28));q.addView(qt,qtp);quick.addView(q,new LinearLayout.LayoutParams(0,-1,1));final int ix=i;q.setOnClickListener(v->{if(ix==0){if(isGroup)showAddPeopleToGroup(c);else openProfileInApp(firstOther(c));}else if(ix==1)showConversationSearch(c);else if(ix==2)toggleMute(c);else if(ix==3)showInfoOptions(c,q);});}
         LinearLayout theme=infoRow(R.drawable.ic_info_theme,"Theme",themeLabel(c.optString("theme","default")),true);body.addView(theme);theme.setOnClickListener(v->showThemePage(c));
         LinearLayout nick=infoRow(R.drawable.ic_info_nick,"Nicknames","",false);body.addView(nick);nick.setOnClickListener(v->showNicknames(c));
         if("group".equals(c.optString("type"))){LinearLayout people=infoRow(R.drawable.ic_info_group,"People","",false);body.addView(people);people.setOnClickListener(v->showGroupPeople(c));}
@@ -3599,14 +4148,28 @@ reactionsCard.animate().cancel();
         TextView shared=text("Shared media",15,Color.WHITE,Typeface.BOLD);LinearLayout.LayoutParams shp=new LinearLayout.LayoutParams(-1,dp(43));shp.setMargins(dp(17),dp(12),dp(17),0);body.addView(shared,shp);addSharedMedia(body);
     }
     private LinearLayout infoRow(int drawable,String title,String subtitle,boolean theme){LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(17),dp(5),dp(17),dp(5));row.setMinimumHeight(dp(57));ImageView iv=new ImageView(this);iv.setImageResource(drawable);iv.setColorFilter(theme?BLUE:Color.WHITE);iv.setScaleType(ImageView.ScaleType.CENTER_INSIDE);row.addView(iv,new LinearLayout.LayoutParams(dp(27),dp(27)));LinearLayout labels=new LinearLayout(this);labels.setOrientation(LinearLayout.VERTICAL);LinearLayout.LayoutParams llp=new LinearLayout.LayoutParams(0,dp(47),1);llp.leftMargin=dp(14);row.addView(labels,llp);labels.addView(text(title,16,Color.WHITE,Typeface.NORMAL),new LinearLayout.LayoutParams(-1,subtitle.isEmpty()?dp(47):dp(26)));if(!subtitle.isEmpty())labels.addView(text(subtitle,12,Color.rgb(174,179,187),Typeface.NORMAL),new LinearLayout.LayoutParams(-1,dp(20)));TextView chevron=text("›",24,Color.rgb(174,179,187),Typeface.NORMAL);chevron.setGravity(Gravity.CENTER);row.addView(chevron,new LinearLayout.LayoutParams(dp(20),dp(47)));return row;}
-    private void addSharedMedia(LinearLayout body){GridLayout grid=new GridLayout(this);grid.setColumnCount(3);grid.setPadding(0,0,0,0);int size=(getResources().getDisplayMetrics().widthPixels-dp(4))/3,count=0;for(JSONObject m:messages){JSONArray at=m.optJSONArray("attachments");if(at==null)continue;for(int i=0;i<at.length()&&count<9;i++){JSONObject a=at.optJSONObject(i);if(a==null)continue;String type=m.optString("type");if(!"image".equals(type)&&!"video".equals(type))continue;ImageView im=new ImageView(this);im.setScaleType(ImageView.ScaleType.CENTER_CROP);im.setBackgroundColor(Color.rgb(23,25,29));GridLayout.LayoutParams lp=new GridLayout.LayoutParams();lp.width=size;lp.height=size;lp.setMargins(dp(1),dp(1),dp(1),dp(1));grid.addView(im,lp);if("image".equals(type))images.load(a.optString("url"),im);else im.setImageResource(R.drawable.ic_msg_play);final JSONObject mediaMessage=m,mediaAttachment=a;final String mediaType=type;im.setOnClickListener(v->{if("video".equals(mediaType))showVideoMediaViewer(mediaMessage,mediaAttachment);else showMediaViewer(mediaMessage,mediaAttachment);});count++;}}if(count>0)body.addView(grid,new LinearLayout.LayoutParams(-1,-2));else{TextView empty=text("No shared photos or videos",13,Color.rgb(174,179,187),Typeface.NORMAL);empty.setGravity(Gravity.CENTER);body.addView(empty,new LinearLayout.LayoutParams(-1,dp(70)));}}
+    private void addSharedMedia(LinearLayout body){GridLayout grid=new GridLayout(this);grid.setColumnCount(3);grid.setPadding(0,0,0,0);int size=(getResources().getDisplayMetrics().widthPixels-dp(4))/3,count=0;for(JSONObject m:messages){JSONArray at=m.optJSONArray("attachments");if(at==null)continue;for(int i=0;i<at.length()&&count<9;i++){JSONObject a=at.optJSONObject(i);if(a==null)continue;String type=m.optString("type");if(!"image".equals(type)&&!"video".equals(type))continue;ImageView im=new ImageView(this);im.setScaleType(ImageView.ScaleType.CENTER_CROP);im.setBackgroundColor(Color.rgb(23,25,29));GridLayout.LayoutParams lp=new GridLayout.LayoutParams();lp.width=size;lp.height=size;lp.setMargins(dp(1),dp(1),dp(1),dp(1));grid.addView(im,lp);if("image".equals(type))images.load(a.optString("url"),im);else loadVideoThumbnail(displayMediaUrl(a),im);final JSONObject mediaMessage=m,mediaAttachment=a;final String mediaType=type;im.setOnClickListener(v->{if("video".equals(mediaType))showVideoMediaViewer(mediaMessage,mediaAttachment);else showMediaViewer(mediaMessage,mediaAttachment);});count++;}}if(count>0)body.addView(grid,new LinearLayout.LayoutParams(-1,-2));else{TextView empty=text("No shared photos or videos",13,Color.rgb(174,179,187),Typeface.NORMAL);empty.setGravity(Gravity.CENTER);body.addView(empty,new LinearLayout.LayoutParams(-1,dp(70)));}}
     private void showInfoOptions(JSONObject c,View anchor){final Dialog d=new Dialog(this);d.requestWindowFeature(Window.FEATURE_NO_TITLE);FrameLayout ov=new FrameLayout(this);ov.setBackgroundColor(Color.TRANSPARENT);LinearLayout menu=new LinearLayout(this);menu.setOrientation(LinearLayout.VERTICAL);menu.setPadding(dp(5),dp(5),dp(5),dp(5));menu.setBackground(bg(Color.rgb(39,43,48),14));int[] loc=new int[2];anchor.getLocationOnScreen(loc);FrameLayout.LayoutParams mp=new FrameLayout.LayoutParams(dp(142),-2,Gravity.TOP|Gravity.START);mp.topMargin=loc[1]+anchor.getHeight()-dp(2);mp.leftMargin=Math.max(dp(8),Math.min(getResources().getDisplayMetrics().widthPixels-dp(150),loc[0]+anchor.getWidth()-dp(142)));ov.addView(menu,mp);boolean group="group".equals(c.optString("type"));LinearLayout action=infoOptionRow(group?R.drawable.ic_info_leave:R.drawable.ic_info_block,group?"Leave":(c.optBoolean("blockedByMe")?"Unblock":"Block"));menu.addView(action);action.setOnClickListener(v->{d.dismiss();toggleBlockOrLeave(c);});ov.setOnClickListener(v->{if(v==ov)d.dismiss();});d.setContentView(ov);d.show();Window w=d.getWindow();if(w!=null){w.setBackgroundDrawableResource(android.R.color.transparent);w.setDimAmount(0);w.setLayout(-1,-1);}}
     private LinearLayout infoOptionRow(int drawable,String label){LinearLayout r=new LinearLayout(this);r.setGravity(Gravity.CENTER_VERTICAL);r.setPadding(dp(10),0,dp(10),0);r.setMinimumHeight(dp(44));ImageView iv=new ImageView(this);iv.setImageResource(drawable);iv.setColorFilter(Color.rgb(255,82,104));r.addView(iv,new LinearLayout.LayoutParams(dp(21),dp(21)));TextView t=text(label,15,Color.rgb(255,82,104),Typeface.NORMAL);LinearLayout.LayoutParams tp=new LinearLayout.LayoutParams(0,dp(44),1);tp.leftMargin=dp(10);r.addView(t,tp);return r;}
-    private void toggleMute(JSONObject c){try{api.patch("/api/messaging/conversations/"+c.optString("id")+"/settings",new JSONObject().put("muted",c.optString("mutedUntil").isEmpty()),(json,error)->main.post(()->{if(error!=null)toast(error.getMessage());else{JSONObject nc=json.optJSONObject("conversation");if(nc!=null)activeConversation=nc;showInfo();}}));}catch(Exception e){toast(e.getMessage());}}
+    private void applyConversationMutedState(JSONObject c,boolean muted){if(c==null)return;try{c.put("muted",muted);c.put("mutedUntil",muted?"forever":"");}catch(Exception ignored){}}
+    private void installConversationSettings(JSONObject original,JSONObject returned,boolean pinAction,boolean enabled){
+        JSONObject target=returned==null?original:returned;if(target==null)return;
+        try{if(pinAction){target.put("pinned",enabled);target.put("isPinned",enabled);if(original!=null){original.put("pinned",enabled);original.put("isPinned",enabled);}}else{applyConversationMutedState(target,enabled);applyConversationMutedState(original,enabled);}}catch(Exception ignored){}
+        String id=target.optString("id",original==null?"":original.optString("id"));for(int i=0;i<inbox.size();i++)if(id.equals(inbox.get(i).optString("id"))){inbox.set(i,target);break;}
+        if(activeConversation!=null&&id.equals(activeConversation.optString("id")))activeConversation=target;cacheInboxNow();
+    }
+    private void toggleMute(JSONObject c){boolean muted=!conversationIsMuted(c);try{api.patch("/api/messaging/conversations/"+c.optString("id")+"/settings",new JSONObject().put("muted",muted),(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}installConversationSettings(c,json.optJSONObject("conversation"),false,muted);showInfo();}));}catch(Exception e){toast(e.getMessage());}}
     private LinearLayout darkSubPage(String titleText,Runnable backAction){root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.rgb(11,15,20));root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(7),0,dp(7),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(50)));ImageButton back=icon(R.drawable.ic_msg_back,38,Color.WHITE);back.setPadding(dp(9),dp(9),dp(9),dp(9));head.addView(back);back.setOnClickListener(v->backAction.run());TextView title=text(titleText,17,Color.WHITE,Typeface.BOLD);head.addView(title,new LinearLayout.LayoutParams(0,-1,1));Space sp=new Space(this);head.addView(sp,new LinearLayout.LayoutParams(dp(38),dp(38)));return page;}
     private void showConversationSearch(JSONObject c){LinearLayout page=darkSubPage("Search",this::showInfo);LinearLayout wrap=new LinearLayout(this);wrap.setOrientation(LinearLayout.VERTICAL);wrap.setPadding(dp(16),dp(7),dp(16),0);page.addView(wrap,new LinearLayout.LayoutParams(-1,0,1));EditText q=new EditText(this);q.setHint("Search in conversation");q.setHintTextColor(Color.rgb(174,179,187));q.setTextColor(Color.WHITE);q.setSingleLine(true);q.setTextSize(16);q.setPadding(dp(16),0,dp(16),0);q.setBackground(bg(Color.rgb(36,40,46),22));wrap.addView(q,new LinearLayout.LayoutParams(-1,dp(43)));LinearLayout results=new LinearLayout(this);results.setOrientation(LinearLayout.VERTICAL);ScrollView scroll=new ScrollView(this);scroll.addView(results,new ScrollView.LayoutParams(-1,-2));LinearLayout.LayoutParams slp=new LinearLayout.LayoutParams(-1,0,1);slp.topMargin=dp(8);wrap.addView(scroll,slp);final Runnable[] run=new Runnable[1];run[0]=()->{String query=q.getText().toString().trim();if(query.isEmpty()){results.removeAllViews();return;}api.get("/api/messaging/search?q="+Uri.encode(query)+"&conversationId="+c.optString("id"),(json,error)->main.post(()->{results.removeAllViews();if(error!=null){TextView e=text(error.getMessage(),13,Color.rgb(174,179,187),Typeface.NORMAL);e.setGravity(Gravity.CENTER);results.addView(e,new LinearLayout.LayoutParams(-1,dp(80)));return;}JSONArray a=json.optJSONArray("results");if(a==null||a.length()==0){TextView empty=text("No messages found",13,Color.rgb(174,179,187),Typeface.NORMAL);empty.setGravity(Gravity.CENTER);results.addView(empty,new LinearLayout.LayoutParams(-1,dp(80)));return;}for(int i=0;i<a.length();i++){JSONObject m=a.optJSONObject(i);if(m==null)continue;LinearLayout row=new LinearLayout(this);row.setOrientation(LinearLayout.VERTICAL);row.setPadding(dp(7),dp(10),dp(7),dp(10));TextView sn=text(senderName(m),15,Color.WHITE,Typeface.BOLD);row.addView(sn,new LinearLayout.LayoutParams(-1,dp(25)));TextView body=text(m.optString("body",previewForType(m.optString("type"))),13,Color.rgb(174,179,187),Typeface.NORMAL);body.setSingleLine(true);body.setEllipsize(TextUtils.TruncateAt.END);row.addView(body,new LinearLayout.LayoutParams(-1,dp(22)));results.addView(row,new LinearLayout.LayoutParams(-1,dp(58)));View div=new View(this);div.setBackgroundColor(Color.rgb(32,36,42));results.addView(div,new LinearLayout.LayoutParams(-1,dp(1)));row.setOnClickListener(v->{String target=m.optString("id");openConversation(c);main.postDelayed(()->{int pos=-1;for(int x=0;x<messages.size();x++)if(target.equals(messages.get(x).optString("id"))){pos=x;break;}if(pos>=0&&list!=null){list.setSelection(Math.max(0,pos-2));}},260);});}}));};q.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c1,int a){}public void onTextChanged(CharSequence cs,int st,int b,int c1){main.removeCallbacks(run[0]);main.postDelayed(run[0],240);}public void afterTextChanged(Editable e){}});q.requestFocus();getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);}
     private String themeLabel(String key){String k=key==null?"default":key;String[] keys={"default","instagram","love","ocean","sunset","monochrome","glow-pup","odyssey","supergirl","avatar","olivia","backrooms","deli-boys","heart-drive","valentines"};String[] labels={"Default","Instagram","Love","Ocean","Sunset","Monochrome","Glow Pup","The Odyssey","Supergirl","Avatar: The Last Airbender","Olivia Rodrigo","Backrooms","Deli Boys","Heart Drive","Valentine’s Day"};for(int i=0;i<keys.length;i++)if(keys[i].equals(k))return labels[i];if("instagram-classic".equals(k))return"Instagram";return"Default";}
-    private void showThemePage(JSONObject c){LinearLayout page=darkSubPage("Theme",this::showInfo);ScrollView scroll=new ScrollView(this);page.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));GridLayout grid=new GridLayout(this);grid.setColumnCount(3);grid.setPadding(dp(16),dp(12),dp(16),dp(28));scroll.addView(grid,new ScrollView.LayoutParams(-1,-2));String[] keys={"default","instagram","love","ocean","sunset","monochrome","glow-pup","odyssey","supergirl","avatar","olivia","backrooms","deli-boys","heart-drive","valentines"};int totalW=getResources().getDisplayMetrics().widthPixels-dp(56);int cardW=totalW/3;int previewH=Math.round(cardW/.69f);for(String key:keys){LinearLayout card=new LinearLayout(this);card.setOrientation(LinearLayout.VERTICAL);card.setPadding(dp(3),0,dp(3),dp(12));ThemePreviewView preview=new ThemePreviewView(this,key,key.equals(c.optString("theme","default")));card.addView(preview,new LinearLayout.LayoutParams(-1,previewH));TextView label=text(themeLabel(key),12,Color.WHITE,Typeface.NORMAL);label.setGravity(Gravity.TOP|Gravity.START);LinearLayout.LayoutParams llp=new LinearLayout.LayoutParams(-1,dp(38));llp.topMargin=dp(8);card.addView(label,llp);GridLayout.LayoutParams cp=new GridLayout.LayoutParams();cp.width=cardW;cp.height=previewH+dp(58);cp.setMargins(dp(2),0,dp(2),dp(4));grid.addView(card,cp);card.setOnClickListener(v->{String previous=c.optString("theme","default");try{c.put("theme",key);activeConversation=c;}catch(Exception ignored){}showThemePage(c);try{api.patch("/api/messaging/conversations/"+c.optString("id")+"/theme",new JSONObject().put("theme",key),(json,error)->main.post(()->{if(error!=null){try{c.put("theme",previous);}catch(Exception ignored){}toast(error.getMessage());showThemePage(c);return;}JSONObject nc=json.optJSONObject("conversation");if(nc!=null)activeConversation=nc;}));}catch(Exception e){toast(e.getMessage());}});}}
+    private void showThemePage(JSONObject c){
+        LinearLayout page=darkSubPage("Theme",this::showInfo);ScrollView scroll=new ScrollView(this);page.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));GridLayout grid=new GridLayout(this);grid.setColumnCount(3);grid.setPadding(dp(16),dp(12),dp(16),dp(28));scroll.addView(grid,new ScrollView.LayoutParams(-1,-2));
+        String[] keys={"default","instagram","love","ocean","sunset","monochrome","glow-pup","odyssey","supergirl","avatar","olivia","backrooms","deli-boys","heart-drive","valentines"};String selectedTheme=activeTheme();int totalW=getResources().getDisplayMetrics().widthPixels-dp(56),cardW=totalW/3,previewH=Math.round(cardW/.69f);
+        for(String key:keys){LinearLayout card=new LinearLayout(this);card.setOrientation(LinearLayout.VERTICAL);card.setPadding(dp(3),0,dp(3),dp(12));ThemePreviewView preview=new ThemePreviewView(this,key,key.equals(selectedTheme));card.addView(preview,new LinearLayout.LayoutParams(-1,previewH));TextView label=text(themeLabel(key),12,Color.WHITE,Typeface.NORMAL);label.setGravity(Gravity.TOP|Gravity.START);LinearLayout.LayoutParams llp=new LinearLayout.LayoutParams(-1,dp(38));llp.topMargin=dp(8);card.addView(label,llp);GridLayout.LayoutParams cp=new GridLayout.LayoutParams();cp.width=cardW;cp.height=previewH+dp(58);cp.setMargins(dp(2),0,dp(2),dp(4));grid.addView(card,cp);card.setOnClickListener(v->applyThemeSelection(c,key));}
+    }
+    private void commitThemeSelection(JSONObject original,String key,JSONObject json){JSONObject updated=json==null?null:json.optJSONObject("conversation"),target=updated==null?original:updated;try{target.put("theme",key);original.put("theme",key);}catch(Exception ignored){}if(activeConversation!=null&&activeConversation.optString("id").equals(original.optString("id")))activeConversation=target;setThemeOverride(original,key);}
+    private void restoreThemeSelection(JSONObject conversation,String previous){try{conversation.put("theme",previous);if(activeConversation!=null&&activeConversation.optString("id").equals(conversation.optString("id")))activeConversation=conversation;}catch(Exception ignored){}setThemeOverride(conversation,previous);toast("Couldn't change the theme.");}
+    private void applyThemeSelection(JSONObject conversation,String key){String previous=activeTheme();try{conversation.put("theme",key);activeConversation=conversation;}catch(Exception ignored){}setThemeOverride(conversation,key);showThemePage(conversation);try{api.patch("/api/messaging/conversations/"+conversation.optString("id")+"/theme",new JSONObject().put("theme",key),(json,error)->main.post(()->{if(error==null){commitThemeSelection(conversation,key,json);return;}if("instagram-classic".equals(key)){try{api.patch("/api/messaging/conversations/"+conversation.optString("id")+"/theme",new JSONObject().put("theme","instagram"),(fallbackJson,fallbackError)->main.post(()->{if(fallbackError==null)commitThemeSelection(conversation,key,fallbackJson);else restoreThemeSelection(conversation,previous);}));}catch(Exception ignored){restoreThemeSelection(conversation,previous);}return;}restoreThemeSelection(conversation,previous);}));}catch(Exception ignored){restoreThemeSelection(conversation,previous);}}
     private void showNicknames(JSONObject c){LinearLayout page=darkSubPage("Nicknames",this::showInfo);ScrollView scroll=new ScrollView(this);page.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setPadding(dp(12),dp(4),dp(12),0);scroll.addView(body,new ScrollView.LayoutParams(-1,-2));JSONArray ps=c.optJSONArray("participants");if(ps==null)return;for(int i=0;i<ps.length();i++){JSONObject person=ps.optJSONObject(i);if(person==null)continue;LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(9),dp(6),dp(9),dp(6));row.setBackgroundColor(Color.TRANSPARENT);View av=buildUserAvatar(avatarUrl(person),person.optString("name"),46);row.addView(av,new LinearLayout.LayoutParams(dp(46),dp(46)));LinearLayout labels=new LinearLayout(this);labels.setOrientation(LinearLayout.VERTICAL);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(54),1);lp.leftMargin=dp(10);row.addView(labels,lp);String nick=person.optString("nickname");labels.addView(text(nick.isEmpty()?"Set nickname":nick,15,Color.WHITE,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(28)));labels.addView(text(person.optString("originalName",person.optString("name")),12,Color.rgb(174,179,187),Typeface.NORMAL),new LinearLayout.LayoutParams(-1,dp(23)));TextView chev=text("›",22,Color.rgb(174,179,187),Typeface.NORMAL);chev.setGravity(Gravity.CENTER);row.addView(chev,new LinearLayout.LayoutParams(dp(28),dp(54)));body.addView(row,new LinearLayout.LayoutParams(-1,dp(66)));row.setOnClickListener(v->editNickname(c,person));}}
     private void editNickname(JSONObject c,JSONObject person){Dialog d=new Dialog(this);d.requestWindowFeature(Window.FEATURE_NO_TITLE);FrameLayout overlay=new FrameLayout(this);overlay.setBackgroundColor(Color.argb(153,0,0,0));LinearLayout card=new LinearLayout(this);card.setOrientation(LinearLayout.VERTICAL);card.setPadding(dp(18),dp(16),dp(18),dp(16));card.setBackground(bg(Color.rgb(39,43,48),18));FrameLayout.LayoutParams cp=new FrameLayout.LayoutParams(Math.min(getResources().getDisplayMetrics().widthPixels-dp(40),dp(340)),-2,Gravity.CENTER);overlay.addView(card,cp);card.addView(text("Set nickname",20,Color.WHITE,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(34)));EditText input=new EditText(this);input.setSingleLine(true);input.setMaxLines(1);input.setText(person.optString("nickname"));input.setHint(person.optString("originalName",person.optString("name")));input.setHintTextColor(Color.rgb(174,179,187));input.setTextColor(Color.WHITE);input.setPadding(dp(12),0,dp(12),0);input.setBackground(bg(Color.rgb(23,25,29),10));LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(-1,dp(44));ip.topMargin=dp(6);card.addView(input,ip);LinearLayout actions=new LinearLayout(this);actions.setGravity(Gravity.END);LinearLayout.LayoutParams alp=new LinearLayout.LayoutParams(-1,dp(48));alp.topMargin=dp(10);card.addView(actions,alp);Button cancel=new Button(this);cancel.setText("Cancel");cancel.setTextColor(Color.WHITE);cancel.setAllCaps(false);cancel.setBackground(bg(Color.rgb(58,63,69),9));actions.addView(cancel,new LinearLayout.LayoutParams(dp(88),dp(39)));Button save=new Button(this);save.setText("Save");save.setTextColor(Color.WHITE);save.setAllCaps(false);save.setBackground(bg(Color.rgb(124,92,255),9));LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(dp(78),dp(39));sp.leftMargin=dp(8);actions.addView(save,sp);cancel.setOnClickListener(v->d.dismiss());save.setOnClickListener(v->{String value=input.getText().toString().trim(),old=person.optString("nickname");try{person.put("nickname",value);}catch(Exception ignored){}d.dismiss();showNicknames(c);try{api.patch("/api/messaging/conversations/"+c.optString("id")+"/nicknames/"+person.optString("id"),new JSONObject().put("nickname",value),(json,error)->main.post(()->{if(error!=null){try{person.put("nickname",old);}catch(Exception ignored){}toast(error.getMessage());showNicknames(c);return;}JSONObject nc=json.optJSONObject("conversation");if(nc!=null)activeConversation=nc;}));}catch(Exception e){toast(e.getMessage());}});d.setContentView(overlay);d.show();Window w=d.getWindow();if(w!=null){w.setBackgroundDrawableResource(android.R.color.transparent);w.setDimAmount(0);w.setLayout(-1,-1);}input.requestFocus();input.setSelection(input.length());}
     private void showCreateGroupFromActive(JSONObject c){Set<String> selected=new HashSet<>();JSONArray existing=c.optJSONArray("participants");if(existing!=null)for(int i=0;i<existing.length();i++){JSONObject p=existing.optJSONObject(i);if(p!=null&&!p.optBoolean("isSelf"))selected.add(p.optString("id"));}root.removeAllViews();LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(Color.WHITE);root.addView(page,new FrameLayout.LayoutParams(-1,-1));LinearLayout head=new LinearLayout(this);head.setGravity(Gravity.CENTER_VERTICAL);head.setPadding(dp(8),0,dp(8),0);page.addView(head,new LinearLayout.LayoutParams(-1,dp(56)));ImageButton back=icon(R.drawable.ic_msg_back,40,TEXT);head.addView(back);back.setOnClickListener(v->showInfo());TextView title=text("New group",20,TEXT,Typeface.BOLD);head.addView(title,new LinearLayout.LayoutParams(0,-1,1));EditText q=new EditText(this);q.setHint("Search people");q.setSingleLine(true);q.setPadding(dp(15),0,dp(15),0);q.setBackground(bg(LIGHT,22));LinearLayout.LayoutParams qp=new LinearLayout.LayoutParams(-1,dp(40));qp.setMargins(dp(12),dp(4),dp(12),dp(5));page.addView(q,qp);FrameLayout content=new FrameLayout(this);page.addView(content,new LinearLayout.LayoutParams(-1,0,1));ListView contacts=new ListView(this);contacts.setDivider(null);content.addView(contacts,new FrameLayout.LayoutParams(-1,-1));Button create=new Button(this);create.setAllCaps(false);create.setTextColor(Color.WHITE);create.setTextSize(14);create.setBackground(bg(BLUE,10));FrameLayout.LayoutParams cfp=new FrameLayout.LayoutParams(-1,dp(48),Gravity.BOTTOM);cfp.setMargins(dp(12),dp(8),dp(12),dp(10));content.addView(create,cfp);final List<JSONObject> data=new ArrayList<>();BaseAdapter a=new BaseAdapter(){public int getCount(){return data.size();}public Object getItem(int p){return data.get(p);}public long getItemId(int p){return p;}public View getView(int pos,View cv,ViewGroup parent){JSONObject person=data.get(pos);LinearLayout row=new LinearLayout(MainActivity.this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(12),dp(6),dp(12),dp(6));View av=buildUserAvatar(person.optString("avatar"),person.optString("name"),48);row.addView(av,new LinearLayout.LayoutParams(dp(48),dp(48)));LinearLayout labels=new LinearLayout(MainActivity.this);labels.setOrientation(LinearLayout.VERTICAL);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(60),1);lp.leftMargin=dp(10);row.addView(labels,lp);labels.addView(text(person.optString("name"),15,TEXT,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(30)));String sub=person.optBoolean("isFriend")?"Friend":person.optBoolean("online")?"Active now":"";labels.addView(text(sub,12,SUB,Typeface.NORMAL),new LinearLayout.LayoutParams(-1,dp(24)));GroupSelectView check=new GroupSelectView(MainActivity.this,selected.contains(person.optString("id")));row.addView(check,new LinearLayout.LayoutParams(dp(28),dp(28)));return row;}};contacts.setAdapter(a);Runnable syncCreate=()->{create.setText("Create group ("+selected.size()+")");create.setVisibility(selected.isEmpty()?View.GONE:View.VISIBLE);};syncCreate.run();Runnable load=()->api.get("/api/messaging/contacts?q="+Uri.encode(q.getText().toString()),(json,error)->main.post(()->{if(error!=null)return;data.clear();JSONArray ar=json.optJSONArray("contacts");if(ar!=null)for(int i=0;i<ar.length();i++){JSONObject o=ar.optJSONObject(i);if(o!=null)data.add(o);}a.notifyDataSetChanged();syncCreate.run();}));load.run();q.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c1,int a1){}public void onTextChanged(CharSequence cs,int st,int b,int c1){main.removeCallbacks(load);main.postDelayed(load,250);}public void afterTextChanged(Editable e){}});contacts.setOnItemClickListener((pp,v,pos,id)->{String uid=data.get(pos).optString("id");if(selected.contains(uid))selected.remove(uid);else selected.add(uid);a.notifyDataSetChanged();syncCreate.run();});create.setOnClickListener(v->{if(selected.isEmpty())return;try{JSONArray ids=new JSONArray();for(String id:selected)ids.put(id);JSONObject req=new JSONObject().put("type","group").put("title","").put("memberIds",ids);api.post("/api/messaging/conversations",req,(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONObject conv=json.optJSONObject("conversation");if(conv!=null)openConversation(conv);}));}catch(Exception e){toast(e.getMessage());}});}
@@ -3631,7 +4194,133 @@ reactionsCard.animate().cancel();
     private void addSelectedMembers(JSONObject c,List<String> ids,int index,Button done){if(index>=ids.size()){done.setEnabled(true);showGroupPeople(activeConversation==null?c:activeConversation);return;}try{api.post("/api/messaging/conversations/"+c.optString("id")+"/members",new JSONObject().put("userId",ids.get(index)),(json,error)->main.post(()->{if(error!=null){done.setEnabled(true);toast(error.getMessage());return;}JSONObject nc=json.optJSONObject("conversation");if(nc!=null)activeConversation=nc;addSelectedMembers(activeConversation==null?c:activeConversation,ids,index+1,done);}));}catch(Exception e){done.setEnabled(true);toast(e.getMessage());}}
 
 
-    private void toggleBlockOrLeave(JSONObject c){if("group".equals(c.optString("type"))){api.delete("/api/messaging/conversations/"+c.optString("id")+"/leave",(json,error)->main.post(()->{if(error!=null)toast(error.getMessage());else showInbox(false);}));return;}try{api.post("/api/messaging/conversations/"+c.optString("id")+"/block",new JSONObject().put("blocked",!c.optBoolean("blockedByMe")),(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONObject nc=json.optJSONObject("conversation");if(nc!=null)activeConversation=nc;showInfo();}));}catch(Exception e){toast(e.getMessage());}}
+    private void toggleBlockOrLeave(JSONObject c){if("group".equals(c.optString("type"))){api.delete("/api/messaging/conversations/"+c.optString("id")+"/leave",(json,error)->main.post(()->{if(error!=null)toast(error.getMessage());else showInbox(false);}));return;}boolean blocked=!conversationBlockedByMe(c);try{api.post("/api/messaging/conversations/"+c.optString("id")+"/block",new JSONObject().put("blocked",blocked),(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONObject nc=json.optJSONObject("conversation");JSONObject target=nc==null?c:nc;try{target.put("blockedByMe",blocked);c.put("blockedByMe",blocked);}catch(Exception ignored){}activeConversation=target;for(int i=0;i<inbox.size();i++)if(c.optString("id").equals(inbox.get(i).optString("id"))){inbox.set(i,target);break;}cacheInboxNow();showInfo();}));}catch(Exception e){toast(e.getMessage());}}
+
+    private void createMessageNotificationChannel(){
+        if(Build.VERSION.SDK_INT<26)return;
+        NotificationManager manager=(NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE);
+        if(manager==null)return;
+        NotificationChannel channel=new NotificationChannel(MESSAGE_CHANNEL_ID,"Messages",NotificationManager.IMPORTANCE_HIGH);
+        channel.setDescription("New message notifications");
+        channel.enableVibration(true);
+        manager.createNotificationChannel(channel);
+    }
+    private void migrateNotificationHistory(){android.content.SharedPreferences prefs=getSharedPreferences("messenger_notification_history",MODE_PRIVATE);if(prefs.getInt("schema",0)<2)prefs.edit().clear().putInt("schema",2).apply();}
+    private void requestNotificationPermission(){
+        if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},REQ_NOTIFICATIONS);
+    }
+    private String notificationSenderName(String cid,JSONObject message){
+        JSONObject sender=message==null?null:message.optJSONObject("sender");
+        String senderId=sender==null?"":sender.optString("id",message.optString("senderId"));
+        JSONObject conversation=inboxConversationById(cid);
+        JSONArray participants=conversation==null?null:conversation.optJSONArray("participants");
+        if(participants!=null)for(int i=0;i<participants.length();i++){
+            JSONObject person=participants.optJSONObject(i);
+            if(person!=null&&senderId.equals(person.optString("id"))){String nickname=person.optString("nickname").trim();return nickname.isEmpty()?person.optString("name","New message"):nickname;}
+        }
+        if(sender==null)return conversation==null?"New message":conversation.optString("name","New message");
+        String nickname=sender.optString("nickname").trim();
+        return nickname.isEmpty()?sender.optString("name","New message"):nickname;
+    }
+    private boolean isNotificationMessage(JSONObject message){if(message==null||message.optBoolean("isSystem")||message.optBoolean("system"))return false;String type=message.optString("type").toLowerCase(Locale.ROOT);return!type.equals("system")&&!type.equals("conversation_update")&&!type.equals("theme_update")&&!type.equals("group_update")&&!type.equals("name_update")&&!type.equals("avatar_update");}
+    private String notificationMessageText(JSONObject message){String body=message==null?"":message.optString("body").trim();return body.isEmpty()?replyPreview(message):body;}
+    private long notificationMessageTime(JSONObject message){Date created=parseDate(message==null?"":message.optString("createdAt"));return created==null?System.currentTimeMillis():created.getTime();}
+    private String participantAvatar(String cid,String userId){
+        JSONObject conversation=inboxConversationById(cid);JSONArray participants=conversation==null?null:conversation.optJSONArray("participants");
+        if(participants!=null)for(int i=0;i<participants.length();i++){JSONObject person=participants.optJSONObject(i);if(person!=null&&userId.equals(person.optString("id"))){String avatar=avatarUrl(person);if(!avatar.isEmpty())return avatar;}}
+        return "";
+    }
+    private String notificationSenderAvatar(String cid,JSONObject message){
+        JSONObject sender=message==null?null:message.optJSONObject("sender");String direct=avatarUrl(sender);if(!direct.isEmpty())return direct;
+        String senderId=sender==null?(message==null?"":message.optString("senderId")):sender.optString("id",message.optString("senderId"));String participant=participantAvatar(cid,senderId);if(!participant.isEmpty())return participant;
+        JSONObject conversation=inboxConversationById(cid);if(conversation!=null&&!"group".equals(conversation.optString("type"))){JSONObject other=firstOther(conversation);String avatar=avatarUrl(other);if(!avatar.isEmpty())return avatar;}
+        return "";
+    }
+    private String reactionSenderAvatar(String cid,JSONObject reaction){
+        String direct=reactionAvatar(reaction);if(!direct.isEmpty())return direct;String identity=reactionIdentity(reaction);int split=identity.indexOf('|');return participantAvatar(cid,split<0?identity:identity.substring(0,split));
+    }
+    private JSONObject notificationEntry(String cid,JSONObject message){JSONObject entry=new JSONObject();try{JSONObject sender=message.optJSONObject("sender");entry.put("id",message.optString("id",message.optString("messageId",message.optString("clientId",""))));entry.put("text",notificationMessageText(message));entry.put("sender",isMine(message)?"You":notificationSenderName(cid,message));entry.put("senderId",sender==null?message.optString("senderId"):sender.optString("id",message.optString("senderId")));entry.put("avatar",notificationSenderAvatar(cid,message));entry.put("mine",isMine(message));entry.put("at",notificationMessageTime(message));}catch(Exception ignored){}return entry;}
+    private JSONObject messageBeforeNotificationUpdate(String cid,JSONObject incoming){
+        if(incoming==null)return null;
+        if(activeConversation!=null&&cid.equals(activeConversation.optString("id"))){JSONObject found=findPreviousMessage(messages,incoming);if(found!=null)return found;}
+        try{
+            String raw=cache.get("messages:"+cid);JSONArray cached=raw==null?null:new JSONObject(raw).optJSONArray("messages");
+            String id=incoming.optString("id"),client=incoming.optString("clientId");
+            if(cached!=null)for(int i=cached.length()-1;i>=0;i--){JSONObject old=cached.optJSONObject(i);if(old==null)continue;if(!id.isEmpty()&&id.equals(old.optString("id")))return old;if(!client.isEmpty()&&client.equals(old.optString("clientId")))return old;}
+        }catch(Exception ignored){}
+        return null;
+    }
+    private String reactionIdentity(JSONObject reaction){if(reaction==null)return"";String userId=reaction.optString("userId",reaction.optString("userid"));if(userId.isEmpty()){JSONObject user=reaction.optJSONObject("user");if(user!=null)userId=user.optString("id");}return userId+"|"+reaction.optString("emoji");}
+    private boolean reactionIsMine(JSONObject reaction){if(reaction==null)return false;if(reaction.optBoolean("mine"))return true;String identity=reactionIdentity(reaction);int split=identity.indexOf('|');String userId=split<0?identity:identity.substring(0,split);return!selfId.isEmpty()&&selfId.equals(userId);}
+    private JSONObject addedExternalReaction(JSONObject before,JSONObject updated){
+        if(before==null||updated==null||!isMine(updated))return null;
+        Set<String> existing=new HashSet<>();JSONArray oldReactions=before.optJSONArray("reactions");if(oldReactions!=null)for(int i=0;i<oldReactions.length();i++)existing.add(reactionIdentity(oldReactions.optJSONObject(i)));
+        JSONArray next=updated.optJSONArray("reactions");if(next==null)return null;for(int i=next.length()-1;i>=0;i--){JSONObject reaction=next.optJSONObject(i);String key=reactionIdentity(reaction);if(reaction!=null&&!reactionIsMine(reaction)&&!key.isEmpty()&&!existing.contains(key))return reaction;}
+        return null;
+    }
+    private String reactionSenderName(String cid,JSONObject reaction){
+        String direct=reaction==null?"":reaction.optString("name").trim();JSONObject user=reaction==null?null:reaction.optJSONObject("user");if(direct.isEmpty()&&user!=null)direct=user.optString("name").trim();JSONObject sender=reaction==null?null:reaction.optJSONObject("sender");if(direct.isEmpty()&&sender!=null)direct=sender.optString("name").trim();
+        String identity=reactionIdentity(reaction);int split=identity.indexOf('|');String userId=split<0?identity:identity.substring(0,split);JSONObject conversation=inboxConversationById(cid);JSONArray participants=conversation==null?null:conversation.optJSONArray("participants");if(participants!=null)for(int i=0;i<participants.length();i++){JSONObject person=participants.optJSONObject(i);if(person!=null&&userId.equals(person.optString("id"))){String nickname=person.optString("nickname").trim();return nickname.isEmpty()?person.optString("name",direct.isEmpty()?"Facebook user":direct):nickname;}}
+        return direct.isEmpty()?"Facebook user":direct;
+    }
+    private void syncReactionNotification(String cid,JSONObject message,JSONObject reaction){
+        if(cid==null||cid.isEmpty()||message==null||reaction==null||reactionIsMine(reaction))return;
+        if(appVisible&&activeConversation!=null&&cid.equals(activeConversation.optString("id")))return;
+        if(conversationIsMuted(inboxConversationById(cid)))return;
+        if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)return;
+        JSONArray history=loadNotificationHistory(cid);String messageId=message.optString("id",message.optString("messageId")),identity=reactionIdentity(reaction);String eventId="reaction:"+messageId+":"+identity;
+        for(int i=0;i<history.length();i++){JSONObject old=history.optJSONObject(i);if(old!=null&&eventId.equals(old.optString("id")))return;}
+        String body=message.optString("body").trim(),type=message.optString("type","text"),emoji=reaction.optString("emoji");boolean heart="❤️".equals(emoji)||"❤".equals(emoji);String notificationText=heart?"Liked your message":"Reacted "+emoji+" to your message";if("text".equals(type)&&!body.isEmpty())notificationText+=": \""+body+"\"";
+        JSONObject entry=new JSONObject();try{entry.put("id",eventId).put("text",notificationText).put("sender",reactionSenderName(cid,reaction)).put("senderId",identity.contains("|")?identity.substring(0,identity.indexOf('|')):identity).put("avatar",reactionSenderAvatar(cid,reaction)).put("mine",false).put("at",System.currentTimeMillis());}catch(Exception ignored){}
+        history.put(entry);while(history.length()>8)history.remove(0);saveNotificationHistory(cid,history);JSONArray candidate;try{candidate=new JSONArray(history.toString());}catch(Exception ignored){candidate=history;}final JSONArray snapshot=candidate;temporaryMediaExecutor.execute(()->renderConversationNotification(cid,snapshot,true));
+    }
+    private String notificationHistoryKey(String cid){return"notification-history:"+cid;}
+    private JSONArray loadNotificationHistory(String cid){
+        android.content.SharedPreferences prefs=getSharedPreferences("messenger_notification_history",MODE_PRIVATE);
+        try{String saved=prefs.getString(notificationHistoryKey(cid),"");if(!saved.isEmpty())return new JSONArray(saved);}catch(Exception ignored){}
+        return new JSONArray();
+    }
+    private void saveNotificationHistory(String cid,JSONArray history){getSharedPreferences("messenger_notification_history",MODE_PRIVATE).edit().putString(notificationHistoryKey(cid),history.toString()).apply();}
+    private void clearConversationNotification(String cid){if(cid==null||cid.isEmpty())return;getSharedPreferences("messenger_notification_history",MODE_PRIVATE).edit().putString(notificationHistoryKey(cid),"[]").apply();NotificationManager manager=(NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE);if(manager!=null)manager.cancel(cid.hashCode());}
+    private Bitmap fallbackNotificationAvatar(){try{android.graphics.drawable.Drawable drawable=getDrawable(R.drawable.default_profile);int size=dp(56);Bitmap bitmap=Bitmap.createBitmap(size,size,Bitmap.Config.ARGB_8888);drawable.setBounds(0,0,size,size);drawable.draw(new Canvas(bitmap));return bitmap;}catch(Exception ignored){return null;}}
+    private void syncConversationNotification(String cid,JSONObject message,boolean announce){
+        if(cid==null||cid.isEmpty()||!isNotificationMessage(message))return;
+        if(announce&&isMine(message))return;
+        if(announce&&appVisible&&activeConversation!=null&&cid.equals(activeConversation.optString("id")))return;
+        if(conversationIsMuted(inboxConversationById(cid)))return;
+        if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)return;
+        JSONArray history=loadNotificationHistory(cid);String id=message.optString("id",message.optString("messageId",message.optString("clientId","")));int found=-1;
+        for(int i=0;i<history.length();i++){JSONObject entry=history.optJSONObject(i);if(entry!=null&&!id.isEmpty()&&id.equals(entry.optString("id"))){found=i;break;}}
+        JSONObject replacement=notificationEntry(cid,message);
+        if(found>=0){try{history.put(found,replacement);}catch(Exception ignored){}}
+        else if(announce)history.put(replacement);else return;
+        while(history.length()>8)history.remove(0);
+        saveNotificationHistory(cid,history);
+        JSONArray snapshotCandidate;
+        try{snapshotCandidate=new JSONArray(history.toString());}catch(Exception ignored){snapshotCandidate=history;}
+        final JSONArray snapshot=snapshotCandidate;
+        final boolean shouldAlert=announce;
+        temporaryMediaExecutor.execute(()->renderConversationNotification(cid,snapshot,shouldAlert));
+    }
+    private void renderConversationNotification(String cid,JSONArray history,boolean alert){
+        if(history==null||history.length()==0)return;
+        JSONObject latest=history.optJSONObject(history.length()-1);if(latest==null)return;
+        String avatar=latest.optString("avatar"),absoluteAvatar=avatar==null?"":(avatar.startsWith("http")||avatar.startsWith("data:")||avatar.startsWith("file:")?avatar:api.absolute(avatar));
+        Bitmap latestAvatar=images.getBitmap(absoluteAvatar,dp(64),dp(64));if(latestAvatar==null)latestAvatar=fallbackNotificationAvatar();
+        Intent open=new Intent(this,MainActivity.class).putExtra("conversationId",cid).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent tap=PendingIntent.getActivity(this,cid.hashCode(),open,PendingIntent.FLAG_UPDATE_CURRENT|(Build.VERSION.SDK_INT>=23?PendingIntent.FLAG_IMMUTABLE:0));
+        Notification.Builder builder=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,MESSAGE_CHANNEL_ID):new Notification.Builder(this);
+        JSONObject conversation=inboxConversationById(cid);boolean group=conversation!=null&&"group".equals(conversation.optString("type"));String title=group?conversation.optString("name","Group chat"):latest.optString("sender","New message");
+        if(Build.VERSION.SDK_INT>=28){
+            android.app.Person self=new android.app.Person.Builder().setName("You").setKey(selfId.isEmpty()?"self":selfId).build();Notification.MessagingStyle style=new Notification.MessagingStyle(self);if(group)style.setConversationTitle(title);style.setGroupConversation(group);
+            for(int i=0;i<history.length();i++){JSONObject entry=history.optJSONObject(i);if(entry==null)continue;android.app.Person senderPerson=null;if(!entry.optBoolean("mine")){String entryAvatar=entry.optString("avatar"),entryAbsolute=entryAvatar.isEmpty()?"":(entryAvatar.startsWith("http")||entryAvatar.startsWith("data:")||entryAvatar.startsWith("file:")?entryAvatar:api.absolute(entryAvatar));Bitmap senderBitmap=images.getBitmap(entryAbsolute,dp(56),dp(56));if(senderBitmap==null)senderBitmap=latestAvatar;android.app.Person.Builder person=new android.app.Person.Builder().setName(entry.optString("sender","New message")).setKey(entry.optString("senderId",entry.optString("sender","sender")));if(senderBitmap!=null)person.setIcon(android.graphics.drawable.Icon.createWithBitmap(senderBitmap));senderPerson=person.build();}style.addMessage(new Notification.MessagingStyle.Message(entry.optString("text"),entry.optLong("at",System.currentTimeMillis()),senderPerson));}builder.setStyle(style);
+        }else{
+            Notification.MessagingStyle style=new Notification.MessagingStyle("You");if(group)style.setConversationTitle(title);for(int i=0;i<history.length();i++){JSONObject entry=history.optJSONObject(i);if(entry!=null)style.addMessage(entry.optString("text"),entry.optLong("at",System.currentTimeMillis()),entry.optBoolean("mine")?null:entry.optString("sender","New message"));}builder.setStyle(style);
+        }
+        builder.setSmallIcon(R.drawable.app_icon).setLargeIcon(latestAvatar).setContentTitle(title).setContentText(latest.optString("text")).setContentIntent(tap).setAutoCancel(true).setCategory(Notification.CATEGORY_MESSAGE).setGroup("conversation-"+cid).setWhen(latest.optLong("at",System.currentTimeMillis())).setShowWhen(true).setOnlyAlertOnce(!alert);
+        if(!alert)builder.setDefaults(0).setSound(null).setVibrate(null);
+        NotificationManager manager=(NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE);if(manager!=null)manager.notify(cid.hashCode(),builder.build());
+    }
 
     private void connectSocket(){
         if(socket!=null||socketConnecting||api==null||!api.hasSession())return;
@@ -3643,10 +4332,23 @@ reactionsCard.animate().cancel();
             main.postDelayed(socketReconnect,delay);
         }));
     }
+    private void queueActiveSocketMessage(String cid,JSONObject message){if(message==null)return;if(!socketMessageBatchConversationId.isEmpty()&&!socketMessageBatchConversationId.equals(cid))flushSocketMessageBatch();socketMessageBatchConversationId=cid;socketMessageBatch.add(message);main.removeCallbacks(flushSocketMessages);main.postDelayed(flushSocketMessages,180);}
+    private void flushSocketMessageBatch(){if(socketMessageBatch.isEmpty())return;String cid=socketMessageBatchConversationId;List<JSONObject> incoming=new ArrayList<>(socketMessageBatch);socketMessageBatch.clear();socketMessageBatchConversationId="";if(activeConversation==null||!activeConversation.optString("id").equals(cid))return;boolean keepBottom=isConversationAtBottom(),refreshNeeded=false;for(JSONObject message:incoming){JSONObject old=findPreviousMessage(messages,message);if(old!=null){boolean visualConfirmation=old.optBoolean("pending")&&isVisualMediaMessage(old);int index=messages.indexOf(old);JSONObject merged=mergeMessage(old,message);preserveLocalMediaPreview(old,merged);messages.set(index,merged);try{messages.get(index).put("pending",false).put("optimisticRetainUntil",System.currentTimeMillis()+30000L);}catch(Exception ignored){}String messageKey=reactionMessageKey(merged);if(visualConfirmation)hidePendingIndicator(old.optString("clientId"));else if(pendingLocalReactionIds.contains(messageKey))refreshVisibleReactionBadge(merged);else refreshNeeded=true;}else if(!message.optBoolean("deleted")){messages.add(message);refreshNeeded=true;}}prefetchTemporaryMedia();if(refreshNeeded)scheduleMessageRefresh(keepBottom);cacheMessagesNow();markRead();}
     private void handleSocket(JSONObject e){String type=e.optString("type");
         if("ready".equals(type)){selfId=e.optString("userId");socketConnecting=false;socketRetry=0;main.removeCallbacks(socketReconnect);refreshInbox();if(activeConversation!=null){refreshMessages(activeConversation.optString("id"));markRead();}return;}
-        if("conversation".equals(type)||"conversation_update".equals(type)){JSONObject c=e.optJSONObject("conversation");if(c!=null&&activeConversation!=null&&c.optString("id").equals(activeConversation.optString("id")))activeConversation=c;refreshInbox();return;}
-        if("message".equals(type)||"message_update".equals(type)){JSONObject m=e.optJSONObject("message");String cid=e.optString("conversationId",m==null?"":m.optString("conversationId"));if(m!=null){if(isStickerMessage(m))stickerLastConversations.add(cid);else if("message".equals(type))stickerLastConversations.remove(cid);}if("message".equals(type)&&m!=null&&!cid.isEmpty())updateInboxFromIncomingMessage(cid,m);if(activeConversation!=null&&activeConversation.optString("id").equals(cid)&&m!=null){JSONObject oldMessage=null;for(JSONObject existing:messages)if(existing.optString("id").equals(m.optString("id"))){oldMessage=existing;break;}upsertMessage(oldMessage==null?m:mergeMessage(oldMessage,m));cacheMessagesNow();markRead();}else if(m!=null&&!cid.isEmpty()){cacheIncomingMessage(cid,m,"message".equals(type));}refreshInbox();return;}
+        if("conversation".equals(type)||"conversation_update".equals(type)){JSONObject c=e.optJSONObject("conversation");if(c!=null&&activeConversation!=null&&c.optString("id").equals(activeConversation.optString("id"))){boolean wasBlocked=conversationBlockedByMe(activeConversation)||conversationBlockedByOther(activeConversation),nowBlocked=conversationBlockedByMe(c)||conversationBlockedByOther(c);activeConversation=c;if(wasBlocked!=nowBlocked)openConversation(c);}refreshInbox();return;}
+        if("message".equals(type)||"message_update".equals(type)){
+            JSONObject m=e.optJSONObject("message");String cid=e.optString("conversationId",m==null?"":m.optString("conversationId"));
+            JSONObject previous="message_update".equals(type)?messageBeforeNotificationUpdate(cid,m):null;JSONObject newReaction=addedExternalReaction(previous,m);
+            if(m!=null){if(isStickerMessage(m))stickerLastConversations.add(cid);else if("message".equals(type))stickerLastConversations.remove(cid);}
+            if("message".equals(type)&&m!=null&&!cid.isEmpty())updateInboxFromIncomingMessage(cid,m);
+            if(activeConversation!=null&&activeConversation.optString("id").equals(cid)&&m!=null)queueActiveSocketMessage(cid,m);else if(m!=null&&!cid.isEmpty())cacheIncomingMessage(cid,m,"message".equals(type));
+            if(m!=null&&!cid.isEmpty()){
+                if(newReaction!=null)syncReactionNotification(cid,m,newReaction);
+                syncConversationNotification(cid,m,"message".equals(type));
+            }
+            refreshInbox();return;
+        }
         if("message_hidden".equals(type)){String id=e.optString("messageId");messages.removeIf(m->id.equals(m.optString("id")));if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();return;}
         if("typing".equals(type)){String tcid=e.optString("conversationId");boolean active=e.optBoolean("active")&&!selfId.equals(e.optString("userId"));Runnable previous=typingExpiry.remove(tcid);if(previous!=null)main.removeCallbacks(previous);if(active){typingConversations.add(tcid);Runnable expire=()->{typingExpiry.remove(tcid);typingConversations.remove(tcid);if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();if(activeConversation!=null&&activeConversation.optString("id").equals(tcid)&&typingView!=null){typingView.setText("");typingView.setVisibility(View.GONE);}};typingExpiry.put(tcid,expire);main.postDelayed(expire,2400);}else{typingConversations.remove(tcid);}if(inboxAdapter!=null)inboxAdapter.notifyDataSetChanged();if(activeConversation!=null&&activeConversation.optString("id").equals(tcid)&&typingView!=null){typingView.setText(active?"Typing..":"");typingView.setVisibility(active?View.VISIBLE:View.GONE);}return;}
         if("read".equals(type)){
@@ -3775,12 +4477,10 @@ reactionsCard.animate().cancel();
         box.setElevation(0f);
 
         ImageView fallback=new ImageView(this);
-        fallback.setImageResource(R.drawable.default_profile);
         fallback.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        fallback.setImageResource(R.drawable.default_profile);
         fallback.setBackgroundColor(Color.TRANSPARENT);
-        fallback.setScaleX(1.14f);
-        fallback.setScaleY(1.14f);
-        box.addView(fallback,new FrameLayout.LayoutParams(-1,-1));
+        box.addView(fallback,new FrameLayout.LayoutParams(dp(size),dp(size)));
 
         if(url!=null&&!url.isEmpty()&&!"null".equalsIgnoreCase(url)){
             ImageView im=new ImageView(this);
@@ -3788,25 +4488,81 @@ reactionsCard.animate().cancel();
             im.setBackgroundColor(Color.TRANSPARENT);
             im.setScaleX(1.085f);
             im.setScaleY(1.085f);
-            box.addView(im,new FrameLayout.LayoutParams(-1,-1));
+            box.addView(im,new FrameLayout.LayoutParams(dp(size),dp(size)));
             images.load(url,im);
         }
         return box;
     }
     private View buildConversationAvatar(JSONObject c,int size){String own=avatarUrl(c);if(!own.isEmpty())return buildUserAvatar(own,c.optString("name"),size);JSONArray ps=c.optJSONArray("participants");if("group".equals(c.optString("type"))&&ps!=null&&ps.length()>1){FrameLayout f=new FrameLayout(this);int child=Math.round(size*.7f);int made=0;for(int i=0;i<ps.length()&&made<2;i++){JSONObject p=ps.optJSONObject(i);if(p==null)continue;View av=buildUserAvatar(avatarUrl(p),p.optString("name"),child);FrameLayout.LayoutParams lp=new FrameLayout.LayoutParams(dp(child),dp(child),made==0?Gravity.START|Gravity.TOP:Gravity.END|Gravity.BOTTOM);f.addView(av,lp);made++;}return f;}JSONObject other=firstOther(c);return buildUserAvatar(avatarUrl(other),c.optString("name"),size);}
     private String senderAvatar(JSONObject m){JSONObject s=m.optJSONObject("sender");String u=avatarUrl(s);if(!u.isEmpty())return u;JSONObject other=firstOther(activeConversation);return avatarUrl(other);}
-    private String senderName(JSONObject m){JSONObject s=m.optJSONObject("sender");return s==null?"Facebook user":s.optString("name","Facebook user");}
+    private String senderName(JSONObject m){
+        JSONObject sender=m==null?null:m.optJSONObject("sender");
+        if(sender==null)return"Facebook user";
+        String senderId=sender.optString("id",m.optString("senderId"));
+        JSONArray participants=activeConversation==null?null:activeConversation.optJSONArray("participants");
+        if(participants!=null&&!senderId.isEmpty())for(int i=0;i<participants.length();i++){
+            JSONObject person=participants.optJSONObject(i);
+            if(person!=null&&senderId.equals(person.optString("id"))){
+                String nickname=person.optString("nickname").trim();
+                if(!nickname.isEmpty())return nickname;
+                return person.optString("name",sender.optString("name","Facebook user"));
+            }
+        }
+        String nickname=sender.optString("nickname").trim();
+        return nickname.isEmpty()?sender.optString("name","Facebook user"):nickname;
+    }
     private String previewForType(String t){if("image".equals(t))return"📷 Photo";if("video".equals(t))return"🎬 Video";if("audio".equals(t))return"🎤 Voice message";if("file".equals(t))return"📎 File";if("shared_reel".equals(t))return"Shared a reel";if("shared_post".equals(t))return"Shared a post";return"";}
+    private void keepNameBesideAvatar(TextView name){if(name==null)return;name.setGravity(Gravity.LEFT|Gravity.CENTER_VERTICAL);name.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);name.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);}
     private void toast(String s){Toast.makeText(this,s==null||s.isEmpty()?"Something went wrong":s,Toast.LENGTH_SHORT).show();}
 
     private boolean isStickerMessage(JSONObject m){if(m==null)return false;if(m.optBoolean("sticker"))return true;JSONArray at=m.optJSONArray("attachments");if(at==null||at.length()==0)return false;JSONObject a=at.optJSONObject(0);if(a==null)return false;String mime=a.optString("mime",a.optString("mimeType",a.optString("type",""))).toLowerCase(Locale.ROOT);String name=a.optString("name","").toLowerCase(Locale.ROOT);String url=a.optString("url","").toLowerCase(Locale.ROOT);return a.optBoolean("sticker")||mime.contains("gif")||name.endsWith(".gif")||name.startsWith("sticker-")||url.contains("giphy.com");}
     private boolean isKnownLastSticker(JSONObject c,JSONObject last){if(c==null||last==null)return false;if(isStickerMessage(last))return true;String cid=c.optString("id");if(stickerLastConversations.contains(cid))return true;try{String raw=cache.get("messages:"+cid);if(raw!=null){JSONArray arr=new JSONObject(raw).optJSONArray("messages");if(arr!=null&&arr.length()>0){JSONObject lm=arr.optJSONObject(arr.length()-1);String lid=last.optString("id");if(lm!=null&&(lid.isEmpty()||lid.equals(lm.optString("id")))&&isStickerMessage(lm))return true;}}}catch(Exception ignored){}return false;}
+    private JSONObject inboxConversationById(String id){if(id==null||id.isEmpty())return null;for(JSONObject conversation:inbox)if(id.equals(conversation.optString("id")))return conversation;return null;}
+    private List<JSONObject> visibleInboxMessageResults(){List<JSONObject> visible=new ArrayList<>();String current=searchBox==null?"":searchBox.getText().toString().trim().toLowerCase(Locale.ROOT);if(current.isEmpty()||!current.equals(inboxMessageSearchQuery))return visible;for(JSONObject message:inboxMessageSearchResults)if(!"system".equals(message.optString("type"))&&inboxConversationById(message.optString("conversationId",message.optString("conversation_id","")))!=null)visible.add(message);return visible;}
+    private View buildInboxMessageSearchRow(JSONObject message){
+        if(list!=null)list.setOnItemClickListener(null);
+        String cid=message.optString("conversationId",message.optString("conversation_id",""));
+        JSONObject conversation=inboxConversationById(cid);
+        LinearLayout row=new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(10),dp(6),dp(12),dp(6));
+        View avatar=conversation==null
+            ?buildUserAvatar(avatarUrl(message.optJSONObject("sender")),senderName(message),48)
+            :buildConversationAvatar(conversation,48);
+        row.addView(avatar,new LinearLayout.LayoutParams(dp(48),dp(48)));
+        LinearLayout labels=new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams labelsParams=new LinearLayout.LayoutParams(0,dp(54),1);
+        labelsParams.leftMargin=dp(10);
+        row.addView(labels,labelsParams);
+        TextView name=text(conversation==null?senderName(message):conversation.optString("name","Conversation"),14.5f,TEXT,Typeface.BOLD);
+        name.setSingleLine(true);
+        name.setEllipsize(TextUtils.TruncateAt.END);
+        labels.addView(name,new LinearLayout.LayoutParams(-1,dp(27)));
+        String body=message.optString("body",previewForType(message.optString("type")));
+        TextView preview=text(body,13.5f,SUB,Typeface.NORMAL);
+        preview.setSingleLine(true);
+        preview.setEllipsize(TextUtils.TruncateAt.END);
+        labels.addView(preview,new LinearLayout.LayoutParams(-1,dp(25)));
+        row.setOnClickListener(v->{
+            JSONObject target=inboxConversationById(cid);
+            if(target==null)return;
+            inboxSearchScrollPosition=list==null?0:list.getFirstVisiblePosition();
+            String messageId=message.optString("id");
+            conversationOpenedFromInboxSearch=true;
+            pendingSearchTargetMessageId=messageId;
+            openConversation(target);
+            main.postDelayed(()->openInboxSearchTarget(messageId,0),180);
+        });
+        return row;
+    }
     private final class InboxAdapter extends BaseAdapter{
-        public int getCount(){return filteredInbox.size();}
-        public Object getItem(int p){return filteredInbox.get(p);}
+        public int getCount(){return filteredInbox.size()+visibleInboxMessageResults().size();}
+        public Object getItem(int p){if(p<filteredInbox.size())return filteredInbox.get(p);return visibleInboxMessageResults().get(p-filteredInbox.size());}
         public long getItemId(int p){return p;}
 
         public View getView(int p,View cv,ViewGroup parent){
+            if(p>=filteredInbox.size())return buildInboxMessageSearchRow(visibleInboxMessageResults().get(p-filteredInbox.size()));
             JSONObject c=filteredInbox.get(p);
             int unread=Math.max(0,c.optInt("unread"));
 
@@ -3820,7 +4576,7 @@ reactionsCard.animate().cancel();
             avWrap.addView(av,new FrameLayout.LayoutParams(dp(56),dp(56)));
 
             JSONObject other=firstOther(c);
-            if(other!=null&&other.optBoolean("online")){
+            if(!"group".equals(c.optString("type"))&&other!=null&&other.optBoolean("online")){
                 FrameLayout activeOuter=new FrameLayout(MainActivity.this);
                 activeOuter.setBackground(bg(Color.WHITE,9));
 
@@ -3859,9 +4615,10 @@ reactionsCard.animate().cancel();
             );
             name.setSingleLine(true);
             name.setEllipsize(TextUtils.TruncateAt.END);
+            keepNameBesideAvatar(name);
             nameRow.addView(name,new LinearLayout.LayoutParams(-2,-1));
 
-            if(c.optBoolean("pinned")){
+            if(conversationIsPinned(c)){
                 ImageView pin=new ImageView(MainActivity.this);
                 pin.setImageResource(R.drawable.messenger_pin);
                 pin.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
@@ -3933,6 +4690,7 @@ reactionsCard.animate().cancel();
     private float threadSheetDragStart=Float.NaN;
 
     private void wireConversationLongPress(View row,JSONObject c){
+        if(list!=null)list.setOnItemClickListener(null);
         row.setClickable(true);
         row.setLongClickable(false);
 
@@ -4079,14 +4837,14 @@ reactionsCard.animate().cancel();
         handle.setBackground(bg(Color.rgb(155,161,170),3));
 
         LinearLayout.LayoutParams hp=
-            new LinearLayout.LayoutParams(dp(55),dp(4));
+            new LinearLayout.LayoutParams(dp(36),dp(2));
         hp.gravity=Gravity.CENTER_HORIZONTAL;
-        hp.bottomMargin=dp(18);
+        hp.bottomMargin=dp(13);
         card.addView(handle,hp);
 
         TextView title=text(
             c.optString("name"),
-            17,
+            15,
             Color.WHITE,
             Typeface.BOLD
         );
@@ -4097,23 +4855,9 @@ reactionsCard.animate().cancel();
         div.setBackgroundColor(Color.rgb(48,52,58));
         card.addView(div,new LinearLayout.LayoutParams(-1,dp(1)));
 
-        LinearLayout pin=threadActionRow(
-            R.drawable.ic_thread_pin,
-            c.optBoolean("pinned")?"Unpin":"Pin",
-            false
-        );
-        LinearLayout del=threadActionRow(
-            R.drawable.ic_thread_trash,
-            "Delete",
-            true
-        );
-        LinearLayout mute=threadActionRow(
-            R.drawable.ic_info_mute,
-            conversationIsMuted(c)
-                ?"Unmute messages"
-                :"Mute messages",
-            false
-        );
+        LinearLayout pin=threadActionRow(conversationIsPinned(c)?"Unpin":"Pin",false);
+        LinearLayout del=threadActionRow("Delete",true);
+        LinearLayout mute=threadActionRow(conversationIsMuted(c)?"Unmute messages":"Mute messages",false);
 
         card.addView(pin);
         card.addView(del);
@@ -4128,7 +4872,7 @@ reactionsCard.animate().cancel();
         del.setOnClickListener(v->{
             d.dismiss();
             clearThreadSheetRefs();
-            runThreadAction(c,"delete");
+            showDeleteThreadConfirmation(c);
         });
 
         mute.setOnClickListener(v->{
@@ -4200,11 +4944,15 @@ reactionsCard.animate().cancel();
             .setInterpolator(new DecelerateInterpolator())
             .start();
     }
-    private LinearLayout threadActionRow(int iconRes,String label,boolean danger){LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(22),0,dp(22),0);row.setMinimumHeight(dp(55));ImageView iv=new ImageView(this);iv.setImageResource(iconRes);int col=danger?Color.rgb(255,64,92):Color.WHITE;iv.setColorFilter(col);row.addView(iv,new LinearLayout.LayoutParams(dp(22),dp(22)));TextView t=text(label,16,col,Typeface.NORMAL);LinearLayout.LayoutParams tp=new LinearLayout.LayoutParams(0,dp(55),1);tp.leftMargin=dp(14);row.addView(t,tp);return row;}
-    private void runThreadAction(JSONObject c,String action){try{if("delete".equals(action)){api.patch("/api/messaging/conversations/"+c.optString("id")+"/settings",new JSONObject().put("archived",true),(json,error)->main.post(()->{if(error!=null)toast(error.getMessage());else{inbox.removeIf(x->x.optString("id").equals(c.optString("id")));filterInbox(searchBox==null?"":searchBox.getText().toString());toast("Conversation deleted");}}));return;}boolean on="pin".equals(action)?!c.optBoolean("pinned"):!conversationIsMuted(c);JSONObject req=new JSONObject();if("pin".equals(action))req.put("pinned",on);else req.put("muted",on);api.patch("/api/messaging/conversations/"+c.optString("id")+"/settings",req,(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONObject nc=json.optJSONObject("conversation");if(nc!=null){for(int i=0;i<inbox.size();i++)if(inbox.get(i).optString("id").equals(nc.optString("id"))){inbox.set(i,nc);break;}}filterInbox(searchBox==null?"":searchBox.getText().toString());toast("pin".equals(action)?(on?"Pinned":"Unpinned"):(on?"Messages muted":"Messages unmuted"));}));}catch(Exception e){toast(e.getMessage());}}
+    private LinearLayout threadActionRow(String label,boolean danger){LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(22),0,dp(22),0);row.setMinimumHeight(dp(52));int col=danger?Color.rgb(255,64,92):Color.WHITE;TextView t=text(label,15.5f,col,Typeface.NORMAL);row.addView(t,new LinearLayout.LayoutParams(-1,dp(52)));return row;}
+    private void showDeleteThreadConfirmation(JSONObject c){AlertDialog dialog=new AlertDialog.Builder(this).setTitle("Permanently delete chat?").setMessage("This message will be removed from your Direct messages. Your chat history will be deleted for you.").setNegativeButton("Cancel",null).setPositiveButton("Delete",(d,w)->runThreadAction(c,"delete")).create();dialog.setOnShowListener(x->{dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(Color.rgb(255,48,64));dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(Color.rgb(45,105,255));});dialog.show();}
+    private void runThreadAction(JSONObject c,String action){try{if("delete".equals(action)){api.patch("/api/messaging/conversations/"+c.optString("id")+"/settings",new JSONObject().put("archived",true),(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}rememberConversationDeletion(c);String identity=conversationIdentityKey(c);inbox.removeIf(x->identity.equals(conversationIdentityKey(x)));cacheInboxNow();filterInbox(searchBox==null?"":searchBox.getText().toString());}));return;}boolean pinAction="pin".equals(action);boolean on=pinAction?!conversationIsPinned(c):!conversationIsMuted(c);JSONObject req=new JSONObject();if(pinAction)req.put("pinned",on);else req.put("muted",on);api.patch("/api/messaging/conversations/"+c.optString("id")+"/settings",req,(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}installConversationSettings(c,json.optJSONObject("conversation"),pinAction,on);filterInbox(searchBox==null?"":searchBox.getText().toString());}));}catch(Exception e){toast(e.getMessage());}}
 
-    private int themeReplyBackground(){switch(activeTheme()){case"instagram":return Color.rgb(19,19,19);case"monochrome":return Color.rgb(214,214,214);case"glow-pup":return Color.rgb(52,43,105);case"odyssey":return Color.rgb(36,85,90);case"supergirl":return Color.rgb(82,43,38);case"avatar":return Color.rgb(52,85,80);case"olivia":return Color.rgb(86,64,76);case"backrooms":return Color.rgb(81,76,41);case"deli-boys":return Color.rgb(61,57,52);case"heart-drive":return Color.rgb(50,27,112);case"valentines":return Color.rgb(73,18,118);default:return Color.rgb(223,225,229);}}
-    private int themeReplyText(){switch(activeTheme()){case"instagram":return Color.rgb(133,133,133);case"glow-pup":return Color.rgb(238,233,255);case"odyssey":return Color.rgb(227,255,255);case"supergirl":return Color.rgb(255,240,228);case"avatar":return Color.rgb(234,255,248);case"olivia":return Color.rgb(255,230,239);case"backrooms":return Color.rgb(255,251,216);case"deli-boys":return Color.rgb(255,244,233);case"heart-drive":return Color.rgb(238,231,255);case"valentines":return Color.rgb(243,229,255);default:return Color.rgb(75,79,86);}}
+    private int readableOn(int color){double value=.299*Color.red(color)+.587*Color.green(color)+.114*Color.blue(color);return value>155?Color.rgb(18,18,20):Color.WHITE;}
+    private int themeReplyBackground(){switch(activeTheme()){case"instagram":return Color.rgb(19,19,19);case"instagram-classic":return Color.rgb(244,235,250);case"love":return Color.rgb(83,17,70);case"ocean":return Color.rgb(213,239,247);case"sunset":return Color.rgb(255,230,216);case"monochrome":return Color.rgb(214,214,214);case"glow-pup":return Color.rgb(52,43,105);case"odyssey":return Color.rgb(36,85,90);case"supergirl":return Color.rgb(82,43,38);case"avatar":return Color.rgb(52,85,80);case"olivia":return Color.rgb(86,64,76);case"backrooms":return Color.rgb(81,76,41);case"deli-boys":return Color.rgb(61,57,52);case"heart-drive":return Color.rgb(50,27,112);case"valentines":return Color.rgb(73,18,118);default:return Color.rgb(223,225,229);}}
+    private int conversationSystemBarColor(){switch(activeTheme()){case"default":return Color.WHITE;case"instagram":return Color.BLACK;case"instagram-classic":return Color.rgb(255,245,251);case"love":return Color.rgb(83,17,70);case"ocean":return Color.rgb(223,248,255);case"sunset":return Color.rgb(255,243,222);case"monochrome":return Color.rgb(244,244,244);case"glow-pup":return Color.rgb(3,0,25);case"odyssey":return Color.rgb(3,28,33);case"supergirl":return Color.rgb(17,17,17);case"avatar":return Color.rgb(16,44,45);case"olivia":return Color.rgb(61,41,55);case"backrooms":return Color.rgb(64,58,24);case"deli-boys":return Color.rgb(23,22,18);case"heart-drive":return Color.rgb(6,19,83);case"valentines":return Color.rgb(61,11,112);default:return themeReplyBackground();}}
+    private void applyConversationSystemBars(){int color=conversationSystemBarColor();Window window=getWindow();window.setStatusBarColor(color);window.setNavigationBarColor(color);double luminance=(.2126*Color.red(color)+.7152*Color.green(color)+.0722*Color.blue(color))/255d;boolean light=luminance>.60d;int flags=0;if(Build.VERSION.SDK_INT>=23&&light)flags|=View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;if(Build.VERSION.SDK_INT>=26&&light)flags|=View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;window.getDecorView().setSystemUiVisibility(flags);if(Build.VERSION.SDK_INT>=29){window.setStatusBarContrastEnforced(false);window.setNavigationBarContrastEnforced(false);}}
+    private int themeReplyText(){switch(activeTheme()){case"instagram":return Color.rgb(133,133,133);case"instagram-classic":return Color.rgb(112,93,120);case"love":return Color.rgb(241,200,226);case"ocean":return Color.rgb(70,105,116);case"sunset":return Color.rgb(118,84,70);case"glow-pup":return Color.rgb(238,233,255);case"odyssey":return Color.rgb(227,255,255);case"supergirl":return Color.rgb(255,240,228);case"avatar":return Color.rgb(234,255,248);case"olivia":return Color.rgb(255,230,239);case"backrooms":return Color.rgb(255,251,216);case"deli-boys":return Color.rgb(255,244,233);case"heart-drive":return Color.rgb(238,231,255);case"valentines":return Color.rgb(243,229,255);default:return Color.rgb(75,79,86);}}
 
     private final class OlderMessagesSpinner extends View{
         private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -4325,6 +5073,25 @@ reactionsCard.animate().cancel();
             }
         }
     }
+
+    private final class TimedProgressView extends View{
+        private final Paint track=new Paint(Paint.ANTI_ALIAS_FLAG),fill=new Paint(Paint.ANTI_ALIAS_FLAG);
+        private float progress=1f;
+        TimedProgressView(Context context){super(context);track.setColor(Color.rgb(102,104,110));fill.setColor(Color.WHITE);track.setStrokeCap(Paint.Cap.ROUND);fill.setStrokeCap(Paint.Cap.ROUND);track.setStrokeWidth(dp(2));fill.setStrokeWidth(dp(2));}
+        void setProgress(float value){progress=Math.max(0f,Math.min(1f,value));invalidate();}
+        @Override protected void onDraw(Canvas canvas){super.onDraw(canvas);float y=getHeight()/2f;canvas.drawLine(0,y,getWidth(),y,track);canvas.drawLine(0,y,getWidth()*progress,y,fill);}
+    }
+
+    private static final class PausableClock{
+        private final long started=SystemClock.uptimeMillis();
+        private long pausedAt=0L,pausedTotal=0L;
+        private boolean paused=false;
+        void pause(){if(paused)return;paused=true;pausedAt=SystemClock.uptimeMillis();}
+        void resume(){if(!paused)return;pausedTotal+=Math.max(0L,SystemClock.uptimeMillis()-pausedAt);paused=false;pausedAt=0L;}
+        float fraction(long durationMs){long now=paused?pausedAt:SystemClock.uptimeMillis();return Math.max(0f,(now-started-pausedTotal)/(float)Math.max(1L,durationMs));}
+    }
+
+    private void wireTemporaryMediaHold(View target,Runnable pause,Runnable resume){final float[] downX={0f},downY={0f};final boolean[] holding={false};final Runnable[] trigger={null};target.setOnTouchListener((v,event)->{switch(event.getActionMasked()){case MotionEvent.ACTION_DOWN:downX[0]=event.getRawX();downY[0]=event.getRawY();holding[0]=false;trigger[0]=()->{holding[0]=true;if(pause!=null)pause.run();};main.postDelayed(trigger[0],190);break;case MotionEvent.ACTION_MOVE:if(!holding[0]&&(Math.abs(event.getRawX()-downX[0])>dp(9)||Math.abs(event.getRawY()-downY[0])>dp(9))&&trigger[0]!=null)main.removeCallbacks(trigger[0]);break;case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:if(trigger[0]!=null)main.removeCallbacks(trigger[0]);if(holding[0]&&resume!=null)resume.run();holding[0]=false;break;}return false;});}
 
     private String revealMessageTime(JSONObject m){
         if(m==null)return"";
@@ -4475,9 +5242,35 @@ reactionsCard.animate().cancel();
         });
     }
 
-    private final class MessageAdapter extends BaseAdapter{public int getCount(){return messages.size();}public Object getItem(int p){return messages.get(p);}public long getItemId(int p){return p;}
+    private JSONObject mediaStackAttachment(JSONObject message){JSONArray attachments=message==null?null:message.optJSONArray("attachments");return attachments!=null&&attachments.length()>0?attachments.optJSONObject(0):null;}
+    private boolean isMediaStackCandidate(JSONObject message){JSONObject attachment=mediaStackAttachment(message);if(attachment==null||mediaViewMode(message,attachment)>0||isStickerMessage(message))return false;String type=actualMediaType(message.optString("type"),attachment);return "image".equals(type)||"video".equals(type);}
+    private String mediaStackSender(JSONObject message){if(isMine(message))return "self";String senderId=message.optString("senderId","");JSONObject sender=message.optJSONObject("sender");if(senderId.isEmpty()&&sender!=null)senderId=sender.optString("id","");return senderId.isEmpty()?senderName(message):senderId;}
+    private String mediaStackBatch(JSONObject message){JSONObject attachment=mediaStackAttachment(message);if(attachment==null)return"";String name=attachment.optString("name","");java.util.regex.Matcher matcher=java.util.regex.Pattern.compile("__batch_([A-Za-z0-9-]+)__").matcher(name);return matcher.find()?matcher.group(1):"";}
+    private boolean sameMediaStack(JSONObject previous,JSONObject current){if(!isMediaStackCandidate(previous)||!isMediaStackCandidate(current)||!mediaStackSender(previous).equals(mediaStackSender(current)))return false;String a=mediaStackBatch(previous),b=mediaStackBatch(current);return!a.isEmpty()&&a.equals(b);}
+    private View buildMediaStackRow(int start,int end){JSONObject last=messages.get(end);boolean mine=isMine(last);LinearLayout outer=new LinearLayout(this);outer.setOrientation(LinearLayout.VERTICAL);if(needsStamp(start)){TextView stamp=text(clusterStamp(messages.get(start).optString("createdAt")),11,Color.rgb(138,141,145),Typeface.NORMAL);stamp.setGravity(Gravity.CENTER);LinearLayout.LayoutParams slp=new LinearLayout.LayoutParams(-1,dp(31));slp.topMargin=dp(7);slp.bottomMargin=dp(2);outer.addView(stamp,slp);}LinearLayout row=new LinearLayout(this);row.setGravity(mine?Gravity.END|Gravity.BOTTOM:Gravity.START|Gravity.BOTTOM);LinearLayout.LayoutParams rowLp=new LinearLayout.LayoutParams(-1,-2);rowLp.leftMargin=dp(10);rowLp.rightMargin=dp(10);rowLp.topMargin=dp(4);rowLp.bottomMargin=dp(5);outer.addView(row,rowLp);if(!mine){View avatar=buildUserAvatar(senderAvatar(last),senderName(last),30);LinearLayout.LayoutParams avatarLp=new LinearLayout.LayoutParams(dp(30),dp(30));avatarLp.rightMargin=dp(6);row.addView(avatar,avatarLp);}LinearLayout column=new LinearLayout(this);column.setOrientation(LinearLayout.VERTICAL);column.setGravity(mine?Gravity.END:Gravity.START);row.addView(column,new LinearLayout.LayoutParams(-2,-2));int count=end-start+1,photos=0,videos=0;for(int i=start;i<=end;i++){JSONObject attachment=mediaStackAttachment(messages.get(i));String type=actualMediaType(messages.get(i).optString("type"),attachment);if("video".equals(type))videos++;else photos++;}String kind=photos>0&&videos>0?"photos and videos":videos==count?(count==1?"video":"videos"):(count==1?"photo":"photos");TextView label=text((mine?"You":senderName(last))+" sent "+count+" "+kind,12.5f,Color.rgb(138,141,145),Typeface.NORMAL);label.setGravity(mine?Gravity.END:Gravity.START);LinearLayout.LayoutParams labelLp=new LinearLayout.LayoutParams(dp(196),dp(27));column.addView(label,labelLp);FrameLayout deck=new FrameLayout(this);column.addView(deck,new LinearLayout.LayoutParams(dp(196),dp(199)));int shown=Math.min(3,count),first=end-shown+1;for(int i=first;i<=end;i++){int layer=i-first;JSONObject message=messages.get(i),attachment=mediaStackAttachment(message);String type=actualMediaType(message.optString("type"),attachment);FrameLayout card=new FrameLayout(this);card.setPadding(dp(3),dp(3),dp(3),dp(3));card.setBackground(bg(Color.WHITE,14));card.setElevation(dp(2+layer));FrameLayout.LayoutParams cardLp=new FrameLayout.LayoutParams(dp(148),dp(176));int shift=layer*10;if(mine)cardLp.leftMargin=dp(24+shift);else cardLp.leftMargin=dp(4+shift);cardLp.topMargin=dp(12-layer*3);deck.addView(card,cardLp);card.setRotation(layer==shown-1?0f:(layer%2==0?-7f:6f));ImageView media=new ImageView(this);media.setScaleType(ImageView.ScaleType.CENTER_CROP);media.setBackground(bg(Color.rgb(20,20,20),11));media.setClipToOutline(true);FrameLayout.LayoutParams mediaLp=new FrameLayout.LayoutParams(dp(142),dp(170));card.addView(media,mediaLp);if("image".equals(type))images.load(displayMediaUrl(attachment),media);else{String poster=attachment.optString("thumbnailUrl",attachment.optString("previewUrl",attachment.optString("posterUrl","")));if(!poster.isEmpty())images.load(poster,media);else loadVideoThumbnail(displayMediaUrl(attachment),media);ImageView play=new ImageView(this);play.setImageResource(R.drawable.ic_msg_play);play.setColorFilter(Color.WHITE);play.setBackgroundColor(Color.TRANSPARENT);FrameLayout.LayoutParams playLp=new FrameLayout.LayoutParams(dp(27),dp(27),Gravity.TOP|Gravity.END);playLp.topMargin=dp(8);playLp.rightMargin=dp(8);card.addView(play,playLp);}card.setOnClickListener(v->showMediaStackGallery(start,end));}deck.setOnClickListener(v->showMediaStackGallery(start,end));boolean pending=false;for(int i=start;i<=end;i++)if(messages.get(i).optBoolean("pending")){pending=true;break;}if(pending){TextView sending=text("Sending…",10.5f,Color.rgb(138,141,145),Typeface.NORMAL);sending.setGravity(mine?Gravity.END:Gravity.START);column.addView(sending,new LinearLayout.LayoutParams(dp(196),dp(18)));}else if(mine&&end==messages.size()-1){String state=status(last);if(!state.isEmpty()){TextView sent=text(state,11.5f,Color.rgb(138,141,145),Typeface.NORMAL);sent.setGravity(Gravity.END);column.addView(sent,new LinearLayout.LayoutParams(dp(196),dp(19)));}}deck.setOnLongClickListener(v->{showMessageActions(last,deck);return true;});return outer;}
+
+    private String systemUpdateKind(JSONObject message){if(message==null||!"system".equals(message.optString("type")))return"";String body=message.optString("body","").toLowerCase(Locale.ROOT);if(body.contains("theme"))return"theme";if(body.contains("renamed")||(body.contains("changed")&&body.contains("name")))return"name";if(body.contains("photo")||body.contains("image")||body.contains("avatar"))return"avatar";return"";}
+    private boolean isConversationUpdate(JSONObject message){return!systemUpdateKind(message).isEmpty();}
+    private int systemUpdateTextColor(){return themeUsesLightHeader()?Color.rgb(75,78,84):Color.rgb(234,236,240);}
+    private View buildSystemUpdateItem(JSONObject message){LinearLayout item=new LinearLayout(this);item.setOrientation(LinearLayout.VERTICAL);item.setGravity(Gravity.CENTER_HORIZONTAL);item.setPadding(dp(22),dp(7),dp(22),dp(8));String kind=systemUpdateKind(message),bodyText=message.optString("body");if("instagram-classic".equals(activeTheme())&&"theme".equals(kind)&&!bodyText.contains("Classic Instagram"))bodyText=bodyText.replace("Instagram","Classic Instagram");TextView body=text(bodyText,12.5f,systemUpdateTextColor(),Typeface.NORMAL);body.setGravity(Gravity.CENTER);item.addView(body,new LinearLayout.LayoutParams(-1,-2));if(!kind.isEmpty()){String action="theme".equals(kind)?"Change theme":"name".equals(kind)?"Change name":"Change avatar";int actionColor=themeAccent()==Color.WHITE?Color.rgb(201,75,255):themeAccent();TextView change=text(action,12.5f,actionColor,Typeface.BOLD);change.setGravity(Gravity.CENTER);LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,dp(24));cp.topMargin=dp(1);item.addView(change,cp);change.setOnClickListener(v->{if(activeConversation==null)return;if("theme".equals(kind))showThemePage(activeConversation);else beginGroupEditor(activeConversation);});}return item;}
+    private View buildSystemUpdateGroup(int start,int end,boolean expanded,Runnable toggle){LinearLayout group=new LinearLayout(this);group.setOrientation(LinearLayout.VERTICAL);group.setGravity(Gravity.CENTER_HORIZONTAL);group.setPadding(0,dp(5),0,dp(6));int count=end-start+1;TextView control=text((expanded?"Hide ":"See ")+count+" updates",12.5f,Color.rgb(150,153,160),Typeface.NORMAL);control.setGravity(Gravity.CENTER);group.addView(control,new LinearLayout.LayoutParams(-1,dp(32)));control.setOnClickListener(v->toggle.run());if(expanded)for(int i=start;i<=end;i++)group.addView(buildSystemUpdateItem(messages.get(i)),new LinearLayout.LayoutParams(-1,-2));return group;}
+
+    private final class MessageAdapter extends BaseAdapter{
+        private final List<int[]> rows=new ArrayList<>();
+        private final Set<String> expandedUpdateGroups=new HashSet<>();
+        private int rowMessageCount=-1;
+        private void rebuildRows(){rows.clear();for(int start=0;start<messages.size();){if(isConversationUpdate(messages.get(start))){int updateEnd=start;while(updateEnd+1<messages.size()&&isConversationUpdate(messages.get(updateEnd+1)))updateEnd++;if(updateEnd-start+1>=3){rows.add(new int[]{start,updateEnd});start=updateEnd+1;continue;}}int end=start;if(isMediaStackCandidate(messages.get(start)))while(end+1<messages.size()&&sameMediaStack(messages.get(end),messages.get(end+1)))end++;rows.add(new int[]{start,end});start=end+1;}rowMessageCount=messages.size();}
+        private void ensureRows(){if(rowMessageCount!=messages.size())rebuildRows();}
+        @Override public void notifyDataSetChanged(){rebuildRows();super.notifyDataSetChanged();}
+        int messageIndexForRow(int row){ensureRows();return row>=0&&row<rows.size()?rows.get(row)[0]:-1;}
+        int messageEndForRow(int row){ensureRows();return row>=0&&row<rows.size()?rows.get(row)[1]:-1;}
+        int rowForMessageIndex(int index){ensureRows();for(int i=0;i<rows.size();i++)if(index>=rows.get(i)[0]&&index<=rows.get(i)[1])return i;return Math.max(0,Math.min(index,rows.size()-1));}
+        public int getCount(){ensureRows();return rows.size();}public Object getItem(int p){int index=messageIndexForRow(p);return index>=0?messages.get(index):null;}public boolean hasStableIds(){return true;}public long getItemId(int p){int start=messageIndexForRow(p),end=messageEndForRow(p);if(start<0)return p;JSONObject message=messages.get(start);String key=message.optString("clientId","");if(key.isEmpty())key=message.optString("id",String.valueOf(start));if(end>start)key+="|"+messages.get(end).optString("id",String.valueOf(end));return key.hashCode()&0xffffffffL;}
         private int lastMineIndex(){for(int i=messages.size()-1;i>=0;i--)if(isMine(messages.get(i))&&!messages.get(i).optBoolean("pending"))return i;return-1;}
-        public View getView(int p,View cv,ViewGroup parent){JSONObject m=messages.get(p);LinearLayout outer=new LinearLayout(MainActivity.this);outer.setOrientation(LinearLayout.VERTICAL);if(needsStamp(p)){TextView stamp=text(clusterStamp(m.optString("createdAt")),11,Color.rgb(138,141,145),Typeface.NORMAL);stamp.setGravity(Gravity.CENTER);LinearLayout.LayoutParams slp=new LinearLayout.LayoutParams(-1,dp(31));slp.topMargin=dp(7);slp.bottomMargin=dp(2);outer.addView(stamp,slp);}if("system".equals(m.optString("type"))){TextView sys=text(m.optString("body"),12,Color.rgb(138,141,145),Typeface.NORMAL);sys.setGravity(Gravity.CENTER);sys.setPadding(dp(25),dp(8),dp(25),dp(8));outer.addView(sys,new LinearLayout.LayoutParams(-1,-2));return outer;}boolean mine=isMine(m),samePrev=p>0&&sameBurst(messages.get(p-1),m),sameNext=p+1<messages.size()&&sameBurst(m,messages.get(p+1));
+        public View getView(int rowPosition,View cv,ViewGroup parent){
+            int p=messageIndexForRow(rowPosition),groupEnd=messageEndForRow(rowPosition);if(p<0)return new Space(MainActivity.this);
+            if(groupEnd>p){if(isConversationUpdate(messages.get(p))){String key=messages.get(p).optString("id",String.valueOf(p))+"|"+messages.get(groupEnd).optString("id",String.valueOf(groupEnd));boolean expanded=expandedUpdateGroups.contains(key);return buildSystemUpdateGroup(p,groupEnd,expanded,()->{if(expanded)expandedUpdateGroups.remove(key);else expandedUpdateGroups.add(key);notifyDataSetChanged();});}return buildMediaStackRow(p,groupEnd);}
+            JSONObject m=messages.get(p);LinearLayout outer=new LinearLayout(MainActivity.this);outer.setOrientation(LinearLayout.VERTICAL);if(needsStamp(p)){TextView stamp=text(clusterStamp(m.optString("createdAt")),11,Color.rgb(138,141,145),Typeface.NORMAL);stamp.setGravity(Gravity.CENTER);LinearLayout.LayoutParams slp=new LinearLayout.LayoutParams(-1,dp(31));slp.topMargin=dp(7);slp.bottomMargin=dp(2);outer.addView(stamp,slp);}if("system".equals(m.optString("type"))){outer.addView(buildSystemUpdateItem(m),new LinearLayout.LayoutParams(-1,-2));return outer;}boolean mine=isMine(m),samePrev=p>0&&sameBurst(messages.get(p-1),m),sameNext=p+1<messages.size()&&sameBurst(m,messages.get(p+1));
 
             FrameLayout swipeHost=new FrameLayout(MainActivity.this);
             swipeHost.setClipChildren(false);
@@ -4568,6 +5361,7 @@ reactionsCard.animate().cancel();
             stack.setClipToPadding(false);
             stack.setOrientation(LinearLayout.VERTICAL);
             stack.setGravity(mine?Gravity.END:Gravity.START);
+            stack.setTag("message-reaction-stack-"+reactionMessageKey(m));
             row.addView(stack,new LinearLayout.LayoutParams(-2,-2));
 
             if(mine&&m.optBoolean("pending")){
@@ -4579,6 +5373,7 @@ reactionsCard.animate().cancel();
                 pendingIcon.setPadding(0,0,0,0);
                 pendingIcon.setRotation(0f);
                 pendingIcon.setTranslationY(dp(2));
+                pendingIcon.setTag("pending-send-"+m.optString("clientId"));
 
                 LinearLayout.LayoutParams pendingLp=
                     new LinearLayout.LayoutParams(dp(16),dp(16));
@@ -4652,7 +5447,7 @@ reactionsCard.animate().cancel();
                 rpp.gravity=mine?Gravity.END:Gravity.START;
                 stack.addView(replyBlock,rpp);
             }
-            View content=buildMessageContent(m,mine,samePrev,sameNext);stack.addView(content,new LinearLayout.LayoutParams(-2,-2));
+            View content=buildMessageContent(m,mine,samePrev,sameNext);if(content.getLayoutParams()==null)content.setLayoutParams(new LinearLayout.LayoutParams(-2,-2));stack.addView(content);
 
             if(reply!=null){
                 // Align reply UI and timestamp with the actual message bubble,
@@ -4662,9 +5457,9 @@ reactionsCard.animate().cancel();
                 sideTime.setTranslationY(dp(19));
             }
 
-            if(isActuallyEdited(m)){TextView ed=text("edited",9,mine?Color.rgb(220,232,255):Color.rgb(110,113,117),Typeface.NORMAL);LinearLayout.LayoutParams ep=new LinearLayout.LayoutParams(-2,dp(14));ep.gravity=mine?Gravity.END:Gravity.START;ep.leftMargin=dp(4);ep.rightMargin=dp(4);stack.addView(ed,ep);}JSONArray reactions=m.optJSONArray("reactions");if(reactions!=null&&reactions.length()>0){StringBuilder r=new StringBuilder();for(int i=0;i<reactions.length();i++){JSONObject rr=reactions.optJSONObject(i);if(rr!=null)r.append(rr.optString("emoji"));}if(reactions.length()>1)r.append(" ").append(reactions.length());TextView badge=text(r.toString(),12,TEXT,Typeface.NORMAL);badge.setGravity(Gravity.CENTER);badge.setPadding(reactions.length()==1?0:dp(5),0,reactions.length()==1?0:dp(5),0);badge.setBackground(bg("instagram".equals(activeTheme())?Color.rgb(38,38,38):Color.WHITE,11));badge.setElevation(0f);LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(reactions.length()==1?dp(22):-2,dp(22));bp.gravity=mine?Gravity.END:Gravity.START;bp.topMargin=-dp(4);stack.addView(badge,bp);badge.setOnClickListener(v->showReactionDetails(m));}
+            renderReactionBadge(stack,m,mine);
             wireMessageGesture(content,content,m,mine,replyArrow,replyProgress);if(mine&&p==lastMineIndex()&&p==messages.size()-1&&!m.optBoolean("pending")){String statusText=status(m);if(!statusText.isEmpty()){TextView st=text(statusText,11.5f,Color.rgb(138,141,145),Typeface.NORMAL);st.setGravity(Gravity.END);LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(-2,dp(19));sp.gravity=Gravity.END;sp.rightMargin=dp(7);sp.topMargin=dp(1);outer.addView(st,sp);if("read".equals(m.optString("status")))main.postDelayed(()->{if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();},15000);}}return outer;}
-        private String replyPreviewFromReply(JSONObject r){String b=r.optString("body").replaceFirst("^[🎤📷🎥🎬]\\s*","").trim();if(!b.isEmpty())return b;String t=r.optString("type");if("audio".equals(t))return"Voice message";if("image".equals(t))return"Photo";if("video".equals(t))return"Video";if("file".equals(t))return"File";if("shared_reel".equals(t))return"Reel";if("shared_post".equals(t))return"Post";return"Message";}
+        private String replyPreviewFromReply(JSONObject r){if(isStickerMessage(r)||"sticker".equals(r.optString("type")))return"Sticker";String b=r.optString("body").replaceFirst("^[🎤📷🎥🎬]\\s*","").trim();if(!b.isEmpty())return b;String t=r.optString("type");if("audio".equals(t))return"Voice message";if("image".equals(t))return"Photo";if("video".equals(t))return"Video";if("file".equals(t))return"File";if("shared_reel".equals(t))return"Reel";if("shared_post".equals(t))return"Post";return"Message";}
     }
     private void wireMessageGesture(
         View touchTarget,
@@ -4809,6 +5604,12 @@ reactionsCard.animate().cancel();
                         e.getActionMasked()==MotionEvent.ACTION_UP &&
                         replying[0] &&
                         Math.abs(offset[0])>=dp(46);
+                    boolean tap=
+                        e.getActionMasked()==MotionEvent.ACTION_UP &&
+                        !replying[0] &&
+                        !longOpened[0] &&
+                        Math.abs(e.getRawX()-downX[0])<dp(8) &&
+                        Math.abs(e.getRawY()-downY[0])<dp(8);
 
                     ViewParent parent=v.getParent();
                     if(parent!=null)parent.requestDisallowInterceptTouchEvent(false);
@@ -4862,6 +5663,20 @@ reactionsCard.animate().cancel();
                                 }
                             },55);
                         }
+                    }else if(tap){
+                        String tappedId=m.optString("id",m.optString("messageId",m.optString("clientId","")));
+                        long now=SystemClock.uptimeMillis();
+                        boolean doubleTap=!tappedId.isEmpty()&&tappedId.equals(lastMessageTapId)&&now-lastMessageTapAt<=320L;
+                        lastMessageTapAt=now;
+                        lastMessageTapId=tappedId;
+                        if(doubleTap){
+                            if(pendingSingleMessageTap!=null){main.removeCallbacks(pendingSingleMessageTap);pendingSingleMessageTap=null;}
+                            lastMessageTapAt=0L;
+                            lastMessageTapId="";
+                            react(m,"❤️");
+                        }else{
+                            if(isMediaStackCandidate(m)){if(pendingSingleMessageTap!=null)main.removeCallbacks(pendingSingleMessageTap);pendingSingleMessageTap=()->{pendingSingleMessageTap=null;messageTrack.performClick();};main.postDelayed(pendingSingleMessageTap,325);}else messageTrack.performClick();
+                        }
                     }
                     return true;
             }
@@ -4869,7 +5684,9 @@ reactionsCard.animate().cancel();
         });
     }
     private void setOlderLoaderVisible(boolean visible){
-        if(olderMessagesSpinner==null)return;
+        if(olderMessagesSpinner==null||olderMessagesLoaderRow==null)return;
+        ViewGroup.LayoutParams rowParams=olderMessagesLoaderRow.getLayoutParams();
+        if(rowParams!=null){rowParams.height=visible?dp(46):0;olderMessagesLoaderRow.setLayoutParams(rowParams);}
         if(visible)olderMessagesSpinner.start();
         else olderMessagesSpinner.stop();
     }
@@ -4895,7 +5712,8 @@ reactionsCard.animate().cancel();
         int childCount=list.getChildCount();
         for(int child=0;child<childCount;child++){
             int adapterPosition=firstVisible+child;
-            int messageIndex=adapterPosition-headers;
+            int rowIndex=adapterPosition-headers;
+            int messageIndex=messageAdapter==null?-1:messageAdapter.messageIndexForRow(rowIndex);
 
             if(messageIndex>=0&&messageIndex<messages.size()){
                 String id=messages.get(messageIndex).optString("id","");
@@ -4941,8 +5759,9 @@ reactionsCard.animate().cancel();
                 }
 
                 JSONArray arr=json.optJSONArray("messages");
-                String next=json.optString("nextBefore","");
+                String next=normalizedBeforeCursor(json);
                 beforeCursor=next;
+                syncDirectConversationIntro();
 
                 List<JSONObject> older=new ArrayList<>();
                 Set<String> known=new HashSet<>();
@@ -4955,7 +5774,7 @@ reactionsCard.animate().cancel();
                 if(arr!=null){
                     for(int i=0;i<arr.length();i++){
                         JSONObject item=arr.optJSONObject(i);
-                        if(item==null||item.optBoolean("deleted"))continue;
+                        if(item==null||item.optBoolean("deleted")||!messageAfterDeletion(conversationId,item))continue;
 
                         String id=item.optString("id");
                         if(!id.isEmpty()&&known.contains(id))continue;
@@ -4985,8 +5804,8 @@ reactionsCard.animate().cancel();
                 if(!stableAnchorId.isEmpty()){
                     int newIndex=findMessageIndex(stableAnchorId);
                     if(newIndex>=0){
-                        targetPosition=
-                            newIndex+list.getHeaderViewsCount();
+                        int newRow=messageAdapter==null?newIndex:messageAdapter.rowForMessageIndex(newIndex);
+                        targetPosition=newRow+list.getHeaderViewsCount();
                     }
                 }else if(fallbackPosition>=0){
                     targetPosition=fallbackPosition+added;
@@ -5018,13 +5837,38 @@ reactionsCard.animate().cancel();
         );
     }
 
+    private void setSearchTargetLoading(boolean visible){
+        if(searchTargetSpinner==null)return;
+        if(visible)searchTargetSpinner.start();
+        else searchTargetSpinner.stop();
+    }
+    private void openInboxSearchTarget(String messageId,int waitAttempt){
+        if(!conversationOpenedFromInboxSearch||activeConversation==null||!messageId.equals(pendingSearchTargetMessageId))return;
+        int index=findMessageIndex(messageId);
+        if(index>=0){
+            setSearchTargetLoading(false);
+            animateMessageTarget(index);
+            return;
+        }
+        if(refreshingMessages&&waitAttempt<30){
+            main.postDelayed(()->openInboxSearchTarget(messageId,waitAttempt+1),100);
+            return;
+        }
+        if(beforeCursor!=null&&!beforeCursor.isEmpty()){
+            loadOlderUntil(messageId,0);
+            return;
+        }
+        setSearchTargetLoading(false);
+        toast("Message is no longer available.");
+    }
     private void jumpToMessage(String messageId){if(messageId==null||messageId.isEmpty()||activeConversation==null)return;int index=findMessageIndex(messageId);if(index>=0){animateMessageTarget(index);return;}loadOlderUntil(messageId,0);}
     private int findMessageIndex(String id){for(int i=0;i<messages.size();i++)if(id.equals(messages.get(i).optString("id")))return i;return-1;}
-    private void loadOlderUntil(String target,int attempts){if(attempts>=40||beforeCursor==null||beforeCursor.isEmpty()){toast("Message is no longer available.");return;}String cursor=beforeCursor;api.get("/api/messaging/conversations/"+activeConversation.optString("id")+"/messages?limit=80&before="+cursor,(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}JSONArray arr=json.optJSONArray("messages");beforeCursor=json.optString("nextBefore","");if(arr!=null){List<JSONObject> older=new ArrayList<>();for(int i=0;i<arr.length();i++){JSONObject x=arr.optJSONObject(i);if(x!=null)older.add(x);}messages.addAll(0,older);if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();}int idx=findMessageIndex(target);if(idx>=0)animateMessageTarget(idx);else if(!beforeCursor.isEmpty()&&!beforeCursor.equals(cursor))loadOlderUntil(target,attempts+1);else toast("Message is no longer available.");}));}
+    private void loadOlderUntil(String target,int attempts){if(attempts>=40||beforeCursor==null||beforeCursor.isEmpty()){if(target.equals(pendingSearchTargetMessageId))setSearchTargetLoading(false);toast("Message is no longer available.");return;}String conversationId=activeConversation==null?"":activeConversation.optString("id");String cursor=beforeCursor;api.get("/api/messaging/conversations/"+conversationId+"/messages?limit=80&before="+cursor,(json,error)->main.post(()->{if(error!=null){if(target.equals(pendingSearchTargetMessageId))setSearchTargetLoading(false);toast(error.getMessage());return;}JSONArray arr=json.optJSONArray("messages");beforeCursor=normalizedBeforeCursor(json);syncDirectConversationIntro();if(arr!=null){List<JSONObject> older=new ArrayList<>();for(int i=0;i<arr.length();i++){JSONObject x=arr.optJSONObject(i);if(x!=null&&messageAfterDeletion(conversationId,x))older.add(x);}messages.addAll(0,older);if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();}int idx=findMessageIndex(target);if(idx>=0){if(target.equals(pendingSearchTargetMessageId))setSearchTargetLoading(false);animateMessageTarget(idx);}else if(!beforeCursor.isEmpty()&&!beforeCursor.equals(cursor))loadOlderUntil(target,attempts+1);else{if(target.equals(pendingSearchTargetMessageId))setSearchTargetLoading(false);toast("Message is no longer available.");}}));}
     private void animateMessageTarget(int messageIndex){
         if(list==null)return;
 
-        int position=messageIndex+list.getHeaderViewsCount();
+        int rowIndex=messageAdapter==null?messageIndex:messageAdapter.rowForMessageIndex(messageIndex);
+        int position=rowIndex+list.getHeaderViewsCount();
 
         // ListView smoothScrollToPositionFromTop can overshoot a distant item
         // and then correct backward. Position it exactly once instead.
@@ -5067,18 +5911,231 @@ reactionsCard.animate().cancel();
 
     private boolean isActuallyEdited(JSONObject m){String ea=m.optString("editedAt");if(ea.isEmpty())return false;Date e=parseDate(ea),c=parseDate(m.optString("createdAt"));return e!=null&&(c==null||e.getTime()-c.getTime()>1200);}
 
-    private View buildMessageContent(JSONObject m,boolean mine,boolean samePrev,boolean sameNext){String type=m.optString("type","text");JSONArray att=m.optJSONArray("attachments");JSONObject a=att!=null&&att.length()>0?att.optJSONObject(0):null;if("audio".equals(type)&&a!=null){int voiceBg=mine?themeSentColors()[0]:themeReceived();int voiceText=mine?themeSentText():themeReceivedText();int voiceAccent=contrastAccent(voiceBg,themeAccent(),voiceText);VoiceMessageView v=new VoiceMessageView(this,api.absolute(a.optString("url")),a.optString("name"),api.mediaHeaders(),voiceAccent,voiceBg,voiceText,voiceText);v.setLayoutParams(new LinearLayout.LayoutParams(Math.min(dp(310),(int)(getResources().getDisplayMetrics().widthPixels*.72f)),dp(78)));return v;}if("image".equals(type)&&a!=null){String mediaUrl=a.optString("url"),mime=a.optString("mime",a.optString("mimeType",a.optString("type")));String fileName=a.optString("name","");boolean stickerLike=m.optBoolean("sticker")||a.optBoolean("sticker")||mime.toLowerCase(Locale.ROOT).contains("gif")||fileName.toLowerCase(Locale.ROOT).endsWith(".gif")||fileName.toLowerCase(Locale.ROOT).startsWith("sticker-")||mediaUrl.contains("giphy.com");ImageView im=new ImageView(this);im.setAdjustViewBounds(true);im.setScaleType(ImageView.ScaleType.FIT_CENTER);im.setBackgroundColor(Color.TRANSPARENT);im.setClipToOutline(false);int max=stickerLike?dp(178):Math.min(dp(260),(int)(getResources().getDisplayMetrics().widthPixels*.72f));im.setMaxWidth(max);im.setMaxHeight(stickerLike?dp(196):dp(310));im.setLayoutParams(new LinearLayout.LayoutParams(-2,-2));if(stickerLike)stickers.load(mediaUrl,im);else{im.setClipToOutline(true);im.setBackground(bg(Color.rgb(17,17,17),15));images.load(mediaUrl,im);im.setOnClickListener(v->showMediaViewer(m,a));}return im;}if("video".equals(type)&&a!=null){VideoView vv=new VideoView(this);vv.setVideoURI(Uri.parse(api.absolute(a.optString("url"))),api.mediaHeaders());vv.setOnClickListener(v->{if(vv.isPlaying())vv.pause();else vv.start();});int w=Math.min(dp(260),(int)(getResources().getDisplayMetrics().widthPixels*.72f));vv.setLayoutParams(new LinearLayout.LayoutParams(w,dp(190)));return vv;}if("file".equals(type)&&a!=null){LinearLayout file=new LinearLayout(this);file.setGravity(Gravity.CENTER_VERTICAL);file.setPadding(dp(10),dp(8),dp(10),dp(8));TextView clip=text("📎",20,TEXT,Typeface.NORMAL);file.addView(clip,new LinearLayout.LayoutParams(dp(34),dp(42)));LinearLayout copy=new LinearLayout(this);copy.setOrientation(LinearLayout.VERTICAL);file.addView(copy,new LinearLayout.LayoutParams(dp(190),dp(48)));copy.addView(text(a.optString("name","File"),13,TEXT,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(27)));copy.addView(text(fileSize(a.optLong("size")),10,SUB,Typeface.NORMAL),new LinearLayout.LayoutParams(-1,dp(18)));return file;}if("shared_reel".equals(type)||"shared_post".equals(type)){TextView card=text("shared_reel".equals(type)?"Reel":"Post",15,TEXT,Typeface.BOLD);card.setGravity(Gravity.CENTER);card.setPadding(dp(18),dp(18),dp(18),dp(18));card.setBackground(bg(RECEIVED,15));return card;}String body=m.optString("body");TextView bubble=text(body,15,mine?themeSentText():themeReceivedText(),Typeface.NORMAL);bubble.setPadding(dp(12),dp(9),dp(12),dp(9));bubble.setMaxWidth((int)(getResources().getDisplayMetrics().widthPixels*.78f));bubble.setBackground(bubbleBg(mine,samePrev,sameNext));return bubble;}
+    private int mediaViewMode(JSONObject message,JSONObject attachment){int value=message==null?0:message.optInt("viewMode",message.optInt("mediaViewMode",message.optInt("viewLimit",0)));if(value==0&&attachment!=null)value=attachment.optInt("viewMode",attachment.optInt("mediaViewMode",attachment.optInt("viewLimit",0)));if(value==1||value==2)return value;String raw="";if(message!=null)raw=message.optString("viewMode",message.optString("mediaViewMode",message.optString("viewLimit",""))).toLowerCase(Locale.ROOT);if(raw.contains("once"))return 1;if(raw.contains("twice"))return 2;String name=attachment==null?"":(attachment.optString("name","")+" "+attachment.optString("url","")).toLowerCase(Locale.ROOT);if(name.contains("__vm1__")||name.contains("view-once"))return 1;if(name.contains("__vm2__")||name.contains("view-twice"))return 2;return 0;}
+    private String mediaUrl(JSONObject attachment){String raw=attachment==null?"":attachment.optString("url","");return raw.startsWith("file:")||raw.startsWith("content:")||raw.startsWith("data:")?raw:api.absolute(raw);}
+    private String displayMediaUrl(JSONObject attachment){if(attachment==null)return"";String local=attachment.optString("localPreviewUrl","");if(local.startsWith("file:")){String path=Uri.parse(local).getPath();if(path!=null&&new File(path).exists())return local;}return attachment.optString("url","");}
+    private String actualMediaType(String declared,JSONObject attachment){if(attachment==null)return declared;String probe=(attachment.optString("mime",attachment.optString("mimeType",attachment.optString("type","")))+" "+attachment.optString("name","")+" "+attachment.optString("url","")).toLowerCase(Locale.ROOT);if(probe.contains("video/")||probe.matches(".*\\.(mp4|mov|m4v|webm|3gp)([? ].*)?$"))return"video";if(probe.contains("image/")||probe.matches(".*\\.(jpg|jpeg|png|webp|gif|heic)([? ].*)?$"))return"image";return declared;}
+    private int stableMediaHeight(JSONObject attachment,int width,boolean stickerLike){if(stickerLike)return width;int sourceW=attachment==null?0:attachment.optInt("width",attachment.optInt("naturalWidth",0)),sourceH=attachment==null?0:attachment.optInt("height",attachment.optInt("naturalHeight",0));if(sourceW<=0||sourceH<=0)return dp(220);return Math.max(dp(190),Math.min(dp(290),Math.round(width*(sourceH/(float)sourceW)*1.22f)));}
+    private String legacyEphemeralKey(JSONObject message,JSONObject attachment){String id=message==null?"":message.optString("id",message.optString("clientId",""));if(id.isEmpty()&&attachment!=null)id=attachment.optString("url",attachment.optString("name","media"));return "ephemeral-views-"+id;}
+    private String legacyV2EphemeralKey(JSONObject message,JSONObject attachment){String identity="";if(attachment!=null){identity=attachment.optString("id","");if(identity.isEmpty())identity=attachment.optString("url","");if(!identity.isEmpty()){int query=identity.indexOf('?');if(query>=0)identity=identity.substring(0,query);}}if(identity.isEmpty()&&message!=null)identity=message.optString("id",message.optString("clientId","media"));return "ephemeral-views-v2-"+identity;}
+    private String ephemeralKey(JSONObject message,JSONObject attachment){String cid=message==null?"":message.optString("conversationId",message.optString("conversation_id",""));if(cid.isEmpty()&&activeConversation!=null)cid=activeConversation.optString("id","");String mid=message==null?"":message.optString("id",message.optString("messageId",message.optString("clientId","")));if(mid.isEmpty()&&attachment!=null)mid=attachment.optString("id",attachment.optString("name","media"));return"ephemeral-views-v3-"+cid+":"+mid;}
+    private List<String> ephemeralKeys(JSONObject message,JSONObject attachment){ArrayList<String> keys=new ArrayList<>();String[] candidates={ephemeralKey(message,attachment),legacyV2EphemeralKey(message,attachment),legacyEphemeralKey(message,attachment)};for(String key:candidates)if(key!=null&&!key.isEmpty()&&!keys.contains(key))keys.add(key);return keys;}
+    private int serverRemainingMediaViews(JSONObject message,JSONObject attachment,int mode){int remaining=-1;if(message!=null){if(message.has("remainingViews"))remaining=message.optInt("remainingViews",-1);else if(message.has("viewsRemaining"))remaining=message.optInt("viewsRemaining",-1);else if(message.has("openedCount"))remaining=Math.max(0,mode-message.optInt("openedCount",0));else if(message.has("viewedCount"))remaining=Math.max(0,mode-message.optInt("viewedCount",0));else if(mode==1&&message.optBoolean("viewed"))remaining=0;}if(remaining<0&&attachment!=null){if(attachment.has("remainingViews"))remaining=attachment.optInt("remainingViews",-1);else if(attachment.has("viewsRemaining"))remaining=attachment.optInt("viewsRemaining",-1);else if(attachment.has("openedCount"))remaining=Math.max(0,mode-attachment.optInt("openedCount",0));}return remaining;}
+    private int remainingMediaViews(JSONObject message,JSONObject attachment){int mode=mediaViewMode(message,attachment);if(mode<=0||isMine(message))return mode;android.content.SharedPreferences prefs=getSharedPreferences("messenger_ephemeral_media",MODE_PRIVATE);int left=mode;boolean found=false;for(String key:ephemeralKeys(message,attachment))if(prefs.contains(key)){left=Math.min(left,prefs.getInt(key,mode));found=true;}int serverLeft=serverRemainingMediaViews(message,attachment,mode);if(serverLeft>=0){left=Math.min(left,serverLeft);found=true;}left=Math.max(0,Math.min(mode,left));if(found&&!prefs.contains(ephemeralKey(message,attachment)))prefs.edit().putInt(ephemeralKey(message,attachment),left).apply();return left;}
+    private boolean beginMediaView(JSONObject message,JSONObject attachment){if(isMine(message))return false;String key=ephemeralKey(message,attachment);synchronized(openEphemeralMedia){if(openEphemeralMedia.contains(key))return false;int left=remainingMediaViews(message,attachment);if(left<=0)return false;android.content.SharedPreferences.Editor edit=getSharedPreferences("messenger_ephemeral_media",MODE_PRIVATE).edit();for(String alias:ephemeralKeys(message,attachment))edit.putInt(alias,left-1);if(!edit.commit())return false;openEphemeralMedia.add(key);}if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();return true;}
+    private void finishMediaView(JSONObject message,JSONObject attachment){synchronized(openEphemeralMedia){openEphemeralMedia.remove(ephemeralKey(message,attachment));}}
+    private String ephemeralRelativeTime(String value){Date dt=parseDate(value);if(dt==null)return"now";long sec=Math.max(0,(System.currentTimeMillis()-dt.getTime())/1000);if(sec<60)return"now";long min=sec/60;if(min<60)return min+"m";long hour=min/60;if(hour<24)return hour+"h";return(hour/24)+"d";}
+    private View buildEphemeralMediaPill(JSONObject message,JSONObject attachment,boolean mine,String type,int mode){
+        LinearLayout pill=new LinearLayout(this);pill.setGravity(Gravity.CENTER_VERTICAL);pill.setPadding(dp(12),0,dp(14),0);
+        boolean expired=!mine&&remainingMediaViews(message,attachment)<=0;
+        int fill=expired?themeDisabled():(mine?themeSentColors()[0]:themeReceived());
+        int color=expired?Color.argb(155,themeReceivedText()==Color.WHITE?255:70,themeReceivedText()==Color.WHITE?255:73,themeReceivedText()==Color.WHITE?255:78):(mine?themeSentText():themeReceivedText());
+        pill.setBackground(bg(fill,22));
+        ImageView iconView=new ImageView(this);iconView.setImageResource(mode==1?R.drawable.ic_camera_view_once_ref:R.drawable.ic_camera_view_twice_ref);iconView.setScaleType(ImageView.ScaleType.CENTER_INSIDE);iconView.setColorFilter(color);pill.addView(iconView,new LinearLayout.LayoutParams(dp(20),dp(20)));
+        String noun="video".equals(type)?"video":"photo",capital=Character.toUpperCase(noun.charAt(0))+noun.substring(1);String label=mine||expired?capital:"View "+noun;TextView title=text(label,15.5f,color,Typeface.BOLD);LinearLayout.LayoutParams tlp=new LinearLayout.LayoutParams(-2,dp(44));tlp.leftMargin=dp(6);pill.addView(title,tlp);pill.setMinimumHeight(dp(44));
+        // Keep every pill enabled so the parent swipe/long-press message gestures work.
+        // Only available received media receives a tap-to-open action.
+        pill.setEnabled(true);pill.setClickable(false);pill.setAlpha(expired?.48f:1f);
+        if(mine||expired)return pill;
+        Runnable open=()->{if("video".equals(type))showVideoMediaViewer(message,attachment);else showMediaViewer(message,attachment);};
+        Runnable ready=()->pill.post(()->{pill.setClickable(true);pill.setAlpha(1f);pill.setOnClickListener(v->open.run());});
+        boolean preloaded;if("video".equals(type)){preloaded=!temporaryVideoLocalUrl(attachment.optString("url")).isEmpty();if(!preloaded)preloadTemporaryVideo(attachment,ready);}else{preloaded=images.isReady(attachment.optString("url"));if(!preloaded)images.prefetch(attachment.optString("url"),ready);}if(preloaded)ready.run();else pill.setAlpha(.68f);return pill;
+    }
+    private View buildMessageContent(JSONObject m,boolean mine,boolean samePrev,boolean sameNext){
+        String type=m.optString("type","text");
+        JSONArray att=m.optJSONArray("attachments");
+        JSONObject a=att!=null&&att.length()>0?att.optJSONObject(0):null;
+        if(a!=null)type=actualMediaType(type,a);
+        if("audio".equals(type)&&a!=null){int voiceBg=mine?themeSentColors()[0]:themeReceived();int voiceText=mine?themeSentText():themeReceivedText();int voiceAccent=contrastAccent(voiceBg,themeAccent(),voiceText);VoiceMessageView v=new VoiceMessageView(this,mediaUrl(a),a.optString("name"),api.mediaHeaders(),voiceAccent,voiceBg,voiceText,voiceText);v.setLayoutParams(new LinearLayout.LayoutParams(Math.min(dp(310),(int)(getResources().getDisplayMetrics().widthPixels*.72f)),dp(78)));return v;}
+        if(("image".equals(type)||"video".equals(type))&&a!=null){int mode=mediaViewMode(m,a);if(mode>0)return buildEphemeralMediaPill(m,a,mine,type,mode);}
+        if("image".equals(type)&&a!=null){
+            String url=displayMediaUrl(a),mime=a.optString("mime",a.optString("mimeType",a.optString("type"))),fileName=a.optString("name","");
+            boolean stickerLike=m.optBoolean("sticker")||a.optBoolean("sticker")||mime.toLowerCase(Locale.ROOT).contains("gif")||fileName.toLowerCase(Locale.ROOT).endsWith(".gif")||fileName.toLowerCase(Locale.ROOT).startsWith("sticker-")||url.contains("giphy.com");
+            int width=stickerLike?dp(108):Math.min(dp(180),(int)(getResources().getDisplayMetrics().widthPixels*.52f)),height=stableMediaHeight(a,width,stickerLike);
+            ImageView im=new ImageView(this);im.setAdjustViewBounds(false);im.setScaleType(stickerLike?ImageView.ScaleType.CENTER_INSIDE:ImageView.ScaleType.CENTER_CROP);im.setBackgroundColor(Color.TRANSPARENT);im.setClipToOutline(false);
+            if(stickerLike){
+                FrameLayout stickerHost=new FrameLayout(this);stickerHost.setLayoutParams(new LinearLayout.LayoutParams(width,height));
+                stickerHost.addView(im,new FrameLayout.LayoutParams(width,height,Gravity.CENTER));
+                OlderMessagesSpinner loading=new OlderMessagesSpinner(this);stickerHost.addView(loading,new FrameLayout.LayoutParams(dp(30),dp(30),Gravity.CENTER));boolean stickerReady=stickers.isReady(url);if(stickerReady){loading.setVisibility(View.GONE);im.setAlpha(1f);}else{loading.start();im.setAlpha(0f);}stickers.load(url,im,()->{if(!url.equals(im.getTag()))return;if(stickerReady){im.setAlpha(1f);loading.stop();return;}im.animate().alpha(1f).setDuration(110).start();loading.animate().alpha(0f).setDuration(100).withEndAction(loading::stop).start();});
+                return stickerHost;
+            }
+            im.setLayoutParams(new LinearLayout.LayoutParams(width,height));im.setClipToOutline(true);im.setBackground(bg(Color.rgb(17,17,17),15));images.load(url,im);im.setOnClickListener(v->showMediaViewer(m,a,im));return im;
+        }
+        if("video".equals(type)&&a!=null){int w=Math.min(dp(180),(int)(getResources().getDisplayMetrics().widthPixels*.52f)),h=dp(210);FrameLayout host=new FrameLayout(this);host.setBackground(bg(Color.rgb(17,17,17),15));host.setClipToOutline(true);ImageView thumbnail=new ImageView(this);thumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);host.addView(thumbnail,new FrameLayout.LayoutParams(w,h));loadVideoPoster(a,thumbnail);ImageView play=new ImageView(this);play.setImageResource(R.drawable.ic_msg_play);play.setColorFilter(Color.WHITE);play.setBackgroundColor(Color.TRANSPARENT);FrameLayout.LayoutParams playLp=new FrameLayout.LayoutParams(dp(28),dp(28),Gravity.TOP|Gravity.END);playLp.topMargin=dp(8);playLp.rightMargin=dp(8);host.addView(play,playLp);host.setOnClickListener(v->showVideoMediaViewer(m,a));host.setLayoutParams(new LinearLayout.LayoutParams(w,h));return host;}
+        if("file".equals(type)&&a!=null){LinearLayout file=new LinearLayout(this);file.setGravity(Gravity.CENTER_VERTICAL);file.setPadding(dp(10),dp(8),dp(10),dp(8));TextView clip=text("📎",20,TEXT,Typeface.NORMAL);file.addView(clip,new LinearLayout.LayoutParams(dp(34),dp(42)));LinearLayout copy=new LinearLayout(this);copy.setOrientation(LinearLayout.VERTICAL);file.addView(copy,new LinearLayout.LayoutParams(dp(190),dp(48)));copy.addView(text(a.optString("name","File"),13,TEXT,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(27)));copy.addView(text(fileSize(a.optLong("size")),10,SUB,Typeface.NORMAL),new LinearLayout.LayoutParams(-1,dp(18)));return file;}
+        if("shared_reel".equals(type)||"shared_post".equals(type)){TextView card=text("shared_reel".equals(type)?"Reel":"Post",15,TEXT,Typeface.BOLD);card.setGravity(Gravity.CENTER);card.setPadding(dp(18),dp(18),dp(18),dp(18));card.setBackground(bg(RECEIVED,15));return card;}
+        String body=m.optString("body");int bubbleText=mine?themeSentText():themeReceivedText();LinearLayout bubble=new LinearLayout(this);bubble.setOrientation(LinearLayout.VERTICAL);bubble.setPadding(dp(12),dp(7),dp(12),isActuallyEdited(m)?dp(4):dp(7));bubble.setBackground(bubbleBg(mine,samePrev,sameNext));bubble.setGravity(Gravity.START);TextView bodyView=text(body,15,bubbleText,Typeface.NORMAL);bodyView.setMaxWidth((int)(getResources().getDisplayMetrics().widthPixels*.78f));bubble.addView(bodyView,new LinearLayout.LayoutParams(-2,-2));if(isActuallyEdited(m)){TextView edited=text("Edited",9,mine?Color.argb(205,235,241,255):Color.rgb(110,113,117),Typeface.NORMAL);edited.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams editedLp=new LinearLayout.LayoutParams(-2,dp(13));editedLp.gravity=Gravity.START;bubble.addView(edited,editedLp);}return bubble;
+    }
     private int contrastAccent(int bg,int preferred,int text){int br=Color.red(bg),bgc=Color.green(bg),bb=Color.blue(bg),pr=Color.red(preferred),pg=Color.green(preferred),pb=Color.blue(preferred);double lumBg=.299*br+.587*bgc+.114*bb,lumPref=.299*pr+.587*pg+.114*pb;return Math.abs(lumBg-lumPref)<68?text:preferred;}
-    private String relativeTime(String value){Date dt=parseDate(value);if(dt==null)return"";long sec=Math.max(0,(System.currentTimeMillis()-dt.getTime())/1000);if(sec<60)return"Just now";long m=sec/60;if(m<60)return m+"m";long h=m/60;if(h<24)return h+"h";return(h/24)+"d";}
-    private void showVideoMediaViewer(JSONObject message,JSONObject attachment){
-        final Dialog d=new Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen);FrameLayout overlay=new FrameLayout(this);overlay.setBackgroundColor(Color.BLACK);
-        VideoView video=new VideoView(this);video.setVideoURI(Uri.parse(api.absolute(attachment.optString("url"))),api.mediaHeaders());FrameLayout.LayoutParams vp=new FrameLayout.LayoutParams(-1,-1);vp.setMargins(dp(12),dp(72),dp(12),dp(72));overlay.addView(video,vp);
-        android.widget.MediaController controls=new android.widget.MediaController(this);controls.setAnchorView(video);video.setMediaController(controls);video.setOnPreparedListener(mp->{mp.setLooping(false);video.start();});
-        LinearLayout top=new LinearLayout(this);top.setGravity(Gravity.CENTER_VERTICAL);top.setPadding(dp(8),dp(8),dp(8),dp(8));overlay.addView(top,new FrameLayout.LayoutParams(-1,dp(64),Gravity.TOP));ImageButton close=icon(R.drawable.ic_msg_close,42,Color.WHITE);top.addView(close);close.setOnClickListener(v->d.dismiss());String name=isMine(message)?"You":senderName(message);TextView who=text(name,15,Color.WHITE,Typeface.BOLD);LinearLayout.LayoutParams wlp=new LinearLayout.LayoutParams(0,dp(48),1);wlp.leftMargin=dp(7);top.addView(who,wlp);
-        d.setOnDismissListener(x->{try{video.stopPlayback();}catch(Exception ignored){}});d.setContentView(overlay);d.show();Window w=d.getWindow();if(w!=null){w.setLayout(-1,-1);w.setStatusBarColor(Color.BLACK);w.setNavigationBarColor(Color.BLACK);}
+    private String relativeTime(String value){Date dt=parseDate(value);if(dt==null)return"";long sec=Math.max(0,(System.currentTimeMillis()-dt.getTime())/1000);if(sec<60)return"Just now";long minutes=sec/60;if(minutes<60)return minutes==1?"1 minute ago":minutes+" minutes ago";long hours=minutes/60;if(hours<24)return hours==1?"1 hour ago":hours+" hours ago";long days=hours/24;if(days<7)return days==1?"1 day ago":days+" days ago";long weeks=days/7;return weeks==1?"1 week ago":weeks+" weeks ago";}
+    private void showTimedVideoViewer(JSONObject message,JSONObject attachment){
+        if(isMine(message))return;
+        String preparedUrl=temporaryVideoLocalUrl(attachment.optString("url"));
+        if(preparedUrl.isEmpty()){preloadTemporaryVideo(attachment,null);toast("Video is still loading.");return;}
+        if(!beginMediaView(message,attachment)){if(remainingMediaViews(message,attachment)<=0)toast("This video is no longer available.");return;}
+        final Dialog d=new Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        FrameLayout overlay=new FrameLayout(this);overlay.setBackgroundColor(Color.BLACK);
+        VideoView video=new VideoView(this);video.setClickable(true);video.setAlpha(0f);video.setVideoURI(Uri.parse(preparedUrl));
+        FrameLayout.LayoutParams videoLp=new FrameLayout.LayoutParams(-1,-1);videoLp.topMargin=dp(54);overlay.addView(video,videoLp);
+        ProgressBar loading=new ProgressBar(this);FrameLayout.LayoutParams loadingLp=new FrameLayout.LayoutParams(dp(42),dp(42),Gravity.CENTER);overlay.addView(loading,loadingLp);
+        TimedProgressView progress=new TimedProgressView(this);FrameLayout.LayoutParams progressLp=new FrameLayout.LayoutParams(-1,dp(4),Gravity.TOP);progressLp.leftMargin=dp(9);progressLp.rightMargin=dp(9);progressLp.topMargin=dp(13);overlay.addView(progress,progressLp);
+        LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);FrameLayout.LayoutParams headerLp=new FrameLayout.LayoutParams(-1,dp(38),Gravity.TOP);headerLp.leftMargin=dp(12);headerLp.rightMargin=dp(12);headerLp.topMargin=dp(20);overlay.addView(header,headerLp);
+        JSONObject sender=message.optJSONObject("sender");String name=senderName(message);View avatar=buildUserAvatar(avatarUrl(sender),name,30);header.addView(avatar,new LinearLayout.LayoutParams(dp(30),dp(30)));
+        LinearLayout words=new LinearLayout(this);words.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams wordsLp=new LinearLayout.LayoutParams(0,dp(36),1);wordsLp.leftMargin=dp(7);header.addView(words,wordsLp);words.addView(text(name,14.5f,Color.WHITE,Typeface.BOLD),new LinearLayout.LayoutParams(-2,-1));words.addView(text(" to you",14.5f,Color.WHITE,Typeface.NORMAL),new LinearLayout.LayoutParams(-2,-1));TextView time=text(" "+ephemeralRelativeTime(message.optString("createdAt")),14.5f,Color.rgb(155,158,164),Typeface.NORMAL);words.addView(time,new LinearLayout.LayoutParams(-2,-1));
+        final boolean[] resumeAfterHold={false},started={false};final Runnable[] ticker={null};
+        video.setOnPreparedListener(mp->{if(!d.isShowing())return;started[0]=true;loading.setVisibility(View.GONE);video.setAlpha(1f);mp.setLooping(false);video.start();ticker[0]=new Runnable(){public void run(){int duration=Math.max(1,video.getDuration()),position=Math.max(0,video.getCurrentPosition());progress.setProgress(1f-Math.min(1f,position/(float)duration));time.setText(" "+ephemeralRelativeTime(message.optString("createdAt")));if(d.isShowing())main.postDelayed(this,33);}};main.post(ticker[0]);});
+        video.setOnErrorListener((mp,what,extra)->{loading.setVisibility(View.GONE);toast("Couldn't load this video.");d.dismiss();return true;});
+        video.setOnCompletionListener(mp->d.dismiss());
+        wireTemporaryMediaHold(video,()->{resumeAfterHold[0]=video.isPlaying();if(resumeAfterHold[0])video.pause();},()->{if(resumeAfterHold[0]&&d.isShowing())video.start();resumeAfterHold[0]=false;});
+        d.setOnDismissListener(x->{finishMediaView(message,attachment);if(ticker[0]!=null)main.removeCallbacks(ticker[0]);try{video.stopPlayback();}catch(Exception ignored){}if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();});
+        d.setContentView(overlay);d.show();Window w=d.getWindow();if(w!=null){w.setLayout(-1,-1);w.setStatusBarColor(Color.BLACK);w.setNavigationBarColor(Color.BLACK);}
     }
 
-    private void showMediaViewer(JSONObject message,JSONObject attachment){final Dialog d=new Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen);FrameLayout overlay=new FrameLayout(this);overlay.setBackgroundColor(Color.rgb(10,12,16));ImageView backdrop=new ImageView(this);backdrop.setScaleType(ImageView.ScaleType.CENTER_CROP);backdrop.setAlpha(.82f);backdrop.setScaleX(1.16f);backdrop.setScaleY(1.16f);if(Build.VERSION.SDK_INT>=31)backdrop.setRenderEffect(RenderEffect.createBlurEffect(dp(35),dp(35),Shader.TileMode.CLAMP));overlay.addView(backdrop,new FrameLayout.LayoutParams(-1,-1));images.load(attachment.optString("url"),backdrop);View shade=new View(this);shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,new int[]{0xaa05070a,0x33080a0e,0x5505070a}));overlay.addView(shade,new FrameLayout.LayoutParams(-1,-1));ZoomImageView image=new ZoomImageView(this);FrameLayout.LayoutParams ip=new FrameLayout.LayoutParams(-1,-1);overlay.addView(image,ip);images.load(attachment.optString("url"),image);LinearLayout top=new LinearLayout(this);top.setGravity(Gravity.CENTER_VERTICAL);top.setPadding(dp(8),dp(8),dp(8),dp(8));overlay.addView(top,new FrameLayout.LayoutParams(-1,dp(74),Gravity.TOP));ImageButton close=icon(R.drawable.ic_msg_close,42,Color.WHITE);top.addView(close);close.setOnClickListener(v->d.dismiss());JSONObject sender=message.optJSONObject("sender");String name=isMine(message)?"You":senderName(message);View av=buildUserAvatar(avatarUrl(sender),name,38);LinearLayout.LayoutParams avp=new LinearLayout.LayoutParams(dp(38),dp(38));avp.leftMargin=dp(4);top.addView(av,avp);LinearLayout author=new LinearLayout(this);author.setOrientation(LinearLayout.VERTICAL);author.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams alp=new LinearLayout.LayoutParams(0,dp(48),1);alp.leftMargin=dp(7);top.addView(author,alp);author.addView(text(name,15,Color.WHITE,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(24)));author.addView(text(relativeTime(message.optString("createdAt")),13,Color.rgb(199,203,209),Typeface.NORMAL),new LinearLayout.LayoutParams(-1,dp(22)));ImageButton story=icon(R.drawable.ic_media_story,42,Color.WHITE);top.addView(story);story.setOnClickListener(v->{story.setEnabled(false);new Thread(()->{try{byte[] raw=api.getBytesSync(attachment.optString("url"));String mime=attachment.optString("mime","image/jpeg");String data="data:"+mime+";base64,"+Base64.encodeToString(raw,Base64.NO_WRAP);api.post("/api/stories",new JSONObject().put("image",data).put("caption",""),(json,error)->main.post(()->{story.setEnabled(true);if(error!=null)toast(error.getMessage());else{toast("Added to story");d.dismiss();}}));}catch(Exception ex){main.post(()->{story.setEnabled(true);toast(ex.getMessage());});}}).start();});ImageButton more=icon(R.drawable.ic_media_more,42,Color.WHITE);more.setPadding(dp(4),dp(4),dp(4),dp(4));top.addView(more);LinearLayout menu=new LinearLayout(this);menu.setOrientation(LinearLayout.VERTICAL);menu.setPadding(dp(5),dp(5),dp(5),dp(5));menu.setBackground(bg(Color.rgb(41,45,51),15));menu.setVisibility(View.GONE);FrameLayout.LayoutParams mlp=new FrameLayout.LayoutParams(dp(172),dp(58),Gravity.TOP|Gravity.END);mlp.setMargins(0,dp(63),dp(12),0);overlay.addView(menu,mlp);LinearLayout download=actionRow("Download",R.drawable.ic_media_download,false);menu.addView(download,new LinearLayout.LayoutParams(-1,dp(48)));download.setOnClickListener(v->{menu.setVisibility(View.GONE);try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(api.absolute(attachment.optString("url")))));}catch(Exception e){toast(e.getMessage());}});more.setOnClickListener(v->menu.setVisibility(menu.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE));LinearLayout reply=new LinearLayout(this);reply.setGravity(Gravity.CENTER_VERTICAL);reply.setPadding(dp(7),dp(5),dp(7),dp(5));reply.setBackground(bg(Color.rgb(59,61,65),29));FrameLayout.LayoutParams rp=new FrameLayout.LayoutParams(-1,dp(54),Gravity.BOTTOM);rp.setMargins(dp(12),0,dp(12),dp(12));overlay.addView(reply,rp);ImageButton camera=icon(R.drawable.ic_media_camera,42,Color.rgb(7,9,12));camera.setBackground(bg(Color.WHITE,21));reply.addView(camera);camera.setOnClickListener(v->{replyTo=message;pickAttachment();});EditText input=new EditText(this);input.setHint("Reply…");input.setHintTextColor(Color.rgb(182,184,189));input.setTextColor(Color.WHITE);input.setTextSize(17);input.setSingleLine(true);input.setBackgroundColor(Color.TRANSPARENT);input.setPadding(dp(10),0,dp(8),0);reply.addView(input,new LinearLayout.LayoutParams(0,dp(42),1));ImageButton send=icon(R.drawable.msg_send_enabled,42,themeAccent());Bitmap mediaSend=themedIconBitmap(R.drawable.msg_send_enabled,themeAccent());if(mediaSend!=null)send.setImageBitmap(mediaSend);send.clearColorFilter();send.setVisibility(View.GONE);reply.addView(send);input.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int b,int c){send.setVisibility(s.toString().trim().isEmpty()?View.GONE:View.VISIBLE);}public void afterTextChanged(Editable e){}});send.setOnClickListener(v->{String body=input.getText().toString().trim();if(body.isEmpty())return;try{JSONObject req=new JSONObject().put("body",body).put("clientId","photo-reply-"+System.currentTimeMillis()).put("replyToId",message.optString("id"));api.post("/api/messaging/conversations/"+activeConversation.optString("id")+"/messages",req,(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}input.setText("");JSONObject nm=json.optJSONObject("message");if(nm!=null)upsertMessage(nm);}));}catch(Exception ex){toast(ex.getMessage());}});final boolean[] chrome={true};image.setOnSingleTapListener(()->{chrome[0]=!chrome[0];if(!chrome[0])menu.setVisibility(View.GONE);top.animate().alpha(chrome[0]?1f:0f).translationY(chrome[0]?0:-dp(12)).setDuration(1800).setInterpolator(new DecelerateInterpolator()).start();reply.animate().alpha(chrome[0]?1f:0f).translationY(chrome[0]?0:dp(12)).setDuration(1800).setInterpolator(new DecelerateInterpolator()).start();});image.setOnDismissListener(d::dismiss);d.setContentView(overlay);d.show();Window w=d.getWindow();if(w!=null){w.setLayout(-1,-1);w.setStatusBarColor(Color.BLACK);w.setNavigationBarColor(Color.BLACK);}}
+    private static final class StackMediaPager extends FrameLayout{
+        interface PageChanged{void changed(int index);}
+        private PageChanged listener;private int page=0;private float downX,downY,dragX,lastX;private long downAt;private boolean dragging=false,settling=false;
+        StackMediaPager(Context context){super(context);setClipChildren(true);setClipToPadding(true);setClickable(true);}
+        void setOnPageChanged(PageChanged value){listener=value;}
+        int currentPage(){return page;}
+        private float gap(){return getResources().getDisplayMetrics().density*12f;}
+        private float span(){return Math.max(1,getWidth())+gap();}
+        private ZoomImageView currentZoom(){if(page<0||page>=getChildCount())return null;View item=getChildAt(page);if(!(item instanceof ViewGroup))return null;ViewGroup group=(ViewGroup)item;for(int i=0;i<group.getChildCount();i++)if(group.getChildAt(i) instanceof ZoomImageView)return(ZoomImageView)group.getChildAt(i);return null;}
+        private boolean canPage(){ZoomImageView zoom=currentZoom();return zoom==null||zoom.isAtBaseScale();}
+        void jumpToPage(int value){page=Math.max(0,Math.min(Math.max(0,getChildCount()-1),value));dragX=0;positionPages();if(listener!=null)listener.changed(page);}
+        private void positionPages(){float width=span();for(int i=0;i<getChildCount();i++){View child=getChildAt(i);child.setTranslationX((i-page)*width+dragX);child.setVisibility(Math.abs(i-page)<=1?View.VISIBLE:View.INVISIBLE);}}
+        @Override protected void onLayout(boolean changed,int l,int t,int r,int b){for(int i=0;i<getChildCount();i++)getChildAt(i).layout(0,0,r-l,b-t);positionPages();}
+        @Override public boolean onInterceptTouchEvent(MotionEvent e){
+            if(settling)return true;
+            if(e.getActionMasked()==MotionEvent.ACTION_DOWN){downX=lastX=e.getX();downY=e.getY();downAt=SystemClock.uptimeMillis();dragX=0;dragging=false;return false;}
+            if(e.getPointerCount()>1)return false;
+            if(e.getActionMasked()==MotionEvent.ACTION_MOVE&&canPage()){float dx=e.getX()-downX,dy=e.getY()-downY;if(Math.abs(dx)>getResources().getDisplayMetrics().density*9f&&Math.abs(dx)>Math.abs(dy)*1.12f){dragging=true;ViewParent parent=getParent();if(parent!=null)parent.requestDisallowInterceptTouchEvent(true);return true;}}
+            return false;
+        }
+        @Override public boolean onTouchEvent(MotionEvent e){
+            if(e.getActionMasked()==MotionEvent.ACTION_DOWN){downX=lastX=e.getX();downY=e.getY();downAt=SystemClock.uptimeMillis();dragX=0;dragging=true;return true;}
+            if(e.getActionMasked()==MotionEvent.ACTION_MOVE){float raw=e.getX()-downX;boolean edge=(page==0&&raw>0)||(page==getChildCount()-1&&raw<0);dragX=edge?raw*.28f:raw;lastX=e.getX();positionPages();return true;}
+            if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL){float raw=e.getX()-downX;long elapsed=Math.max(1,SystemClock.uptimeMillis()-downAt);float velocity=raw*1000f/elapsed;int direction=0;if(Math.abs(raw)>getWidth()*.16f||Math.abs(velocity)>760f)direction=raw<0?1:-1;int target=Math.max(0,Math.min(getChildCount()-1,page+direction));boolean boundary=target==page&&Math.abs(raw)>getResources().getDisplayMetrics().density*18f;settleTo(target,boundary);ViewParent parent=getParent();if(parent!=null)parent.requestDisallowInterceptTouchEvent(false);dragging=false;return true;}
+            return true;
+        }
+        private void settleTo(int target,boolean boundary){settling=true;final int old=page;final float from=dragX;final float to=target>page?-span():target<page?span():0f;android.animation.ValueAnimator animator=android.animation.ValueAnimator.ofFloat(from,to);animator.setDuration(boundary?280:225);animator.setInterpolator(boundary?new android.view.animation.OvershootInterpolator(.72f):new DecelerateInterpolator(1.65f));animator.addUpdateListener(a->{dragX=(float)a.getAnimatedValue();positionPages();});animator.addListener(new android.animation.AnimatorListenerAdapter(){@Override public void onAnimationEnd(android.animation.Animator animation){page=target;dragX=0;settling=false;positionPages();if(listener!=null&&page!=old)listener.changed(page);}});animator.start();}
+    }
+
+    private static final class StackMediaItem{
+        final JSONObject message,attachment;final String type;
+        StackMediaItem(JSONObject m,JSONObject a,String t){message=m;attachment=a;type=t;}
+    }
+
+    private void showMediaStackGallery(int start,int end){
+        final ArrayList<StackMediaItem> items=new ArrayList<>();
+        for(int i=start;i<=end;i++){JSONObject m=messages.get(i),a=mediaStackAttachment(m);if(a!=null)items.add(new StackMediaItem(m,a,actualMediaType(m.optString("type"),a)));}
+        if(items.isEmpty())return;
+        final Dialog d=new Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        final FrameLayout rootView=new FrameLayout(this);rootView.setBackground(themeConversationBackground());
+        final FrameLayout galleryLayer=new FrameLayout(this);rootView.addView(galleryLayer,new FrameLayout.LayoutParams(-1,-1));
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setClipToPadding(false);scroll.setPadding(dp(28),dp(82),dp(28),dp(28));galleryLayer.addView(scroll,new FrameLayout.LayoutParams(-1,-1));
+        GridLayout grid=new GridLayout(this);grid.setColumnCount(2);grid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);scroll.addView(grid,new ScrollView.LayoutParams(-1,-2));
+        final ArrayList<View> cells=new ArrayList<>();int screen=getResources().getDisplayMetrics().widthPixels,cellW=(screen-dp(68))/2,cellH=Math.round(cellW*1.27f);
+        for(int i=0;i<items.size();i++){
+            StackMediaItem item=items.get(i);FrameLayout cell=new FrameLayout(this);cell.setClipToOutline(true);cell.setBackground(bg(Color.rgb(22,25,29),15));
+            GridLayout.LayoutParams cp=new GridLayout.LayoutParams();cp.width=cellW;cp.height=cellH;cp.rowSpec=GridLayout.spec(i/2);cp.columnSpec=GridLayout.spec(i%2);cp.setMargins(dp(3),dp(8),dp(3),dp(8));grid.addView(cell,cp);
+            ImageView media=new ImageView(this);media.setScaleType(ImageView.ScaleType.CENTER_CROP);media.setBackgroundColor(Color.rgb(20,22,26));cell.addView(media,new FrameLayout.LayoutParams(-1,-1));
+            if("video".equals(item.type)){String poster=item.attachment.optString("thumbnailUrl",item.attachment.optString("previewUrl",item.attachment.optString("posterUrl","")));if(!poster.isEmpty())images.load(poster,media);else loadVideoThumbnail(displayMediaUrl(item.attachment),media);ImageView play=new ImageView(this);play.setImageResource(R.drawable.ic_msg_play);play.setColorFilter(Color.WHITE);play.setBackgroundColor(Color.TRANSPARENT);FrameLayout.LayoutParams playLp=new FrameLayout.LayoutParams(dp(27),dp(27),Gravity.TOP|Gravity.END);playLp.topMargin=dp(9);playLp.rightMargin=dp(9);cell.addView(play,playLp);}else images.load(displayMediaUrl(item.attachment),media);
+            final int selected=i;wireStackGalleryCellTap(cell,()->openStackMediaPager(rootView,galleryLayer,items,cells,selected,d));cells.add(cell);
+        }
+        ImageButton close=icon(R.drawable.ic_msg_close,48,themeHeaderColor());FrameLayout.LayoutParams closeLp=new FrameLayout.LayoutParams(dp(48),dp(48),Gravity.TOP|Gravity.START);closeLp.leftMargin=dp(13);closeLp.topMargin=dp(19);galleryLayer.addView(close,closeLp);close.setOnClickListener(v->d.dismiss());
+        d.setContentView(rootView);d.show();Window w=d.getWindow();if(w!=null){w.setLayout(-1,-1);w.setStatusBarColor(Color.BLACK);w.setNavigationBarColor(Color.BLACK);}
+    }
+
+    private void wireStackGalleryCellTap(View cell,Runnable open){final float[] x={0},y={0};final boolean[] moved={false};cell.setOnTouchListener((v,e)->{switch(e.getActionMasked()){case MotionEvent.ACTION_DOWN:x[0]=e.getRawX();y[0]=e.getRawY();moved[0]=false;v.setPressed(true);return true;case MotionEvent.ACTION_MOVE:if(Math.hypot(e.getRawX()-x[0],e.getRawY()-y[0])>dp(7)){moved[0]=true;v.setPressed(false);}return true;case MotionEvent.ACTION_UP:v.setPressed(false);if(!moved[0])open.run();return true;case MotionEvent.ACTION_CANCEL:v.setPressed(false);moved[0]=true;return true;}return true;});}
+
+    private android.graphics.drawable.Drawable galleryCellDrawable(View cell){if(cell instanceof ViewGroup){ViewGroup group=(ViewGroup)cell;for(int i=0;i<group.getChildCount();i++){View child=group.getChildAt(i);if(child instanceof ImageView){android.graphics.drawable.Drawable drawable=((ImageView)child).getDrawable();if(drawable!=null)return drawable;}}}return null;}
+    private void stopStackVideos(List<androidx.media3.exoplayer.ExoPlayer> videos,int active){for(int i=0;i<videos.size();i++){androidx.media3.exoplayer.ExoPlayer player=videos.get(i);if(player==null)continue;if(i==active)player.play();else player.pause();}}
+    private void loadStackPagerWindow(ArrayList<StackMediaItem> items,ArrayList<ImageView> pageImages,int index){for(int i=Math.max(0,index-1);i<=Math.min(items.size()-1,index+1);i++){ImageView image=pageImages.get(i);if(image!=null&&image.getTag()==null)images.load(displayMediaUrl(items.get(i).attachment),image);}}
+
+    private void openStackMediaPager(FrameLayout rootView,FrameLayout galleryLayer,ArrayList<StackMediaItem> items,ArrayList<View> cells,int selected,Dialog dialog){
+        if(rootView.findViewWithTag("stack-media-viewer")!=null)return;
+        final FrameLayout viewer=new FrameLayout(this);viewer.setTag("stack-media-viewer");rootView.addView(viewer,new FrameLayout.LayoutParams(-1,-1));
+        View darkness=new View(this);darkness.setBackgroundColor(Color.rgb(9,12,16));darkness.setAlpha(0f);viewer.addView(darkness,new FrameLayout.LayoutParams(-1,-1));
+        final StackMediaPager pager=new StackMediaPager(this);pager.setClipToPadding(true);
+        FrameLayout.LayoutParams pagerLp=new FrameLayout.LayoutParams(-1,-1);pagerLp.topMargin=dp(66);pagerLp.bottomMargin=dp(72);viewer.addView(pager,pagerLp);
+        final ArrayList<androidx.media3.exoplayer.ExoPlayer> videos=new ArrayList<>();final ArrayList<ImageView> pageImages=new ArrayList<>();final ArrayList<ZoomImageView> zoomImages=new ArrayList<>();
+        for(int i=0;i<items.size();i++){
+            StackMediaItem item=items.get(i);FrameLayout page=new FrameLayout(this);page.setPadding(dp(12),0,dp(12),0);pager.addView(page,new FrameLayout.LayoutParams(-1,-1));
+            if("video".equals(item.type)){
+                androidx.media3.ui.PlayerView video=new androidx.media3.ui.PlayerView(this);video.setUseController(true);video.setResizeMode(androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT);video.setBackgroundColor(Color.BLACK);androidx.media3.exoplayer.ExoPlayer stackPlayer=newStreamingVideoPlayer();video.setPlayer(stackPlayer);String playable=displayMediaUrl(item.attachment);if(playable.startsWith("file:")||playable.startsWith("content:"))stackPlayer.setMediaItem(androidx.media3.common.MediaItem.fromUri(Uri.parse(playable)));else{androidx.media3.datasource.DefaultHttpDataSource.Factory http=new androidx.media3.datasource.DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(api.mediaHeaders());androidx.media3.datasource.DefaultDataSource.Factory data=new androidx.media3.datasource.DefaultDataSource.Factory(this,http);stackPlayer.setMediaSource(new androidx.media3.exoplayer.source.ProgressiveMediaSource.Factory(data).createMediaSource(androidx.media3.common.MediaItem.fromUri(api.absolute(item.attachment.optString("url")))));}stackPlayer.prepare();page.addView(video,new FrameLayout.LayoutParams(-1,-1));videos.add(stackPlayer);pageImages.add(null);zoomImages.add(null);
+            }else{
+                ZoomImageView image=new ZoomImageView(this);image.setBackgroundColor(Color.BLACK);android.graphics.drawable.Drawable preview=galleryCellDrawable(cells.get(i));if(preview!=null)image.setImageDrawable(preview);page.addView(image,new FrameLayout.LayoutParams(-1,-1));videos.add(null);pageImages.add(image);zoomImages.add(image);
+            }
+        }
+        LinearLayout top=new LinearLayout(this);top.setGravity(Gravity.CENTER_VERTICAL);top.setPadding(dp(8),dp(7),dp(8),dp(7));top.setAlpha(0f);viewer.addView(top,new FrameLayout.LayoutParams(-1,dp(66),Gravity.TOP));ImageButton close=icon(R.drawable.ic_msg_close,46,Color.WHITE);top.addView(close);
+        StackMediaItem initial=items.get(selected);JSONObject sender=initial.message.optJSONObject("sender");String name=isMine(initial.message)?"You":senderName(initial.message);View avatar=buildUserAvatar(avatarUrl(sender),name,32);LinearLayout.LayoutParams avp=new LinearLayout.LayoutParams(dp(32),dp(32));avp.leftMargin=dp(3);top.addView(avatar,avp);LinearLayout who=new LinearLayout(this);who.setOrientation(LinearLayout.VERTICAL);who.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams whoLp=new LinearLayout.LayoutParams(0,dp(43),1);whoLp.leftMargin=dp(7);top.addView(who,whoLp);who.addView(text(name,13.5f,Color.WHITE,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(21)));who.addView(text(relativeTime(initial.message.optString("createdAt")),11.5f,Color.rgb(190,194,200),Typeface.NORMAL),new LinearLayout.LayoutParams(-1,dp(19)));
+        LinearLayout reply=new LinearLayout(this);reply.setGravity(Gravity.CENTER_VERTICAL);reply.setPadding(dp(7),dp(5),dp(7),dp(5));reply.setBackground(bg(Color.rgb(59,61,65),29));reply.setAlpha(0f);FrameLayout.LayoutParams replyLp=new FrameLayout.LayoutParams(-1,dp(54),Gravity.BOTTOM);replyLp.setMargins(dp(12),0,dp(12),dp(12));viewer.addView(reply,replyLp);
+        ImageButton replyCamera=icon(R.drawable.ic_instagram_camera_glyph,42,Color.rgb(7,9,12));replyCamera.setBackground(bg(Color.WHITE,21));reply.addView(replyCamera);replyCamera.setOnClickListener(v->{StackMediaItem current=items.get(Math.max(0,Math.min(items.size()-1,pager.currentPage())));replyTo=current.message;pickAttachment();});
+        EditText replyInput=new EditText(this);replyInput.setHint("Reply…");replyInput.setHintTextColor(Color.rgb(182,184,189));replyInput.setTextColor(Color.WHITE);replyInput.setTextSize(17);replyInput.setSingleLine(true);replyInput.setBackgroundColor(Color.TRANSPARENT);replyInput.setPadding(dp(10),0,dp(8),0);reply.addView(replyInput,new LinearLayout.LayoutParams(0,dp(42),1));
+        ImageButton replySend=icon(R.drawable.msg_send_enabled,42,Color.WHITE);replySend.setVisibility(View.GONE);reply.addView(replySend);replyInput.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int b,int c){replySend.setVisibility(s.toString().trim().isEmpty()?View.GONE:View.VISIBLE);}public void afterTextChanged(Editable e){}});replySend.setOnClickListener(v->{String body=replyInput.getText().toString().trim();if(body.isEmpty())return;StackMediaItem current=items.get(Math.max(0,Math.min(items.size()-1,pager.currentPage())));try{JSONObject req=new JSONObject().put("body",body).put("clientId","stack-photo-reply-"+System.currentTimeMillis()).put("replyToId",current.message.optString("id"));api.post("/api/messaging/conversations/"+activeConversation.optString("id")+"/messages",req,(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}replyInput.setText("");JSONObject nm=json.optJSONObject("message");if(nm!=null)upsertMessage(nm);}));}catch(Exception ex){toast(ex.getMessage());}});
+        final boolean[] chromeVisible={true};Runnable toggleChrome=()->{chromeVisible[0]=!chromeVisible[0];float alpha=chromeVisible[0]?1f:0f;top.animate().alpha(alpha).translationY(chromeVisible[0]?0:-dp(12)).setDuration(180).setInterpolator(new DecelerateInterpolator()).start();reply.animate().alpha(alpha).translationY(chromeVisible[0]?0:dp(12)).setDuration(180).setInterpolator(new DecelerateInterpolator()).start();};for(ZoomImageView zoom:zoomImages)if(zoom!=null)zoom.setOnSingleTapListener(toggleChrome::run);
+        final boolean[] closing={false};final Runnable closeViewer=()->{if(closing[0])return;closing[0]=true;int index=Math.max(0,Math.min(items.size()-1,pager.currentPage()));ZoomImageView activeZoom=zoomImages.get(index);if(activeZoom!=null)activeZoom.reset(false);View target=cells.get(index);int[] targetAt=new int[2],pagerAt=new int[2];target.getLocationOnScreen(targetAt);pager.getLocationOnScreen(pagerAt);float sx=target.getWidth()/(float)Math.max(1,pager.getWidth()),sy=target.getHeight()/(float)Math.max(1,pager.getHeight()),tx=targetAt[0]-pagerAt[0],ty=targetAt[1]-pagerAt[1];galleryLayer.animate().cancel();galleryLayer.setAlpha(0f);galleryLayer.setVisibility(View.VISIBLE);galleryLayer.animate().alpha(1f).setDuration(190).start();top.animate().alpha(0f).setDuration(110).start();reply.animate().alpha(0f).setDuration(110).start();darkness.animate().alpha(0f).setDuration(180).start();pager.setPivotX(0);pager.setPivotY(0);pager.animate().scaleX(sx).scaleY(sy).translationX(tx).translationY(ty).setDuration(205).setInterpolator(new DecelerateInterpolator(1.7f)).withEndAction(()->{for(androidx.media3.exoplayer.ExoPlayer stackPlayer:videos)if(stackPlayer!=null)stackPlayer.release();rootView.removeView(viewer);}).start();};
+        close.setOnClickListener(v->closeViewer.run());for(ZoomImageView zoom:zoomImages)if(zoom!=null)zoom.setOnDismissListener(closeViewer::run);pager.setOnPageChanged(index->{loadStackPagerWindow(items,pageImages,index);stopStackVideos(videos,index);});viewer.setOnKeyListener((v,key,event)->{if(key==android.view.KeyEvent.KEYCODE_BACK&&event.getAction()==android.view.KeyEvent.ACTION_UP){closeViewer.run();return true;}return false;});viewer.setFocusableInTouchMode(true);viewer.requestFocus();
+        pager.post(()->{pager.jumpToPage(selected);loadStackPagerWindow(items,pageImages,selected);stopStackVideos(videos,selected);int[] targetAt=new int[2],pagerAt=new int[2];cells.get(selected).getLocationOnScreen(targetAt);pager.getLocationOnScreen(pagerAt);float sx=cells.get(selected).getWidth()/(float)Math.max(1,pager.getWidth()),sy=cells.get(selected).getHeight()/(float)Math.max(1,pager.getHeight()),tx=targetAt[0]-pagerAt[0],ty=targetAt[1]-pagerAt[1];pager.setPivotX(0);pager.setPivotY(0);pager.setScaleX(sx);pager.setScaleY(sy);pager.setTranslationX(tx);pager.setTranslationY(ty);galleryLayer.animate().alpha(0f).setDuration(190).withEndAction(()->galleryLayer.setVisibility(View.INVISIBLE)).start();darkness.animate().alpha(1f).setDuration(190).start();top.animate().alpha(1f).setStartDelay(90).setDuration(150).start();reply.animate().alpha(1f).setStartDelay(90).setDuration(150).start();pager.animate().scaleX(1f).scaleY(1f).translationX(0f).translationY(0f).setDuration(235).setInterpolator(new DecelerateInterpolator(1.7f)).start();});
+        dialog.setOnKeyListener((x,key,event)->{if(key==android.view.KeyEvent.KEYCODE_BACK&&event.getAction()==android.view.KeyEvent.ACTION_UP&&rootView.findViewWithTag("stack-media-viewer")!=null){closeViewer.run();return true;}return false;});
+    }
+
+    private void loadVideoPoster(JSONObject attachment,ImageView target){if(attachment==null||target==null)return;String poster=attachment.optString("thumbnailUrl",attachment.optString("previewUrl",attachment.optString("posterUrl","")));if(!poster.isEmpty())images.load(poster,target);else loadVideoThumbnail(displayMediaUrl(attachment),target);}
+    private androidx.media3.exoplayer.ExoPlayer newStreamingVideoPlayer(){androidx.media3.exoplayer.DefaultLoadControl loadControl=new androidx.media3.exoplayer.DefaultLoadControl.Builder().setBufferDurationsMs(1500,12000,250,500).build();return new androidx.media3.exoplayer.ExoPlayer.Builder(this).setLoadControl(loadControl).build();}
+    private void wireVideoPullDown(View touchTarget,View viewer,Dialog dialog){final float[] downX={0},downY={0};final boolean[] dragging={false};touchTarget.setOnTouchListener((v,event)->{switch(event.getActionMasked()){case MotionEvent.ACTION_DOWN:downX[0]=event.getRawX();downY[0]=event.getRawY();dragging[0]=false;return true;case MotionEvent.ACTION_MOVE:float dx=event.getRawX()-downX[0],dy=Math.max(0,event.getRawY()-downY[0]);if(dragging[0]||(dy>dp(7)&&dy>Math.abs(dx)*1.12f)){dragging[0]=true;float fraction=Math.min(1f,dy/Math.max(dp(1),getResources().getDisplayMetrics().heightPixels*.56f));viewer.setTranslationY(dy);viewer.setScaleX(1f-fraction*.09f);viewer.setScaleY(1f-fraction*.09f);viewer.setAlpha(1f-fraction*.34f);}return true;case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:float release=Math.max(0,event.getRawY()-downY[0]);if(dragging[0]&&release>dp(86)){viewer.animate().translationY(getResources().getDisplayMetrics().heightPixels).alpha(0f).setDuration(190).setInterpolator(new android.view.animation.AccelerateInterpolator()).withEndAction(dialog::dismiss).start();}else{viewer.animate().translationY(0).scaleX(1f).scaleY(1f).alpha(1f).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();if(!dragging[0]&&event.getActionMasked()==MotionEvent.ACTION_UP)v.performClick();}dragging[0]=false;return true;}return true;});}
+    private String videoClock(long milliseconds){long total=Math.max(0,milliseconds)/1000L;return(total/60)+":"+String.format(Locale.US,"%02d",total%60);}
+    private void showVideoMediaViewer(JSONObject message,JSONObject attachment){
+        if(mediaViewMode(message,attachment)>0){showTimedVideoViewer(message,attachment);return;}
+        final Dialog d=new Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        FrameLayout overlay=new FrameLayout(this);overlay.setBackgroundColor(Color.rgb(10,12,16));
+        String source=displayMediaUrl(attachment),remote=api.absolute(attachment.optString("url"));
+
+        View backdrop=new View(this);backdrop.setBackground(themeConversationBackground());backdrop.setAlpha(.94f);backdrop.setScaleX(1.16f);backdrop.setScaleY(1.16f);if(Build.VERSION.SDK_INT>=31)backdrop.setRenderEffect(RenderEffect.createBlurEffect(dp(35),dp(35),Shader.TileMode.CLAMP));overlay.addView(backdrop,new FrameLayout.LayoutParams(-1,-1));
+        View shade=new View(this);shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,new int[]{0x9905070a,0x22080a0e,0x6605070a}));overlay.addView(shade,new FrameLayout.LayoutParams(-1,-1));
+
+        int screenW=getResources().getDisplayMetrics().widthPixels,screenH=getResources().getDisplayMetrics().heightPixels,videoW=screenW-dp(24);int aw=attachment.optInt("width",0),ah=attachment.optInt("height",0);int videoH=aw>0&&ah>0?Math.round(videoW*Math.min(1.35f,Math.max(.62f,ah/(float)aw))):Math.round(screenH*.48f);videoH=Math.min(Math.round(screenH*.60f),Math.max(dp(230),videoH));
+        FrameLayout videoCard=new FrameLayout(this);videoCard.setBackground(bg(Color.BLACK,18));videoCard.setClipToOutline(true);FrameLayout.LayoutParams cardLp=new FrameLayout.LayoutParams(videoW,videoH,Gravity.CENTER);cardLp.topMargin=dp(10);overlay.addView(videoCard,cardLp);
+        ImageView openingPoster=new ImageView(this);openingPoster.setScaleType(ImageView.ScaleType.CENTER_CROP);openingPoster.setBackground(themeConversationBackground());videoCard.addView(openingPoster,new FrameLayout.LayoutParams(-1,-1));loadVideoPoster(attachment,openingPoster);
+        androidx.media3.ui.PlayerView playerView=new androidx.media3.ui.PlayerView(this);playerView.setUseController(false);playerView.setResizeMode(androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM);playerView.setBackgroundColor(Color.TRANSPARENT);playerView.setShutterBackgroundColor(Color.TRANSPARENT);videoCard.addView(playerView,new FrameLayout.LayoutParams(-1,-1));
+        androidx.media3.exoplayer.ExoPlayer player=newStreamingVideoPlayer();playerView.setPlayer(player);
+        if(source.startsWith("file:")||source.startsWith("content:"))player.setMediaItem(androidx.media3.common.MediaItem.fromUri(Uri.parse(source)));else{androidx.media3.datasource.DefaultHttpDataSource.Factory http=new androidx.media3.datasource.DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(api.mediaHeaders());androidx.media3.datasource.DefaultDataSource.Factory data=new androidx.media3.datasource.DefaultDataSource.Factory(this,http);player.setMediaSource(new androidx.media3.exoplayer.source.ProgressiveMediaSource.Factory(data).createMediaSource(androidx.media3.common.MediaItem.fromUri(remote)));}
+
+        ProgressBar loading=new ProgressBar(this);videoCard.addView(loading,new FrameLayout.LayoutParams(dp(40),dp(40),Gravity.CENTER));
+        LinearLayout controls=new LinearLayout(this);controls.setGravity(Gravity.CENTER_VERTICAL);controls.setPadding(dp(10),0,dp(10),dp(4));controls.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,new int[]{0x00000000,0xaa000000}));FrameLayout.LayoutParams controlsLp=new FrameLayout.LayoutParams(-1,dp(58),Gravity.BOTTOM);videoCard.addView(controls,controlsLp);
+        ImageButton playPause=icon(R.drawable.ic_msg_pause,42,Color.WHITE);playPause.setBackgroundColor(Color.TRANSPARENT);controls.addView(playPause,new LinearLayout.LayoutParams(dp(42),dp(48)));SeekBar seek=new SeekBar(this);seek.setMax(1000);if(Build.VERSION.SDK_INT>=21){seek.getProgressDrawable().setTint(Color.WHITE);seek.getThumb().setTint(Color.WHITE);}controls.addView(seek,new LinearLayout.LayoutParams(0,dp(48),1));TextView duration=text("0:00",13,Color.WHITE,Typeface.NORMAL);duration.setGravity(Gravity.CENTER);controls.addView(duration,new LinearLayout.LayoutParams(dp(54),dp(48)));
+        final boolean[] seeking={false};final Runnable ticker=new Runnable(){public void run(){long total=Math.max(0,player.getDuration()),position=Math.max(0,player.getCurrentPosition());if(!seeking[0]&&total>0)seek.setProgress((int)Math.min(1000,position*1000L/total));duration.setText(videoClock(total));if(d.isShowing())main.postDelayed(this,180);}};
+        seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar bar,int progress,boolean fromUser){}public void onStartTrackingTouch(SeekBar bar){seeking[0]=true;}public void onStopTrackingTouch(SeekBar bar){long total=player.getDuration();if(total>0)player.seekTo(total*bar.getProgress()/1000L);seeking[0]=false;}});
+        playPause.setOnClickListener(v->{if(player.isPlaying())player.pause();else player.play();});player.addListener(new androidx.media3.common.Player.Listener(){@Override public void onPlaybackStateChanged(int state){if(state==androidx.media3.common.Player.STATE_READY){loading.setVisibility(View.GONE);main.removeCallbacks(ticker);main.post(ticker);}else if(state==androidx.media3.common.Player.STATE_BUFFERING)loading.setVisibility(View.VISIBLE);}@Override public void onRenderedFirstFrame(){openingPoster.setVisibility(View.GONE);}@Override public void onIsPlayingChanged(boolean playing){playPause.setImageResource(playing?R.drawable.ic_msg_pause:R.drawable.ic_msg_play);}@Override public void onPlayerError(androidx.media3.common.PlaybackException error){loading.setVisibility(View.GONE);toast("Couldn't play this video.");}});player.prepare();player.play();
+
+        LinearLayout top=new LinearLayout(this);top.setGravity(Gravity.CENTER_VERTICAL);top.setPadding(dp(8),dp(8),dp(8),dp(8));overlay.addView(top,new FrameLayout.LayoutParams(-1,dp(70),Gravity.TOP));ImageButton close=icon(R.drawable.ic_msg_close,42,Color.WHITE);top.addView(close);close.setOnClickListener(v->d.dismiss());JSONObject sender=message.optJSONObject("sender");String name=isMine(message)?"You":senderName(message);View av=buildUserAvatar(avatarUrl(sender),name,34);LinearLayout.LayoutParams avp=new LinearLayout.LayoutParams(dp(34),dp(34));avp.leftMargin=dp(4);top.addView(av,avp);LinearLayout author=new LinearLayout(this);author.setOrientation(LinearLayout.VERTICAL);author.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams alp=new LinearLayout.LayoutParams(0,dp(44),1);alp.leftMargin=dp(7);top.addView(author,alp);author.addView(text(name,13.5f,Color.WHITE,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(21)));author.addView(text(relativeTime(message.optString("createdAt")),11.5f,Color.rgb(199,203,209),Typeface.NORMAL),new LinearLayout.LayoutParams(-1,dp(19)));
+        ImageButton story=icon(R.drawable.ic_media_story,42,Color.WHITE);top.addView(story);story.setOnClickListener(v->{story.setEnabled(false);temporaryMediaExecutor.execute(()->{try{byte[] raw;if(source.startsWith("file:")){String path=Uri.parse(source).getPath();raw=readAll(new FileInputStream(path==null?"":path));}else raw=api.getBytesSync(attachment.optString("url"));String data="data:video/mp4;base64,"+Base64.encodeToString(raw,Base64.NO_WRAP);api.post("/api/stories",new JSONObject().put("video",data).put("caption",""),(json,error)->main.post(()->{story.setEnabled(true);if(error!=null)toast(error.getMessage());else{toast("Added to story");d.dismiss();}}));}catch(Exception ex){main.post(()->{story.setEnabled(true);toast(ex.getMessage());});}});});
+        ImageButton more=icon(R.drawable.ic_media_more,42,Color.WHITE);more.setPadding(dp(4),dp(4),dp(4),dp(4));top.addView(more);LinearLayout menu=new LinearLayout(this);menu.setOrientation(LinearLayout.VERTICAL);menu.setPadding(dp(5),dp(5),dp(5),dp(5));menu.setBackground(bg(Color.rgb(41,45,51),15));menu.setVisibility(View.GONE);FrameLayout.LayoutParams mlp=new FrameLayout.LayoutParams(dp(172),dp(58),Gravity.TOP|Gravity.END);mlp.setMargins(0,dp(63),dp(12),0);overlay.addView(menu,mlp);LinearLayout download=actionRow("Download",R.drawable.ic_media_download,false);menu.addView(download,new LinearLayout.LayoutParams(-1,dp(48)));download.setOnClickListener(v->{menu.setVisibility(View.GONE);try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(remote)));}catch(Exception e){toast(e.getMessage());}});more.setOnClickListener(v->menu.setVisibility(menu.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE));
+
+        LinearLayout reply=new LinearLayout(this);reply.setGravity(Gravity.CENTER_VERTICAL);reply.setPadding(dp(7),dp(5),dp(7),dp(5));reply.setBackground(bg(Color.rgb(59,61,65),29));FrameLayout.LayoutParams rp=new FrameLayout.LayoutParams(-1,dp(54),Gravity.BOTTOM);rp.setMargins(dp(12),0,dp(12),dp(12));overlay.addView(reply,rp);ImageButton camera=icon(R.drawable.ic_instagram_camera_glyph,42,Color.rgb(7,9,12));camera.setBackground(bg(Color.WHITE,21));reply.addView(camera);camera.setOnClickListener(v->{replyTo=message;pickAttachment();});EditText input=new EditText(this);input.setHint("Reply…");input.setHintTextColor(Color.rgb(182,184,189));input.setTextColor(Color.WHITE);input.setTextSize(17);input.setSingleLine(true);input.setBackgroundColor(Color.TRANSPARENT);input.setPadding(dp(10),0,dp(8),0);reply.addView(input,new LinearLayout.LayoutParams(0,dp(42),1));ImageButton send=icon(R.drawable.msg_send_enabled,42,Color.WHITE);send.setVisibility(View.GONE);reply.addView(send);input.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int b,int c){send.setVisibility(s.toString().trim().isEmpty()?View.GONE:View.VISIBLE);}public void afterTextChanged(Editable e){}});send.setOnClickListener(v->{String body=input.getText().toString().trim();if(body.isEmpty())return;try{JSONObject req=new JSONObject().put("body",body).put("clientId","video-reply-"+System.currentTimeMillis()).put("replyToId",message.optString("id"));api.post("/api/messaging/conversations/"+activeConversation.optString("id")+"/messages",req,(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}input.setText("");JSONObject nm=json.optJSONObject("message");if(nm!=null)upsertMessage(nm);}));}catch(Exception ex){toast(ex.getMessage());}});
+        final boolean[] chrome={true};playerView.setClickable(true);playerView.setOnClickListener(v->{chrome[0]=!chrome[0];if(!chrome[0])menu.setVisibility(View.GONE);float alpha=chrome[0]?1f:0f;top.animate().alpha(alpha).translationY(chrome[0]?0:-dp(12)).setDuration(180).start();reply.animate().alpha(alpha).translationY(chrome[0]?0:dp(12)).setDuration(180).start();controls.animate().alpha(alpha).setDuration(160).start();});wireVideoPullDown(playerView,overlay,d);
+        d.setOnDismissListener(x->{main.removeCallbacks(ticker);player.release();});d.setContentView(overlay);d.show();Window w=d.getWindow();if(w!=null){w.setLayout(-1,-1);w.setStatusBarColor(Color.BLACK);w.setNavigationBarColor(Color.BLACK);}
+    }
+
+    private void showTimedPhotoViewer(JSONObject message,JSONObject attachment){
+        if(isMine(message))return;
+        if(!beginMediaView(message,attachment)){if(remainingMediaViews(message,attachment)<=0)toast("This photo is no longer available.");return;}
+        final Dialog d=new Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        FrameLayout overlay=new FrameLayout(this);overlay.setBackgroundColor(Color.BLACK);
+        boolean alreadyPreloaded=images.isReady(attachment.optString("url"));ZoomImageView image=new ZoomImageView(this);image.setAlpha(alreadyPreloaded?1f:0f);overlay.addView(image,new FrameLayout.LayoutParams(-1,-1));
+        ProgressBar loading=new ProgressBar(this);loading.setVisibility(alreadyPreloaded?View.GONE:View.VISIBLE);overlay.addView(loading,new FrameLayout.LayoutParams(dp(42),dp(42),Gravity.CENTER));
+        TimedProgressView progress=new TimedProgressView(this);FrameLayout.LayoutParams progressLp=new FrameLayout.LayoutParams(-1,dp(4),Gravity.TOP);progressLp.leftMargin=dp(9);progressLp.rightMargin=dp(9);progressLp.topMargin=dp(13);overlay.addView(progress,progressLp);
+        LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);FrameLayout.LayoutParams headerLp=new FrameLayout.LayoutParams(-1,dp(38),Gravity.TOP);headerLp.leftMargin=dp(12);headerLp.rightMargin=dp(12);headerLp.topMargin=dp(20);overlay.addView(header,headerLp);
+        JSONObject sender=message.optJSONObject("sender");String name=senderName(message);View avatar=buildUserAvatar(avatarUrl(sender),name,30);header.addView(avatar,new LinearLayout.LayoutParams(dp(30),dp(30)));
+        LinearLayout words=new LinearLayout(this);words.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams wordsLp=new LinearLayout.LayoutParams(0,dp(36),1);wordsLp.leftMargin=dp(7);header.addView(words,wordsLp);words.addView(text(name,14.5f,Color.WHITE,Typeface.BOLD),new LinearLayout.LayoutParams(-2,-1));words.addView(text(" to you",14.5f,Color.WHITE,Typeface.NORMAL),new LinearLayout.LayoutParams(-2,-1));TextView timeView=text(" "+ephemeralRelativeTime(message.optString("createdAt")),14.5f,Color.rgb(155,158,164),Typeface.NORMAL);words.addView(timeView,new LinearLayout.LayoutParams(-2,-1));
+        final PausableClock[] clock={null};final boolean[] started={false};final Runnable[] ticker={null};ticker[0]=new Runnable(){public void run(){if(clock[0]==null)return;float elapsed=clock[0].fraction(15000L);progress.setProgress(1f-Math.min(1f,elapsed));timeView.setText(" "+ephemeralRelativeTime(message.optString("createdAt")));if(elapsed>=1f){if(d.isShowing())d.dismiss();return;}main.postDelayed(this,16);}};
+        wireTemporaryMediaHold(image,()->{if(clock[0]!=null)clock[0].pause();},()->{if(clock[0]!=null)clock[0].resume();});
+        image.setOnDismissListener(d::dismiss);
+        d.setOnDismissListener(x->{finishMediaView(message,attachment);main.removeCallbacks(ticker[0]);if(messageAdapter!=null)messageAdapter.notifyDataSetChanged();});
+        d.setContentView(overlay);d.show();Window w=d.getWindow();if(w!=null){w.setLayout(-1,-1);w.setStatusBarColor(Color.BLACK);w.setNavigationBarColor(Color.BLACK);}images.load(attachment.optString("url"),image,()->{if(!d.isShowing()||started[0])return;started[0]=true;clock[0]=new PausableClock();loading.setVisibility(View.GONE);image.setAlpha(1f);main.post(ticker[0]);});
+    }
+
+    private void showMediaViewer(JSONObject message,JSONObject attachment){showMediaViewer(message,attachment,null);}
+    private void showMediaViewer(JSONObject message,JSONObject attachment,ImageView source){if(mediaViewMode(message,attachment)>0){showTimedPhotoViewer(message,attachment);return;}final Dialog d=new Dialog(this,android.R.style.Theme_Black_NoTitleBar_Fullscreen);FrameLayout overlay=new FrameLayout(this);overlay.setBackgroundColor(Color.rgb(10,12,16));ImageView backdrop=new ImageView(this);backdrop.setScaleType(ImageView.ScaleType.CENTER_CROP);backdrop.setAlpha(.82f);backdrop.setScaleX(1.16f);backdrop.setScaleY(1.16f);if(Build.VERSION.SDK_INT>=31)backdrop.setRenderEffect(RenderEffect.createBlurEffect(dp(35),dp(35),Shader.TileMode.CLAMP));overlay.addView(backdrop,new FrameLayout.LayoutParams(-1,-1));android.graphics.drawable.Drawable immediate=source==null?null:source.getDrawable();if(immediate!=null)backdrop.setImageDrawable(immediate);images.load(attachment.optString("url"),backdrop);View shade=new View(this);shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,new int[]{0xaa05070a,0x33080a0e,0x5505070a}));overlay.addView(shade,new FrameLayout.LayoutParams(-1,-1));ZoomImageView image=new ZoomImageView(this);if(immediate!=null)image.setImageDrawable(immediate);FrameLayout.LayoutParams ip=new FrameLayout.LayoutParams(-1,-1);overlay.addView(image,ip);images.load(attachment.optString("url"),image);LinearLayout top=new LinearLayout(this);top.setGravity(Gravity.CENTER_VERTICAL);top.setPadding(dp(8),dp(8),dp(8),dp(8));overlay.addView(top,new FrameLayout.LayoutParams(-1,dp(70),Gravity.TOP));ImageButton close=icon(R.drawable.ic_msg_close,42,Color.WHITE);top.addView(close);close.setOnClickListener(v->d.dismiss());JSONObject sender=message.optJSONObject("sender");String name=isMine(message)?"You":senderName(message);View av=buildUserAvatar(avatarUrl(sender),name,34);LinearLayout.LayoutParams avp=new LinearLayout.LayoutParams(dp(34),dp(34));avp.leftMargin=dp(4);top.addView(av,avp);LinearLayout author=new LinearLayout(this);author.setOrientation(LinearLayout.VERTICAL);author.setGravity(Gravity.CENTER_VERTICAL);LinearLayout.LayoutParams alp=new LinearLayout.LayoutParams(0,dp(44),1);alp.leftMargin=dp(7);top.addView(author,alp);author.addView(text(name,13.5f,Color.WHITE,Typeface.BOLD),new LinearLayout.LayoutParams(-1,dp(21)));author.addView(text(relativeTime(message.optString("createdAt")),11.5f,Color.rgb(199,203,209),Typeface.NORMAL),new LinearLayout.LayoutParams(-1,dp(19)));ImageButton story=icon(R.drawable.ic_media_story,42,Color.WHITE);top.addView(story);story.setOnClickListener(v->{story.setEnabled(false);new Thread(()->{try{byte[] raw=api.getBytesSync(attachment.optString("url"));String mime=attachment.optString("mime","image/jpeg");String data="data:"+mime+";base64,"+Base64.encodeToString(raw,Base64.NO_WRAP);api.post("/api/stories",new JSONObject().put("image",data).put("caption",""),(json,error)->main.post(()->{story.setEnabled(true);if(error!=null)toast(error.getMessage());else{toast("Added to story");d.dismiss();}}));}catch(Exception ex){main.post(()->{story.setEnabled(true);toast(ex.getMessage());});}}).start();});ImageButton more=icon(R.drawable.ic_media_more,42,Color.WHITE);more.setPadding(dp(4),dp(4),dp(4),dp(4));top.addView(more);LinearLayout menu=new LinearLayout(this);menu.setOrientation(LinearLayout.VERTICAL);menu.setPadding(dp(5),dp(5),dp(5),dp(5));menu.setBackground(bg(Color.rgb(41,45,51),15));menu.setVisibility(View.GONE);FrameLayout.LayoutParams mlp=new FrameLayout.LayoutParams(dp(172),dp(58),Gravity.TOP|Gravity.END);mlp.setMargins(0,dp(63),dp(12),0);overlay.addView(menu,mlp);LinearLayout download=actionRow("Download",R.drawable.ic_media_download,false);menu.addView(download,new LinearLayout.LayoutParams(-1,dp(48)));download.setOnClickListener(v->{menu.setVisibility(View.GONE);try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(api.absolute(attachment.optString("url")))));}catch(Exception e){toast(e.getMessage());}});more.setOnClickListener(v->menu.setVisibility(menu.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE));LinearLayout reply=new LinearLayout(this);reply.setGravity(Gravity.CENTER_VERTICAL);reply.setPadding(dp(7),dp(5),dp(7),dp(5));reply.setBackground(bg(Color.rgb(59,61,65),29));FrameLayout.LayoutParams rp=new FrameLayout.LayoutParams(-1,dp(54),Gravity.BOTTOM);rp.setMargins(dp(12),0,dp(12),dp(12));overlay.addView(reply,rp);ImageButton camera=icon(R.drawable.ic_instagram_camera_glyph,42,Color.rgb(7,9,12));camera.setBackground(bg(Color.WHITE,21));reply.addView(camera);camera.setOnClickListener(v->{replyTo=message;pickAttachment();});EditText input=new EditText(this);input.setHint("Reply…");input.setHintTextColor(Color.rgb(182,184,189));input.setTextColor(Color.WHITE);input.setTextSize(17);input.setSingleLine(true);input.setBackgroundColor(Color.TRANSPARENT);input.setPadding(dp(10),0,dp(8),0);reply.addView(input,new LinearLayout.LayoutParams(0,dp(42),1));ImageButton send=icon(R.drawable.msg_send_enabled,42,Color.WHITE);send.setVisibility(View.GONE);reply.addView(send);input.addTextChangedListener(new TextWatcher(){public void beforeTextChanged(CharSequence s,int st,int c,int a){}public void onTextChanged(CharSequence s,int st,int b,int c){send.setVisibility(s.toString().trim().isEmpty()?View.GONE:View.VISIBLE);}public void afterTextChanged(Editable e){}});send.setOnClickListener(v->{String body=input.getText().toString().trim();if(body.isEmpty())return;try{JSONObject req=new JSONObject().put("body",body).put("clientId","photo-reply-"+System.currentTimeMillis()).put("replyToId",message.optString("id"));api.post("/api/messaging/conversations/"+activeConversation.optString("id")+"/messages",req,(json,error)->main.post(()->{if(error!=null){toast(error.getMessage());return;}input.setText("");JSONObject nm=json.optJSONObject("message");if(nm!=null)upsertMessage(nm);}));}catch(Exception ex){toast(ex.getMessage());}});final boolean[] chrome={true};image.setOnSingleTapListener(()->{chrome[0]=!chrome[0];if(!chrome[0])menu.setVisibility(View.GONE);top.animate().alpha(chrome[0]?1f:0f).translationY(chrome[0]?0:-dp(12)).setDuration(180).setInterpolator(new DecelerateInterpolator()).start();reply.animate().alpha(chrome[0]?1f:0f).translationY(chrome[0]?0:dp(12)).setDuration(180).setInterpolator(new DecelerateInterpolator()).start();});image.setOnDismissListener(d::dismiss);d.setContentView(overlay);d.show();Window w=d.getWindow();if(w!=null){w.setLayout(-1,-1);w.setStatusBarColor(Color.BLACK);w.setNavigationBarColor(Color.BLACK);}}
     private static final class ZoomImageView extends ImageView{
         interface SingleTap{void tap();} interface Dismiss{void dismiss();}
         private SingleTap single; private Dismiss dismiss; private final Matrix matrix=new Matrix();
@@ -5087,6 +6144,7 @@ reactionsCard.animate().cancel();
         private boolean pinching=false,moved=false;private long downAt,lastTap;
         ZoomImageView(Context c){super(c);setClickable(true);setScaleType(ScaleType.MATRIX);setLayerType(View.LAYER_TYPE_HARDWARE,null);}
         void setOnSingleTapListener(SingleTap s){single=s;} void setOnDismissListener(Dismiss d){dismiss=d;}
+        boolean isAtBaseScale(){return userScale<=1.01f&&!pinching;}
         @Override protected void onSizeChanged(int w,int h,int ow,int oh){super.onSizeChanged(w,h,ow,oh);post(()->applyMatrix(false));}
         @Override public void setImageDrawable(android.graphics.drawable.Drawable d){super.setImageDrawable(d);post(()->{userScale=1f;panX=panY=0;applyMatrix(false);});}
         private float dist(MotionEvent e){if(e.getPointerCount()<2)return 0;float dx=e.getX(0)-e.getX(1),dy=e.getY(0)-e.getY(1);return(float)Math.hypot(dx,dy);}
@@ -5136,56 +6194,131 @@ reactionsCard.animate().cancel();
         private final List<Path> paths=new ArrayList<>();
         private final List<Integer> colors=new ArrayList<>();
         private final List<Float> widths=new ArrayList<>();
+        private final List<Integer> styles=new ArrayList<>();
         private Path current;
-        DrawOverlay(Context c){super(c);paint.setStyle(Paint.Style.STROKE);paint.setStrokeCap(Paint.Cap.ROUND);
-            paint.setStrokeJoin(Paint.Join.ROUND);paint.setColor(Color.WHITE);paint.setStrokeWidth(8f);setBackgroundColor(Color.TRANSPARENT);}
-        private int brushStyle=0;
-        int getBrushStyle(){return brushStyle;}
-        void setDrawColor(int c){
-            paint.setXfermode(null);
-            paint.setColor(c);
-            if(brushStyle==2) paint.setShadowLayer(10f,0f,0f,c);
-            else paint.clearShadowLayer();
+        private int brushStyle=0,currentColor=Color.WHITE;
+        private float currentWidth=8f;
+
+        DrawOverlay(Context c){
+            super(c);
+            setLayerType(View.LAYER_TYPE_SOFTWARE,null);
+            setBackgroundColor(Color.TRANSPARENT);
         }
-        void setStrokeWidth(float w){paint.setStrokeWidth(Math.max(2f,w));}
-        void setBrushStyle(int style){
-            brushStyle=style;
-            paint.setPathEffect(null);
-            paint.setXfermode(null);
+
+        int getBrushStyle(){return brushStyle;}
+        void setDrawColor(int c){currentColor=c;invalidate();}
+        void setStrokeWidth(float w){currentWidth=Math.max(2f,w);}
+        void setBrushStyle(int style){brushStyle=style;}
+
+        void undo(){
+            int n=paths.size();
+            if(n>0){
+                paths.remove(n-1);
+                colors.remove(n-1);
+                widths.remove(n-1);
+                styles.remove(n-1);
+                invalidate();
+            }
+        }
+
+        private void configure(Paint p,int style,int color,float width){
+            p.reset();
+            p.setAntiAlias(true);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeJoin(Paint.Join.ROUND);
+            p.setStrokeWidth(width);
+            p.setColor(color);
+            p.setAlpha(255);
+            p.setXfermode(null);
+            p.clearShadowLayer();
+
             switch(style){
                 case 1:
-                    paint.setStrokeCap(Paint.Cap.SQUARE);
-                    paint.setStrokeJoin(Paint.Join.ROUND);
-                    paint.setAlpha(110);
-                    paint.clearShadowLayer();
+                    // Soft translucent spray/highlighter.
+                    p.setStrokeCap(Paint.Cap.ROUND);
+                    p.setAlpha(95);
+                    p.setStrokeWidth(width*1.35f);
                     break;
+
                 case 2:
-                    paint.setStrokeCap(Paint.Cap.ROUND);
-                    paint.setStrokeJoin(Paint.Join.ROUND);
-                    paint.setAlpha(255);
-                    paint.setShadowLayer(10f,0f,0f,paint.getColor());
+                    // Hard marker/glow.
+                    p.setStrokeCap(Paint.Cap.SQUARE);
+                    p.setShadowLayer(Math.max(5f,width*.8f),0,0,color);
                     break;
+
                 case 3:
-                    paint.setStrokeCap(Paint.Cap.ROUND);
-                    paint.setStrokeJoin(Paint.Join.ROUND);
-                    paint.setAlpha(255);
-                    paint.clearShadowLayer();
-                    paint.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR));
+                    // Real eraser: CLEAR is replayed with this stroke forever.
+                    p.setStrokeCap(Paint.Cap.ROUND);
+                    p.setStrokeWidth(width*1.55f);
+                    p.setXfermode(
+                        new android.graphics.PorterDuffXfermode(
+                            android.graphics.PorterDuff.Mode.CLEAR
+                        )
+                    );
                     break;
+
                 default:
-                    paint.setStrokeCap(Paint.Cap.ROUND);
-                    paint.setStrokeJoin(Paint.Join.ROUND);
-                    paint.setAlpha(255);
-                    paint.clearShadowLayer();
+                    // Standard round brush.
+                    p.setStrokeCap(Paint.Cap.ROUND);
                     break;
             }
         }
-        void undo(){int n=paths.size();if(n>0){paths.remove(n-1);colors.remove(n-1);widths.remove(n-1);invalidate();}}
-        @Override protected void onDraw(Canvas c){super.onDraw(c);for(int i=0;i<paths.size();i++){paint.setColor(colors.get(i));paint.setStrokeWidth(widths.get(i));c.drawPath(paths.get(i),paint);}}
-        @Override public boolean onTouchEvent(MotionEvent e){switch(e.getActionMasked()){
-            case MotionEvent.ACTION_DOWN:current=new Path();current.moveTo(e.getX(),e.getY());paths.add(current);colors.add(paint.getColor());widths.add(paint.getStrokeWidth());invalidate();return true;
-            case MotionEvent.ACTION_MOVE:if(current!=null){current.lineTo(e.getX(),e.getY());invalidate();}return true;
-            case MotionEvent.ACTION_UP:case MotionEvent.ACTION_CANCEL:current=null;invalidate();return true;}return true;}
+
+        @Override protected void onDraw(Canvas c){
+            super.onDraw(c);
+            for(int i=0;i<paths.size();i++){
+                configure(
+                    paint,
+                    styles.get(i),
+                    colors.get(i),
+                    widths.get(i)
+                );
+                c.drawPath(paths.get(i),paint);
+            }
+            paint.setXfermode(null);
+        }
+
+        Bitmap exportBitmap(){
+            try{
+                Bitmap b=Bitmap.createBitmap(
+                    Math.max(1,getWidth()),
+                    Math.max(1,getHeight()),
+                    Bitmap.Config.ARGB_8888
+                );
+                draw(new Canvas(b));
+                return b;
+            }catch(Exception e){
+                return null;
+            }
+        }
+
+        @Override public boolean onTouchEvent(MotionEvent e){
+            switch(e.getActionMasked()){
+                case MotionEvent.ACTION_DOWN:
+                    current=new Path();
+                    current.moveTo(e.getX(),e.getY());
+                    paths.add(current);
+                    colors.add(currentColor);
+                    widths.add(currentWidth);
+                    styles.add(brushStyle);
+                    invalidate();
+                    return true;
+
+                case MotionEvent.ACTION_MOVE:
+                    if(current!=null){
+                        current.lineTo(e.getX(),e.getY());
+                        invalidate();
+                    }
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    current=null;
+                    invalidate();
+                    return true;
+            }
+            return true;
+        }
     }
 
 }
