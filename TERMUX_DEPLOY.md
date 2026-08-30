@@ -1,13 +1,13 @@
-# Deploy Flash 1.108
+# Deploy Flash 1.109 login and new logo
 
 ```bash
 cd ~/Messenger-repo-1.103 || exit 1
 
 unzip -o \
-"$HOME/storage/downloads/messenger-native-source.zip" \
+"$HOME/storage/downloads/flash-native-source-v1.109-login-logo.zip" \
 -d ~/Messenger-repo-1.103
 
 git add -A
-git commit -m "Rename Messenger app to Flash"
+git commit -m "Match FaceTok login design and add Flash logo"
 git push origin main
 ```

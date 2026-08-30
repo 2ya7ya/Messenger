@@ -1,0 +1,3 @@
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:left="21dp" android:top="21dp" android:right="21dp" android:bottom="21dp"><bitmap android:src="@drawable/flash_logo" android:gravity="fill" /></item>
+</layer-list>
