@@ -1,13 +1,13 @@
-# Deploy Flash 1.109 login and new logo
+# Deploy Flash 1.110 minimal logo
 
 ```bash
 cd ~/Messenger-repo-1.103 || exit 1
 
 unzip -o \
-"$HOME/storage/downloads/flash-native-source-v1.109-login-logo.zip" \
+"$HOME/storage/downloads/flash-native-source-v1.110-minimal-logo.zip" \
 -d ~/Messenger-repo-1.103
 
 git add -A
-git commit -m "Match FaceTok login design and add Flash logo"
+git commit -m "Use minimal Flash app logo"
 git push origin main
 ```
