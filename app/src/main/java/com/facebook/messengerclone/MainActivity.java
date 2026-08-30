@@ -308,7 +308,7 @@ public class MainActivity extends Activity {
         TextView language=text("English (US)",17,Color.rgb(102,102,102),Typeface.NORMAL);language.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams languageLp=new LinearLayout.LayoutParams(-1,dp(24));languageLp.topMargin=dp(29);languageLp.bottomMargin=dp(30);box.addView(language,languageLp);
 
-        ImageView logo=new ImageView(this);logo.setImageResource(R.drawable.flash_logo);logo.setScaleType(ImageView.ScaleType.FIT_CENTER);logo.setContentDescription("Flash");
+        ImageView logo=new ImageView(this);logo.setImageResource(R.drawable.flash_logo);logo.setScaleType(ImageView.ScaleType.FIT_CENTER);GradientDrawable logoPlate=new GradientDrawable();logoPlate.setShape(GradientDrawable.OVAL);logoPlate.setColor(Color.WHITE);logoPlate.setStroke(dp(1),Color.rgb(229,231,239));logo.setBackground(logoPlate);logo.setPadding(dp(8),dp(8),dp(8),dp(8));logo.setElevation(dp(2));logo.setContentDescription("Flash");
         LinearLayout.LayoutParams logoLp=new LinearLayout.LayoutParams(dp(92),dp(92));logoLp.bottomMargin=dp(14);box.addView(logo,logoLp);
         TextView brand=text("Flash",34,Color.rgb(24,28,45),Typeface.BOLD);brand.setGravity(Gravity.CENTER);box.addView(brand,new LinearLayout.LayoutParams(-1,dp(43)));
         TextView tagline=text("Connect. Chat. Instantly.",16,Color.rgb(108,113,132),Typeface.NORMAL);tagline.setGravity(Gravity.CENTER);
